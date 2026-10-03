@@ -39,7 +39,9 @@ function queueKvRead(fn) {
 /*  Config & helpers                                                   */
 /* ------------------------------------------------------------------ */
 
-const WHATSAPP_NUMBER = "34662317094";
+// El número de WhatsApp de la tienda ya no se fija acá en el código: se
+// carga desde el panel en Ajustes → Marca (ver settings.whatsappNumber más
+// abajo), así el dueño lo puede cambiar él mismo cuando quiera.
 const INSTAGRAM_URL = "https://www.instagram.com/kulto25";
 // Este es el mail de tu cuenta de administrador. Registrate (o iniciá
 // sesión) en "Mi cuenta" con este mail exacto y vas a ver el panel de
@@ -366,8 +368,11 @@ function buildOrderMessage(order, settings) {
   return lines.join("\n");
 }
 
-function openWhatsApp(text) {
-  const url = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(text)}`;
+function openWhatsApp(text, number) {
+  // El número ahora lo carga el admin en Ajustes → Marca (settings.whatsappNumber).
+  // Si todavía no cargó ninguno, no hay a dónde escribir — no hace nada.
+  if (!number) return;
+  const url = `https://wa.me/${number}?text=${encodeURIComponent(text)}`;
   window.open(url, "_blank");
 }
 
@@ -1435,6 +1440,15 @@ const DEFAULT_SETTINGS = {
   contactEmail: "",
   contactPhone: "",
   contactAddress: "",
+  // Número de WhatsApp para los botones "Escribir por WhatsApp" de la web
+  // (formato internacional sin "+" ni espacios, ej: 34612345678). Arranca
+  // vacío a propósito: mientras no se cargue ninguno acá, esos botones se
+  // ocultan solos en toda la web (el pedido en sí nunca depende de esto).
+  whatsappNumber: "",
+  // Globito flotante de WhatsApp (abajo a la derecha, en todas las páginas).
+  // Es independiente del número de arriba: el admin lo puede prender o
+  // apagar a mano, aunque ya haya un número cargado. Arranca apagado.
+  whatsappFloatEnabled: false,
   // "En tendencia" automático: combina ventas y vistas de cada producto para
   // sumar (sin pisar) a los que el admin ya marcó a mano — ver
   // computeTrendingIds y AdminSalesPanel.
@@ -3701,9 +3715,10 @@ function Home({ products, settings, reviews, customWorkGallery, onOpen, onGoCata
 /*  Catalog                                                             */
 /* ------------------------------------------------------------------ */
 
-function Catalog({ products, categories, groups, onOpen, initialQuery, initialGroup, initialCategory, favorites, onToggleFavorite, onlyFavorites = false, onGoHome, onAddToCart }) {
+function Catalog({ products, categories, groups, onOpen, initialQuery, initialGroup, initialCategory, initialSubcategory, favorites, onToggleFavorite, onlyFavorites = false, onGoHome, onAddToCart }) {
   const [activeGroup, setActiveGroup] = useState(initialGroup || "Todas");
   const [activeCat, setActiveCat] = useState(initialCategory || "Todas");
+  const [activeSubcat, setActiveSubcat] = useState(initialSubcategory || "Todas");
   const [query, setQuery] = useState(initialQuery || "");
   const [sortBy, setSortBy] = useState("relevancia");
   const [showFilters, setShowFilters] = useState(false);
@@ -3721,6 +3736,9 @@ function Catalog({ products, categories, groups, onOpen, initialQuery, initialGr
   // la principal, p.extraCategories las que se suman solo para mostrarlo acá.
   const catsInGroup = [...new Set(filtered.flatMap((p) => [p.category, ...(p.extraCategories || [])]))].filter(Boolean);
   filtered = activeCat === "Todas" ? filtered : filtered.filter((p) => p.category === activeCat || (p.extraCategories || []).includes(activeCat));
+  // Subcategoría (ej: dentro de "Sudaderas" separar "Con capucha" de "Sin
+  // capucha") — llega sobre todo desde el submenú del header, ver AdminProductForm.
+  filtered = activeSubcat === "Todas" ? filtered : filtered.filter((p) => p.subcategory === activeSubcat);
   // Un mismo diseño puede estar disponible en varias prendas a la vez
   // (comparten designGroup, ver "Modelos donde está disponible" / "Vincular
   // con otro estilo" en el admin) — acá se muestra una sola tarjeta por
@@ -3739,6 +3757,7 @@ function Catalog({ products, categories, groups, onOpen, initialQuery, initialGr
       (p) =>
         p.name.toLowerCase().includes(q) ||
         p.category.toLowerCase().includes(q) ||
+        (p.subcategory || "").toLowerCase().includes(q) ||
         (p.extraCategories || []).some((c) => c.toLowerCase().includes(q))
     );
   }
@@ -3784,6 +3803,8 @@ function Catalog({ products, categories, groups, onOpen, initialQuery, initialGr
           { label: "Inicio", onClick: onGoHome },
           { label: onlyFavorites ? "Favoritos" : "Catálogo" },
           ...(activeGroup !== "Todas" ? [{ label: activeGroup }] : []),
+          ...(activeCat !== "Todas" ? [{ label: activeCat }] : []),
+          ...(activeSubcat !== "Todas" ? [{ label: activeSubcat }] : []),
         ]}
       />
       <SectionTitle eyebrow={onlyFavorites ? "Guardado por vos" : "Todo Kulto"} title={onlyFavorites ? "Tus favoritos" : "Catálogo"} />
@@ -3896,7 +3917,7 @@ function Catalog({ products, categories, groups, onOpen, initialQuery, initialGr
           {["Todas", ...groups].map((g) => (
             <button
               key={g}
-              onClick={() => { setActiveGroup(g); setActiveCat("Todas"); }}
+              onClick={() => { setActiveGroup(g); setActiveCat("Todas"); setActiveSubcat("Todas"); }}
               className="kulto-btn shrink-0 text-sm font-semibold px-4 py-2 rounded-full"
               style={{
                 background: activeGroup === g ? "var(--sun)" : "var(--ink-2)",
@@ -3914,7 +3935,7 @@ function Catalog({ products, categories, groups, onOpen, initialQuery, initialGr
         {["Todas", ...catsInGroup].map((c) => (
           <button
             key={c}
-            onClick={() => setActiveCat(c)}
+            onClick={() => { setActiveCat(c); setActiveSubcat("Todas"); }}
             className="kulto-btn shrink-0 text-sm font-semibold px-4 py-2 rounded-full"
             style={{
               background: activeCat === c ? "var(--signal)" : "var(--ink-2)",
@@ -5397,11 +5418,11 @@ function CartDrawer({ cart, onClose, onUpdateQty, onRemove, onCheckout, customer
                 className="kulto-btn w-full rounded-full py-3 font-semibold flex items-center justify-center gap-2"
                 style={{ background: !canCheckout ? "var(--ink-3)" : "var(--signal)", color: !canCheckout ? "var(--slate)" : "var(--bone)", cursor: !canCheckout ? "not-allowed" : "pointer" }}
               >
-                {sending ? <Loader2 size={18} className="animate-spin" /> : <MessageCircle size={18} />}
-                Enviar pedido por WhatsApp
+                {sending ? <Loader2 size={18} className="animate-spin" /> : <ShoppingBag size={18} />}
+                Comprar
               </button>
               <p className="text-xs text-center" style={{ color: "var(--slate)" }}>
-                Se abrirá WhatsApp con tu pedido listo para enviar a Kulto.
+                Tu pedido queda registrado al momento, sin pasar por WhatsApp.
               </p>
             </div>
           </>
@@ -5419,7 +5440,7 @@ function CartDrawer({ cart, onClose, onUpdateQty, onRemove, onCheckout, customer
 // apenas se confirma — eso pasa siempre, sin depender de WhatsApp. El botón
 // de WhatsApp acá es solo una opción extra para el cliente que quiera avisar
 // también por ese medio, nunca un paso obligatorio del pedido.
-function OrderConfirm({ orderId, hasCustom, whatsappText, onClose }) {
+function OrderConfirm({ orderId, hasCustom, whatsappText, whatsappNumber, onClose }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.65)" }} onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} className="rounded-3xl p-8 max-w-sm w-full text-center" style={{ background: "var(--ink)", border: "1px solid var(--line)" }}>
@@ -5435,9 +5456,9 @@ function OrderConfirm({ orderId, hasCustom, whatsappText, onClose }) {
             Como incluye una prenda personalizada, puede demorar entre 3 y 7 días. Si la necesitás antes, escribinos.
           </p>
         )}
-        {whatsappText && (
+        {whatsappText && whatsappNumber && (
           <a
-            href={`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(whatsappText)}`}
+            href={`https://wa.me/${whatsappNumber}?text=${encodeURIComponent(whatsappText)}`}
             target="_blank"
             rel="noreferrer"
             className="kulto-btn w-full rounded-full py-3 font-semibold mb-3 flex items-center justify-center gap-2"
@@ -6098,7 +6119,7 @@ function CropModal({ source, onConfirm, onCancel, frameW = CROP_FRAME_W, frameH 
 }
 
 const emptyDraft = {
-  id: null, name: "", description: "", category: "", group: "", price: "", salePrice: "", stock: "", points: "", sku: "",
+  id: null, name: "", description: "", category: "", subcategory: "", group: "", price: "", salePrice: "", stock: "", points: "", sku: "",
   tags: { bestseller: false, oferta: false, tendencia: false, template: false, customDesign: false },
   colors: [], designs: [], sizes: [], photoPool: [],
   imageFit: "contain", imageBackground: null,
@@ -6394,6 +6415,7 @@ function AdminProductForm({ categories, groups, onAddCategory, onAddGroup, saved
       salesCount: draft.salesCount || 0,
       viewsCount: draft.viewsCount || 0,
       designGroup: (draft.designGroup || "").trim(),
+      subcategory: (draft.subcategory || "").trim(),
       ...overrides,
     };
   };
@@ -6463,6 +6485,13 @@ function AdminProductForm({ categories, groups, onAddCategory, onAddGroup, saved
   // en otros productos, así el admin puede reusar exactamente el mismo en
   // vez de tener que escribirlo igual a mano cada vez.
   const designGroupSuggestions = Array.from(new Set(allProducts.map((p) => p.designGroup).filter(Boolean)));
+  // Sugerencias de subcategoría: los textos que ya se usaron en OTROS
+  // productos de esta misma categoría (ej: dentro de "Sudaderas" ya usaste
+  // "Con capucha" y "Sin capucha") — el admin escribe libre, esto solo le
+  // evita tipear de nuevo algo que ya existe.
+  const subcategorySuggestionsProd = Array.from(
+    new Set(allProducts.filter((p) => p.category === draft.category && p.subcategory).map((p) => p.subcategory))
+  );
 
   return (
     <div className="rounded-2xl p-5 flex flex-col gap-4" style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}>
@@ -6633,6 +6662,26 @@ function AdminProductForm({ categories, groups, onAddCategory, onAddGroup, saved
           Añadir
         </button>
       </div>
+
+      {draft.category && (
+        <div>
+          <label className="text-xs mb-1 block" style={{ color: "var(--slate)" }}>Subcategoría dentro de "{draft.category}" (opcional)</label>
+          <input
+            list="product-subcategory-options"
+            placeholder='Ej: "Con capucha", "Beagle", "Oversize"'
+            value={draft.subcategory}
+            onChange={(e) => setDraft({ ...draft, subcategory: e.target.value })}
+            className="w-full rounded-xl p-3 text-sm"
+            style={inputStyle}
+          />
+          <datalist id="product-subcategory-options">
+            {subcategorySuggestionsProd.map((s) => <option key={s} value={s} />)}
+          </datalist>
+          <p className="text-xs mt-1" style={{ color: "var(--slate)" }}>
+            Sirve para separar modelos o variantes dentro de la misma categoría (ej: en "Sudaderas", separar "Con capucha" de "Sin capucha"; en "Camisetas", separar por modelo como "Beagle" u "Oversize"). El cliente los va a ver agrupados en el menú "Productos" del header. Dejalo vacío si esta categoría no necesita esa división.
+          </p>
+        </div>
+      )}
 
       <div>
         <label className="text-xs mb-1 block" style={{ color: "var(--slate)" }}>Vincular con otro estilo del mismo diseño (opcional)</label>
@@ -9181,14 +9230,16 @@ function AdminBannerSettings({ settings, groups = [], onSave }) {
   const inputStyle = { background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" };
 
   // Las fotos de portada son lo primero que carga CUALQUIER visitante, así
-  // que acá sí conviene comprimir siempre (a diferencia de otras fotos del
-  // panel que pueden necesitar transparencia): una portada nunca la necesita,
-  // es una foto de fondo. Antes, si se subía en PNG, se guardaba sin
-  // comprimir en absoluto (podía pesar varios MB) — ahora se convierte
-  // siempre a JPG comprimido, pese más liviana la portada para todos.
+  // que acá sí conviene comprimirlas siempre que se pueda. Pero esta misma
+  // sección también se usa para imágenes decorativas con transparencia (ej:
+  // el logo, que tiene que verse flotando sobre el fondo oscuro, no en un
+  // recuadro). fileToBase64 ya detecta solo si la imagen tiene transparencia
+  // de verdad: si no la tiene, la comprime como JPG liviano; si la tiene
+  // (como un logo en PNG), la mantiene en PNG para no taparla con un fondo
+  // negro — por eso acá pedimos "image/png" y dejamos que decida sola.
   const addHeroImages = (fileList) => {
     Array.from(fileList || []).forEach((f) => {
-      fileToBase64(f, (b64) => setHeroImages((imgs) => [...imgs, b64]), 1200, 0.85, "image/jpeg");
+      fileToBase64(f, (b64) => setHeroImages((imgs) => [...imgs, b64]), 1200, 0.85, "image/png");
     });
   };
   const removeHeroImage = (img) => setHeroImages((imgs) => imgs.filter((i) => i !== img));
@@ -9571,6 +9622,8 @@ function AdminBrandSettings({ settings, onSave }) {
   const [contactEmail, setContactEmail] = useState(settings.contactEmail || "");
   const [contactPhone, setContactPhone] = useState(settings.contactPhone || "");
   const [contactAddress, setContactAddress] = useState(settings.contactAddress || "");
+  const [whatsappNumber, setWhatsappNumber] = useState(settings.whatsappNumber || "");
+  const [whatsappFloatEnabled, setWhatsappFloatEnabled] = useState(!!settings.whatsappFloatEnabled);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
@@ -9582,6 +9635,8 @@ function AdminBrandSettings({ settings, onSave }) {
     setContactEmail(settings.contactEmail || "");
     setContactPhone(settings.contactPhone || "");
     setContactAddress(settings.contactAddress || "");
+    setWhatsappNumber(settings.whatsappNumber || "");
+    setWhatsappFloatEnabled(!!settings.whatsappFloatEnabled);
   }, [settings]);
 
   const handleUpload = (e) => {
@@ -9591,7 +9646,11 @@ function AdminBrandSettings({ settings, onSave }) {
   };
 
   const save = async () => {
-    await onSave({ logoImage, logoText, socialInstagram, socialFacebook, socialTiktok, contactEmail, contactPhone, contactAddress });
+    // Limpia espacios, "+" y guiones — wa.me necesita el número pelado, en
+    // formato internacional (ej: 34612345678).
+    const cleanWhatsapp = whatsappNumber.replace(/[^0-9]/g, "");
+    await onSave({ logoImage, logoText, socialInstagram, socialFacebook, socialTiktok, contactEmail, contactPhone, contactAddress, whatsappNumber: cleanWhatsapp, whatsappFloatEnabled });
+    setWhatsappNumber(cleanWhatsapp);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
@@ -9667,8 +9726,29 @@ function AdminBrandSettings({ settings, onSave }) {
       </div>
 
       <div className="pt-2" style={{ borderTop: "1px solid var(--line)" }}>
+        <p className="text-sm font-semibold mb-2" style={{ color: "var(--bone)" }}>WhatsApp</p>
+        <p className="text-xs mb-2" style={{ color: "var(--slate)" }}>
+          El pedido en sí nunca depende de esto — se guarda y te llega por mail siempre. Este número es para los botones opcionales de "Escribir por WhatsApp" (pie de página y "¿Tienes dudas?"). Mientras lo dejes vacío, esos botones no aparecen en la web.
+        </p>
+        <input
+          value={whatsappNumber}
+          onChange={(e) => setWhatsappNumber(e.target.value)}
+          placeholder="Ej: 34612345678 (código de país + número, sin + ni espacios)"
+          className="w-full rounded-xl p-3 text-sm mb-3"
+          style={{ background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" }}
+        />
+        <label className="flex items-center gap-2 text-sm" style={{ color: "var(--bone)" }}>
+          <input type="checkbox" checked={whatsappFloatEnabled} onChange={(e) => setWhatsappFloatEnabled(e.target.checked)} />
+          Mostrar el globito flotante de WhatsApp (abajo a la derecha, en toda la web)
+        </label>
+        <p className="text-xs mt-1" style={{ color: "var(--slate)" }}>
+          Es independiente del número de arriba — lo podés prender o apagar cuando quieras, aunque ya tengas un número cargado. Arranca apagado.
+        </p>
+      </div>
+
+      <div className="pt-2" style={{ borderTop: "1px solid var(--line)" }}>
         <p className="text-sm font-semibold mb-2" style={{ color: "var(--bone)" }}>Datos de contacto formales</p>
-        <p className="text-xs mb-2" style={{ color: "var(--slate)" }}>Se muestran en el pie de página y en "¿Tienes dudas?", además del botón de WhatsApp que ya tenés.</p>
+        <p className="text-xs mb-2" style={{ color: "var(--slate)" }}>Se muestran en el pie de página y en "¿Tienes dudas?".</p>
         <div className="flex flex-col gap-2">
           <input
             type="email"
@@ -10043,7 +10123,7 @@ function AdminProductsMenu({ items, categories, groups, onSave }) {
       <div>
         <h4 className="font-semibold" style={{ color: "var(--bone)" }}>Menú "Productos" del header</h4>
         <p className="text-xs mt-1" style={{ color: "var(--slate)" }}>
-          Al lado de "Catálogo" en el menú flotante, agregá los accesos directos que quieras (ej: "Llaveros", "Lanyards"). Cada uno lleva al catálogo ya filtrado por la categoría o el grupo que elijas.
+          Al lado de "Catálogo" en el menú flotante, agregá los accesos directos que quieras (ej: "Llaveros", "Lanyards"). Cada uno lleva al catálogo ya filtrado por la categoría o el grupo que elijas. Si un acceso es de tipo "Categoría" y esa categoría tiene productos con "Subcategoría" cargada (ver formulario de producto), automáticamente aparece una flechita para desplegar esas subcategorías debajo — no hace falta configurar nada más acá para eso.
         </p>
       </div>
       {list.length === 0 && <EmptyState text="Por ahora el menú solo muestra 'Catálogo'." />}
@@ -12437,7 +12517,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                               </div>
                               <div className="flex-1 min-w-0">
                                 <p className="text-sm font-semibold truncate" style={{ color: "var(--bone)" }}>{p.name}</p>
-                                <p className="text-xs" style={{ color: "var(--slate)" }}>{p.category ? `${p.category} · ` : ""}{formatPrice(p.price)} · stock {p.stock}{p.hidden ? " · Oculto para clientes" : ""}{variants.length > 1 ? ` · ${variants.length} modelos` : ""}</p>
+                                <p className="text-xs" style={{ color: "var(--slate)" }}>{p.category ? `${p.category}${p.subcategory ? ` · ${p.subcategory}` : ""} · ` : ""}{formatPrice(p.price)} · stock {p.stock}{p.hidden ? " · Oculto para clientes" : ""}{variants.length > 1 ? ` · ${variants.length} modelos` : ""}</p>
                               </div>
                               <button
                                 onClick={(e) => { e.stopPropagation(); onSaveProduct({ ...p, hidden: !p.hidden }); }}
@@ -12621,7 +12701,7 @@ function NavLink({ label, active, onClick }) {
   );
 }
 
-function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, customer, themeMode, onToggleThemeMode, fontStep, onDecreaseFont, onIncreaseFont, socialLinks = {}, showAdminMenu = false, onGoAdminTab, onPreviewAsCustomer, productsMenuItems = [], onGoCatalog }) {
+function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, customer, themeMode, onToggleThemeMode, fontStep, onDecreaseFont, onIncreaseFont, socialLinks = {}, showAdminMenu = false, onGoAdminTab, onPreviewAsCustomer, productsMenuItems = [], onGoCatalog, products = [] }) {
   const [open, setOpen] = useState(false);
   const [adminMenuOpen, setAdminMenuOpen] = useState(false);
   const adminMenuRef = useRef(null);
@@ -12633,11 +12713,36 @@ function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, cus
   const [catalogMenuOpen, setCatalogMenuOpen] = useState(false);
   const [catalogMenuOpenMobile, setCatalogMenuOpenMobile] = useState(false);
   const catalogMenuRef = useRef(null);
+  // Qué acceso directo (de categoría) tiene desplegado su lista de
+  // subcategorías ahora mismo — uno a la vez, y por separado en desktop y
+  // celular porque son dos desplegables independientes.
+  const [expandedMenuItemId, setExpandedMenuItemId] = useState(null);
+  const [expandedMenuItemIdMobile, setExpandedMenuItemIdMobile] = useState(null);
   const goCatalog = (item) => {
     onGoCatalog?.(item ? { group: item.type === "group" ? item.value : "", category: item.type === "category" ? item.value : "" } : {});
     setOpen(false);
     setCatalogMenuOpen(false);
     setCatalogMenuOpenMobile(false);
+  };
+  const goCatalogSubcategory = (categoryValue, subcat) => {
+    onGoCatalog?.({ category: categoryValue, subcategory: subcat });
+    setOpen(false);
+    setCatalogMenuOpen(false);
+    setCatalogMenuOpenMobile(false);
+  };
+  // Subcategorías ya usadas por productos de esta categoría (texto libre,
+  // ver "Subcategoría" en el formulario de producto) — si no hay ninguna,
+  // el acceso directo se comporta como antes, sin flecha para desplegar.
+  const subcatsForItem = (it) => {
+    if (it.type !== "category") return [];
+    return Array.from(
+      new Set(
+        products
+          .filter((p) => p.category === it.value || (p.extraCategories || []).includes(it.value))
+          .map((p) => p.subcategory)
+          .filter(Boolean)
+      )
+    );
   };
   const go = (p) => { setPage(p); setOpen(false); };
   useEffect(() => {
@@ -12665,8 +12770,14 @@ function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, cus
     { label: "Diseños PNG", onClick: () => onGoAdminTab?.("personalizar") },
     { label: "Subir productos", onClick: () => onGoAdminTab?.("productos") },
   ];
+  // paddingTop con env(safe-area-inset-top): en el iPhone, al instalar la web
+  // como app (PWA) con viewport-fit=cover, el contenido puede dibujarse
+  // debajo de la barra de la hora/batería — ahí los botones se ven pero no
+  // se pueden tocar porque esa franja la reserva el sistema. Este padding
+  // empuja el header (y sus botones) para abajo de esa franja, sin perder
+  // el fondo que llega hasta el borde.
   return (
-    <header className="sticky top-0 z-40" style={{ background: "var(--ink)", borderBottom: "1px solid var(--line)" }}>
+    <header className="sticky top-0 z-40" style={{ background: "var(--ink)", borderBottom: "1px solid var(--line)", paddingTop: "env(safe-area-inset-top)" }}>
       <div className="max-w-6xl mx-auto px-4 md:px-6 flex items-center justify-between h-16">
         <button onClick={() => go("home")} className="flex items-center gap-2.5">
           {logoImage ? (
@@ -12693,14 +12804,44 @@ function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, cus
                 <button onClick={() => goCatalog(null)} className="kulto-btn w-full text-left px-4 py-2.5 text-sm" style={{ color: "var(--bone)" }}>
                   Catálogo
                 </button>
-                {productsMenuItems.map((it) => (
-                  <React.Fragment key={it.id}>
-                    <div style={{ height: 1, background: "var(--line)" }} />
-                    <button onClick={() => goCatalog(it)} className="kulto-btn w-full text-left px-4 py-2.5 text-sm" style={{ color: "var(--bone)" }}>
-                      {it.label || it.value}
-                    </button>
-                  </React.Fragment>
-                ))}
+                {productsMenuItems.map((it) => {
+                  const subcats = subcatsForItem(it);
+                  const expanded = expandedMenuItemId === it.id;
+                  return (
+                    <React.Fragment key={it.id}>
+                      <div style={{ height: 1, background: "var(--line)" }} />
+                      <div className="flex items-center">
+                        <button onClick={() => goCatalog(it)} className="kulto-btn flex-1 text-left px-4 py-2.5 text-sm" style={{ color: "var(--bone)" }}>
+                          {it.label || it.value}
+                        </button>
+                        {subcats.length > 0 && (
+                          <button
+                            onClick={() => setExpandedMenuItemId(expanded ? null : it.id)}
+                            className="kulto-btn px-2 py-2.5"
+                            style={{ color: "var(--slate)" }}
+                            aria-label={`Ver subcategorías de ${it.label || it.value}`}
+                          >
+                            <ChevronDown size={14} style={{ transform: expanded ? "rotate(180deg)" : "none" }} />
+                          </button>
+                        )}
+                      </div>
+                      {expanded && subcats.length > 0 && (
+                        <div style={{ background: "var(--ink-3)" }}>
+                          {subcats.map((sc) => (
+                            <button
+                              key={sc}
+                              onClick={() => goCatalogSubcategory(it.value, sc)}
+                              className="kulto-btn w-full text-left pl-7 pr-4 py-2 text-sm"
+                              style={{ color: "var(--slate)" }}
+                            >
+                              {sc}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -12846,14 +12987,44 @@ function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, cus
                 <button onClick={() => goCatalog(null)} className="kulto-btn text-left py-2 text-sm" style={{ color: "var(--slate)" }}>
                   Catálogo
                 </button>
-                {productsMenuItems.map((it) => (
-                  <React.Fragment key={it.id}>
-                    <div style={{ height: 1, background: "var(--line)" }} />
-                    <button onClick={() => goCatalog(it)} className="kulto-btn text-left py-2 text-sm" style={{ color: "var(--slate)" }}>
-                      {it.label || it.value}
-                    </button>
-                  </React.Fragment>
-                ))}
+                {productsMenuItems.map((it) => {
+                  const subcats = subcatsForItem(it);
+                  const expanded = expandedMenuItemIdMobile === it.id;
+                  return (
+                    <React.Fragment key={it.id}>
+                      <div style={{ height: 1, background: "var(--line)" }} />
+                      <div className="flex items-center">
+                        <button onClick={() => goCatalog(it)} className="kulto-btn flex-1 text-left py-2 text-sm" style={{ color: "var(--slate)" }}>
+                          {it.label || it.value}
+                        </button>
+                        {subcats.length > 0 && (
+                          <button
+                            onClick={() => setExpandedMenuItemIdMobile(expanded ? null : it.id)}
+                            className="kulto-btn px-2 py-2"
+                            style={{ color: "var(--slate)" }}
+                            aria-label={`Ver subcategorías de ${it.label || it.value}`}
+                          >
+                            <ChevronDown size={14} style={{ transform: expanded ? "rotate(180deg)" : "none" }} />
+                          </button>
+                        )}
+                      </div>
+                      {expanded && subcats.length > 0 && (
+                        <div className="flex flex-col pl-3">
+                          {subcats.map((sc) => (
+                            <button
+                              key={sc}
+                              onClick={() => goCatalogSubcategory(it.value, sc)}
+                              className="kulto-btn text-left py-1.5 text-sm"
+                              style={{ color: "var(--slate)" }}
+                            >
+                              {sc}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -13090,14 +13261,15 @@ function ContactFormModal({ open, onClose, settings }) {
 }
 
 function ContactSection({ settings }) {
-  const sendHello = () => openWhatsApp("Hola Kulto, tengo una duda sobre un producto.");
+  const hasWhatsapp = !!settings?.whatsappNumber;
+  const sendHello = () => openWhatsApp("Hola Kulto, tengo una duda sobre un producto.", settings?.whatsappNumber);
   const [contactOpen, setContactOpen] = useState(false);
   return (
     <section id="contacto" className="max-w-6xl mx-auto px-4 md:px-6 py-16">
       <div className="rounded-3xl p-8 md:p-12 flex flex-col md:flex-row items-center justify-between gap-6" style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}>
         <div>
           <h3 className="kulto-display text-2xl" style={{ color: "var(--bone)" }}>¿Tienes dudas?</h3>
-          <p className="mt-2 max-w-sm" style={{ color: "var(--slate)" }}>Escríbenos directo a WhatsApp y te respondemos lo antes posible.</p>
+          <p className="mt-2 max-w-sm" style={{ color: "var(--slate)" }}>{hasWhatsapp ? "Escríbenos directo a WhatsApp y te respondemos lo antes posible." : "Escríbenos y te respondemos lo antes posible."}</p>
           <div className="mt-4 flex flex-wrap items-center gap-4">
             <button onClick={() => setContactOpen(true)} className="kulto-btn text-sm flex items-center gap-2 w-fit" style={{ color: "var(--slate)" }}>
               <Mail size={15} /> Contacto
@@ -13109,9 +13281,11 @@ function ContactSection({ settings }) {
             )}
           </div>
         </div>
-        <button onClick={sendHello} className="kulto-btn rounded-full px-6 py-3 font-semibold flex items-center gap-2 shrink-0" style={{ background: "var(--sun)", color: "var(--ink)" }}>
-          <MessageCircle size={18} /> Escribir por WhatsApp
-        </button>
+        {hasWhatsapp && (
+          <button onClick={sendHello} className="kulto-btn rounded-full px-6 py-3 font-semibold flex items-center gap-2 shrink-0" style={{ background: "var(--sun)", color: "var(--ink)" }}>
+            <MessageCircle size={18} /> Escribir por WhatsApp
+          </button>
+        )}
       </div>
       <ContactFormModal open={contactOpen} onClose={() => setContactOpen(false)} settings={settings} />
     </section>
@@ -13181,14 +13355,16 @@ function Footer({ settings }) {
       {settings.contactAddress && <span className="flex items-center gap-1.5"><MapPin size={13} /> {settings.contactAddress}</span>}
     </div>
   );
-  // WhatsApp siempre se muestra (es el mismo número que usa todo el sitio
-  // para abrir el chat) — las redes son opcionales, según lo que cargue el admin.
+  // El ícono de WhatsApp solo se muestra si el admin cargó un número en
+  // Ajustes → Marca — las redes son igual de opcionales, según lo que cargue.
   items.push(
     <div className="flex items-center gap-4">
       {settings.socialInstagram && (
         <a href={settings.socialInstagram} target="_blank" rel="noreferrer" className="kulto-btn" style={{ color: "var(--slate)" }} title="Instagram"><Instagram size={18} /></a>
       )}
-      <a href={`https://wa.me/${WHATSAPP_NUMBER}`} target="_blank" rel="noreferrer" className="kulto-btn" style={{ color: "var(--slate)" }} title="WhatsApp"><MessageCircle size={18} /></a>
+      {settings.whatsappNumber && (
+        <a href={`https://wa.me/${settings.whatsappNumber}`} target="_blank" rel="noreferrer" className="kulto-btn" style={{ color: "var(--slate)" }} title="WhatsApp"><MessageCircle size={18} /></a>
+      )}
       {settings.socialFacebook && (
         <a href={settings.socialFacebook} target="_blank" rel="noreferrer" className="kulto-btn" style={{ color: "var(--slate)" }} title="Facebook"><Facebook size={18} /></a>
       )}
@@ -13230,10 +13406,13 @@ function Footer({ settings }) {
   );
 }
 
-function WhatsAppFloat({ liftForMobileBar }) {
+function WhatsAppFloat({ liftForMobileBar, whatsappNumber, enabled }) {
+  // No se muestra si está apagado o si todavía no hay número cargado
+  // (Ajustes → Marca) — las dos cosas se controlan por separado.
+  if (!enabled || !whatsappNumber) return null;
   return (
     <button
-      onClick={() => openWhatsApp("Hola Kulto, tengo una duda sobre un producto.")}
+      onClick={() => openWhatsApp("Hola Kulto, tengo una duda sobre un producto.", whatsappNumber)}
       className={`kulto-btn fixed right-5 z-30 w-14 h-14 rounded-full flex items-center justify-center ${liftForMobileBar ? "bottom-24 md:bottom-5" : "bottom-5"}`}
       style={{ background: "var(--sun)", color: "var(--ink)", boxShadow: "0 8px 20px rgba(0,0,0,0.4)" }}
       title="Escríbenos por WhatsApp"
@@ -13245,7 +13424,10 @@ function WhatsAppFloat({ liftForMobileBar }) {
 
 function MobileCartBar({ count, total, onOpen }) {
   return (
-    <div className="md:hidden fixed bottom-0 left-0 right-0 z-30 px-4 py-3" style={{ background: "var(--ink-2)", borderTop: "1px solid var(--line)" }}>
+    // paddingBottom extra con env(safe-area-inset-bottom): en iPhones sin
+    // botón físico de inicio, evita que la franja del "home indicator" tape
+    // parte del botón.
+    <div className="md:hidden fixed bottom-0 left-0 right-0 z-30 px-4 pt-3" style={{ background: "var(--ink-2)", borderTop: "1px solid var(--line)", paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom))" }}>
       <button onClick={onOpen} className="kulto-btn w-full rounded-full py-3 px-4 font-semibold flex items-center justify-between" style={{ background: "var(--signal)", color: "var(--bone)" }}>
         <span className="flex items-center gap-2"><ShoppingBag size={18} /> {count} artículo{count === 1 ? "" : "s"}</span>
         <span>{formatPrice(total)} · Ver carrito</span>
@@ -13333,15 +13515,18 @@ export default function App() {
   const [catalogSearchQuery, setCatalogSearchQuery] = useState("");
   const [catalogInitialGroup, setCatalogInitialGroup] = useState("");
   const [catalogInitialCategory, setCatalogInitialCategory] = useState("");
+  const [catalogInitialSubcategory, setCatalogInitialSubcategory] = useState("");
   // Compartida entre el header (menú "Productos", ahora puede filtrar por
-  // categoría además de por grupo), el inicio y los banners — lleva al
-  // catálogo ya filtrado, o sin filtro si no se pasa nada. Acepta tanto un
-  // string suelto (un grupo, como usan los banners de siempre) como un
-  // objeto { group, category } (como usa el menú "Productos" del header).
+  // categoría/subcategoría además de por grupo), el inicio y los banners —
+  // lleva al catálogo ya filtrado, o sin filtro si no se pasa nada. Acepta
+  // tanto un string suelto (un grupo, como usan los banners de siempre) como
+  // un objeto { group, category, subcategory } (como usa el menú "Productos"
+  // del header, incluido su submenú de subcategorías).
   const goToCatalog = (filter) => {
     const f = typeof filter === "string" ? { group: filter } : (filter || {});
     setCatalogInitialGroup(f.group || "");
     setCatalogInitialCategory(f.category || "");
+    setCatalogInitialSubcategory(f.subcategory || "");
     setCatalogSearchQuery("");
     setPage("catalog");
   };
@@ -14399,7 +14584,7 @@ export default function App() {
   return (
     <div className="kulto-root min-h-screen flex flex-col" data-mode={themeMode}>
       <GlobalStyle colors={settings.theme} />
-      <Header page={page} setPage={setPage} cartCount={cartCount} onOpenCart={() => setCartOpen(true)} logoImage={settings.logoImage} logoText={settings.logoText} customer={customer} themeMode={themeMode} onToggleThemeMode={toggleThemeMode} fontStep={fontStep} onDecreaseFont={decreaseFont} onIncreaseFont={increaseFont} socialLinks={{ instagram: settings.socialInstagram, facebook: settings.socialFacebook, tiktok: settings.socialTiktok }} showAdminMenu={hasAdminAccess} onGoAdminTab={jumpToAdminTab} onPreviewAsCustomer={() => { setPreviewAsCustomer(true); setPage("home"); }} productsMenuItems={settings.productsMenuItems || []} onGoCatalog={goToCatalog} />
+      <Header page={page} setPage={setPage} cartCount={cartCount} onOpenCart={() => setCartOpen(true)} logoImage={settings.logoImage} logoText={settings.logoText} customer={customer} themeMode={themeMode} onToggleThemeMode={toggleThemeMode} fontStep={fontStep} onDecreaseFont={decreaseFont} onIncreaseFont={increaseFont} socialLinks={{ instagram: settings.socialInstagram, facebook: settings.socialFacebook, tiktok: settings.socialTiktok }} showAdminMenu={hasAdminAccess} onGoAdminTab={jumpToAdminTab} onPreviewAsCustomer={() => { setPreviewAsCustomer(true); setPage("home"); }} productsMenuItems={settings.productsMenuItems || []} onGoCatalog={goToCatalog} products={sellableProducts} />
       {hasAdminAccess && previewAsCustomer && (
         <div className="sticky top-16 z-30 flex items-center justify-center gap-3 px-4 py-2 text-sm font-semibold" style={{ background: "var(--sun)", color: "var(--ink)" }}>
           <span>Estás viendo la web como la vería un cliente.</span>
@@ -14443,7 +14628,7 @@ export default function App() {
             onAddToCart={handleAddToCart}
           />
         )}
-        {page === "catalog" && <Catalog products={sellableProducts} categories={categories} groups={groups} onOpen={setSelectedProduct} initialQuery={catalogSearchQuery} initialGroup={catalogInitialGroup} initialCategory={catalogInitialCategory} favorites={customer?.favorites} onToggleFavorite={handleToggleFavorite} onGoHome={() => setPage("home")} onAddToCart={handleAddToCart} />}
+        {page === "catalog" && <Catalog products={sellableProducts} categories={categories} groups={groups} onOpen={setSelectedProduct} initialQuery={catalogSearchQuery} initialGroup={catalogInitialGroup} initialCategory={catalogInitialCategory} initialSubcategory={catalogInitialSubcategory} favorites={customer?.favorites} onToggleFavorite={handleToggleFavorite} onGoHome={() => setPage("home")} onAddToCart={handleAddToCart} />}
         {page === "favoritos" && <Catalog products={sellableProducts} categories={categories} groups={groups} onOpen={setSelectedProduct} favorites={customer?.favorites} onToggleFavorite={handleToggleFavorite} onlyFavorites onGoHome={() => setPage("home")} onAddToCart={handleAddToCart} />}
         {page === "wizard" && (
           <Wizard
@@ -14549,7 +14734,7 @@ export default function App() {
       </main>
 
       <Footer settings={settings} />
-      <WhatsAppFloat liftForMobileBar={cart.length > 0 && !cartOpen} />
+      <WhatsAppFloat liftForMobileBar={cart.length > 0 && !cartOpen} whatsappNumber={settings.whatsappNumber} enabled={settings.whatsappFloatEnabled} />
       {cart.length > 0 && !cartOpen && (
         <MobileCartBar count={cartCount} total={cart.reduce((s, it) => s + it.qty * it.unitPrice, 0)} onOpen={() => setCartOpen(true)} />
       )}
@@ -14590,7 +14775,7 @@ export default function App() {
         />
       )}
 
-      {confirmedOrderId && <OrderConfirm orderId={confirmedOrderId} hasCustom={confirmedHasCustom} whatsappText={confirmedWhatsappText} onClose={() => { setConfirmedOrderId(null); setConfirmedWhatsappText(null); }} />}
+      {confirmedOrderId && <OrderConfirm orderId={confirmedOrderId} hasCustom={confirmedHasCustom} whatsappText={confirmedWhatsappText} whatsappNumber={settings.whatsappNumber} onClose={() => { setConfirmedOrderId(null); setConfirmedWhatsappText(null); }} />}
     </div>
   );
 }
