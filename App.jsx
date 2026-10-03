@@ -12755,8 +12755,14 @@ function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, cus
     { label: "Diseños PNG", onClick: () => onGoAdminTab?.("personalizar") },
     { label: "Subir productos", onClick: () => onGoAdminTab?.("productos") },
   ];
+  // paddingTop con env(safe-area-inset-top): en el iPhone, al instalar la web
+  // como app (PWA) con viewport-fit=cover, el contenido puede dibujarse
+  // debajo de la barra de la hora/batería — ahí los botones se ven pero no
+  // se pueden tocar porque esa franja la reserva el sistema. Este padding
+  // empuja el header (y sus botones) para abajo de esa franja, sin perder
+  // el fondo que llega hasta el borde.
   return (
-    <header className="sticky top-0 z-40" style={{ background: "var(--ink)", borderBottom: "1px solid var(--line)" }}>
+    <header className="sticky top-0 z-40" style={{ background: "var(--ink)", borderBottom: "1px solid var(--line)", paddingTop: "env(safe-area-inset-top)" }}>
       <div className="max-w-6xl mx-auto px-4 md:px-6 flex items-center justify-between h-16">
         <button onClick={() => go("home")} className="flex items-center gap-2.5">
           {logoImage ? (
@@ -13402,7 +13408,10 @@ function WhatsAppFloat({ liftForMobileBar, whatsappNumber }) {
 
 function MobileCartBar({ count, total, onOpen }) {
   return (
-    <div className="md:hidden fixed bottom-0 left-0 right-0 z-30 px-4 py-3" style={{ background: "var(--ink-2)", borderTop: "1px solid var(--line)" }}>
+    // paddingBottom extra con env(safe-area-inset-bottom): en iPhones sin
+    // botón físico de inicio, evita que la franja del "home indicator" tape
+    // parte del botón.
+    <div className="md:hidden fixed bottom-0 left-0 right-0 z-30 px-4 pt-3" style={{ background: "var(--ink-2)", borderTop: "1px solid var(--line)", paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom))" }}>
       <button onClick={onOpen} className="kulto-btn w-full rounded-full py-3 px-4 font-semibold flex items-center justify-between" style={{ background: "var(--signal)", color: "var(--bone)" }}>
         <span className="flex items-center gap-2"><ShoppingBag size={18} /> {count} artículo{count === 1 ? "" : "s"}</span>
         <span>{formatPrice(total)} · Ver carrito</span>
