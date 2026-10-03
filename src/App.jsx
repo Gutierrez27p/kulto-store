@@ -9180,10 +9180,15 @@ function AdminBannerSettings({ settings, groups = [], onSave }) {
 
   const inputStyle = { background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" };
 
+  // Las fotos de portada son lo primero que carga CUALQUIER visitante, así
+  // que acá sí conviene comprimir siempre (a diferencia de otras fotos del
+  // panel que pueden necesitar transparencia): una portada nunca la necesita,
+  // es una foto de fondo. Antes, si se subía en PNG, se guardaba sin
+  // comprimir en absoluto (podía pesar varios MB) — ahora se convierte
+  // siempre a JPG comprimido, pese más liviana la portada para todos.
   const addHeroImages = (fileList) => {
     Array.from(fileList || []).forEach((f) => {
-      const isPng = f.type === "image/png";
-      fileToBase64(f, (b64) => setHeroImages((imgs) => [...imgs, b64]), 1200, 0.88, isPng ? "image/png" : "image/jpeg");
+      fileToBase64(f, (b64) => setHeroImages((imgs) => [...imgs, b64]), 1200, 0.85, "image/jpeg");
     });
   };
   const removeHeroImage = (img) => setHeroImages((imgs) => imgs.filter((i) => i !== img));
