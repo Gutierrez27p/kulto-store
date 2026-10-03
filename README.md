@@ -147,12 +147,39 @@ no en `npm run dev` local.
 
 ## Paso 5 — Conectar tu propio dominio (opcional)
 
-1. Comprá el dominio donde prefieras (Namecheap, GoDaddy, Google Domains, etc. —
-   un `.com` o `.es` suele costar entre 10€ y 20€ al año).
-2. En Vercel, andá a tu proyecto → **Settings → Domains** → agregá tu dominio.
-3. Vercel te va a mostrar uno o dos registros DNS para agregar en el panel de tu
-   proveedor de dominio (donde lo compraste). Es copiar y pegar.
-4. En unas horas (a veces minutos) tu dominio va a apuntar directo a la web.
+### Dónde comprarlo
+
+Para un `.es` concretamente:
+- **Namecheap** (recomendado): conocido, confiable, panel en español, buen soporte. Un `.es` ronda los 18€/año.
+- **Sered** o **Hostinet** (alternativa): registradores españoles, bastante más baratos para `.es` (5€–7€/año) y con soporte en español, aunque el panel es un poco menos pulido que el de Namecheap.
+
+No hace falta ser español ni tener NIF para registrar un `.es` — eso se exigía antes, ya no. Evitá GoDaddy si podés: es más caro para renovar y empuja mucho "extras" pagos al comprar.
+
+### Cómo comprarlo
+
+1. Entrá al sitio del registrador que elijas, buscá `kulto-store.es` y comprobá que esté libre.
+2. Agregalo al carrito. Te van a ofrecer extras (protección de privacidad WHOIS, hosting, mail) — para esto no hace falta nada de eso, solo el dominio pelado (la privacidad WHOIS sí está bien tenerla si es gratis o muy barata).
+3. Pagá y listo, ya es tuyo.
+
+### Cómo conectarlo en Vercel
+
+1. En Vercel, andá a tu proyecto → **Settings → Domains** → escribí `kulto-store.es` → **Add**.
+2. Vercel te va a mostrar uno o dos registros DNS (normalmente un registro **A** apuntando a una IP, y un **CNAME** para la versión `www`).
+3. Andá al panel de tu registrador → la sección de **DNS** (a veces se llama "Zona DNS" o "Administrar DNS") de `kulto-store.es` → agregá ahí los registros que te mostró Vercel, tal cual (copiar y pegar).
+4. Esperá un rato — a veces son minutos, a veces unas horas (nunca más de 24–48h) — y listo, tu dominio va a apuntar directo a la web. Vercel también te genera el candado HTTPS automáticamente, sin que tengas que hacer nada más.
+
+---
+
+## Paso 6 — Instalar la web como app en el celular (PWA)
+
+La web ya está armada para que cualquiera pueda "instalarla" en su celular como si fuera una app, sin pasar por Google Play ni la App Store:
+
+- **Android/Chrome:** al entrar a la web aparece un cartel amarillo arriba con un botón "Instalar" que hace todo solo.
+- **iPhone/iPad (Safari):** ahí Apple no deja que las webs se instalen solas — aparece un cartel con instrucciones: tocar **Compartir** → **"Agregar a pantalla de inicio"**.
+
+Una vez instalada, queda un ícono en la pantalla de inicio del celular y abre en pantalla completa, sin la barra del navegador. No hay nada que configurar de tu lado — ya viene activado en el proyecto (lo arma `vite-plugin-pwa` al compilar, ver `vite.config.js`).
+
+Si más adelante querés que además aparezca en Google Play o en el App Store (una app "de verdad" en las tiendas), es un paso aparte y más grande: hay que crear cuentas de desarrollador (pagas: ~25 USD una vez en Google, ~99 USD por año en Apple) y pasar la revisión de cada tienda. Avisame cuando quieras ir por ese camino.
 
 ---
 
@@ -161,11 +188,11 @@ no en `npm run dev` local.
 - [ ] Cambiaste el mail de administrador (`ADMIN_EMAIL` en `src/App.jsx`) por el tuyo, y te registraste en "Mi cuenta" con ese mail.
 - [ ] Cargaste tus productos reales, con fotos, colores, stock y precios.
 - [ ] Probaste hacer un pedido de prueba de punta a punta: agregar al carrito,
-      completar el email y la dirección, y confirmar que el mensaje de WhatsApp
-      se arma bien y te llega.
+      completar el email y la dirección, y confirmar que el pedido te llega
+      por mail y queda guardado en el panel ("Pedidos").
 - [ ] Revisaste la pestaña "Envío" del panel de administrador con tus valores
       reales de costo de envío.
-- [ ] Confirmaste el número de WhatsApp (`WHATSAPP_NUMBER` en `src/App.jsx`).
+- [ ] Confirmaste el número de WhatsApp (`WHATSAPP_NUMBER` en `src/App.jsx`), que ahora es solo el canal de contacto opcional, no obligatorio para pedir.
 
 ## Una limitación para tener en cuenta
 

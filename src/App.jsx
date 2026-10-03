@@ -4,7 +4,7 @@ import {
   MessageCircle, Lock, Check, Shirt, Upload, Package, Star, Sparkles, ArrowRight,
   LogOut, Loader2, ZoomIn, ZoomOut, ArrowUp, ArrowDown, Quote, Instagram, Search, Heart, GripVertical, Info,
   Sun, Moon, RotateCw, Facebook, Music2, Mail, Phone, MapPin, HelpCircle, SlidersHorizontal, RotateCcw,
-  LayoutGrid, Eye, EyeOff, TrendingUp, UserPlus, KeyRound, Boxes, FolderPlus, ArrowLeft, Move, WifiOff
+  LayoutGrid, Eye, EyeOff, TrendingUp, UserPlus, KeyRound, Boxes, FolderPlus, ArrowLeft, Move, WifiOff, Download
 } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
 
@@ -502,7 +502,54 @@ function buildOrderEmailHtml(order, settings) {
     ${deliveryHtml}
     ${order.discountAmount > 0 ? `<p style="margin:0 0 4px;">Descuento: -${formatPrice(order.discountAmount)}</p>` : ""}
     <p style="margin:0 0 4px;font-size:18px;font-weight:bold;">Total: ${formatPrice(order.total)}</p>
-    <p style="margin:20px 0 0;color:#a9a2b0;font-size:13px;">Te vamos a estar escribiendo por WhatsApp para coordinar el pago y la entrega. Cualquier duda, respondé este mismo mail o escribinos.</p>
+    <p style="margin:20px 0 0;color:#a9a2b0;font-size:13px;">Te vamos a estar escribiendo para coordinar el pago y la entrega. Cualquier duda, respondé este mismo mail o escribinos por WhatsApp.</p>
+  `);
+}
+
+// Aviso interno al dueño (se manda a ADMIN_EMAIL, que sendEmail() redirige de
+// verdad a ADMIN_NOTIFICATION_EMAIL) cada vez que entra un pedido nuevo. Este
+// mail — junto con que el pedido ya queda guardado en el panel vía
+// persistOrder() — es ahora el camino GARANTIZADO para enterarse de un
+// pedido: antes dependía de que WhatsApp se abriera bien en el celular del
+// cliente (algunos navegadores, sobre todo Safari de iPhone, bloqueaban el
+// popup), así que podía perderse un pedido sin que nadie se diera cuenta.
+function buildAdminOrderEmailHtml(order, settings) {
+  const storeName = settings?.logoText || "Kulto";
+  const itemsHtml = order.items.map((it) => `
+    <tr>
+      <td style="padding:8px 0;border-bottom:1px solid #2c2833;">
+        <p style="margin:0;font-weight:bold;">${it.name} ${it.qty > 1 ? `× ${it.qty}` : ""}</p>
+        <p style="margin:2px 0 0;font-size:13px;color:#a9a2b0;">
+          ${it.colorName || ""}${it.size ? ` · Talle ${it.size}` : ""}${it.designName ? ` · ${it.designName}` : ""}${it.sku ? ` · ref. ${it.sku}` : ""}
+        </p>
+        ${(it.designImage || it.previewImageFront || it.previewImageBack || it.previewImageSleeveLeft || it.previewImageSleeveRight) ? `<p style="margin:2px 0 0;font-size:12px;color:#E8452C;">(tiene imagen de diseño o vista previa — se ve en el panel, pestaña Pedidos)</p>` : ""}
+      </td>
+      <td style="padding:8px 0;border-bottom:1px solid #2c2833;text-align:right;white-space:nowrap;">${formatPrice(it.unitPrice * it.qty)}</td>
+    </tr>
+  `).join("");
+
+  const deliveryHtml = order.deliveryMethod === "envio"
+    ? `<p style="margin:0 0 4px;">Envío a domicilio: ${order.shippingCost > 0 ? formatPrice(order.shippingCost) : "Gratis"}</p><p style="margin:0 0 16px;color:#a9a2b0;font-size:13px;">${formatAddress(order.address)}</p>`
+    : `<p style="margin:0 0 16px;">Retiro en persona (sin costo de envío)</p>`;
+
+  const hasCustom = order.items.some((it) => it.designName?.startsWith("Personalizado"));
+  const depositHtml = hasCustom && settings?.depositEnabled
+    ? `<p style="margin:0 0 12px;color:#a9a2b0;font-size:13px;">Lleva seña del ${settings.depositPercent}% (${formatPrice(order.subtotal * ((settings.depositPercent || 0) / 100))}) por ${settings.depositInfo || "el medio que corresponda"}.</p>`
+    : "";
+
+  return emailShell(storeName, `
+    <p style="margin:0 0 4px;font-weight:bold;">Pedido nuevo</p>
+    <p style="margin:0 0 20px;color:#a9a2b0;font-size:13px;">Pedido N° ${order.id} · ${formatDate(order.date)}</p>
+    <p style="margin:0 0 4px;"><strong>Cliente:</strong> ${order.customerName || "(sin nombre)"}</p>
+    ${order.customerPhone ? `<p style="margin:0 0 4px;"><strong>Teléfono:</strong> ${order.customerPhone}</p>` : ""}
+    ${order.customerEmail ? `<p style="margin:0 0 16px;"><strong>Email:</strong> ${order.customerEmail}</p>` : ""}
+    <table style="width:100%;border-collapse:collapse;margin-bottom:16px;">${itemsHtml}</table>
+    ${deliveryHtml}
+    ${order.discountAmount > 0 ? `<p style="margin:0 0 4px;">Descuento: -${formatPrice(order.discountAmount)}</p>` : ""}
+    <p style="margin:0 0 4px;font-size:18px;font-weight:bold;">Total: ${formatPrice(order.total)}</p>
+    ${order.comment ? `<p style="margin:16px 0 4px;"><strong>Comentario del cliente:</strong></p><p style="margin:0 0 12px;white-space:pre-line;background:#15131a;border-radius:12px;padding:12px;">${order.comment}</p>` : ""}
+    ${depositHtml}
+    <p style="margin:20px 0 0;color:#a9a2b0;font-size:13px;">También lo vas a ver en el panel, pestaña "Pedidos".</p>
   `);
 }
 
@@ -619,6 +666,29 @@ function tintImageToColor(src, hex) {
     img.onerror = () => resolve(null);
     img.src = src;
   });
+}
+
+// Genera las 4 fotos de UN color a partir de una tanda de fotos base (ya
+// subidas a Storage o como dataURL), pintando cada zona disponible. Es el
+// mismo paso que usa AdminTemplateForm para "Foto base" — lo dejamos acá
+// arriba, fuera del componente, para que también lo pueda usar la carga
+// masiva por subcategoría (AdminBulkColorsBySubcategory) sin duplicar la
+// lógica. Si la subida a Storage falla, devuelve la imagen pintada tal cual
+// (más pesada) para no perder el color, marcando usedFallback.
+async function generateColorFromBaseImages(baseImages, hex) {
+  const zones = TEMPLATE_ZONE_DEFS.map((z) => z.key);
+  const result = {};
+  let usedFallback = false;
+  for (const zone of zones) {
+    const base = baseImages?.[zone];
+    if (!base) continue;
+    const tinted = await tintImageToColor(base, hex);
+    if (!tinted) continue;
+    const uploaded = await uploadDataUrlToStorage(tinted);
+    if (!uploaded) usedFallback = true;
+    result[zone] = uploaded || tinted;
+  }
+  return { images: result, usedFallback };
 }
 
 /* ------------------------------------------------------------------ */
@@ -3646,8 +3716,11 @@ function Catalog({ products, categories, groups, onOpen, initialQuery, initialGr
   if (onlyFavorites) products = products.filter((p) => favorites?.includes(p.id));
 
   let filtered = activeGroup === "Todas" ? products : products.filter((p) => (p.group || "") === activeGroup);
-  const catsInGroup = [...new Set(filtered.map((p) => p.category))].filter(Boolean);
-  filtered = activeCat === "Todas" ? filtered : filtered.filter((p) => p.category === activeCat);
+  // Un producto puede listarse en varias categorías a la vez sin duplicarse
+  // (ver "También listar en otras categorías" en el admin) — p.category es
+  // la principal, p.extraCategories las que se suman solo para mostrarlo acá.
+  const catsInGroup = [...new Set(filtered.flatMap((p) => [p.category, ...(p.extraCategories || [])]))].filter(Boolean);
+  filtered = activeCat === "Todas" ? filtered : filtered.filter((p) => p.category === activeCat || (p.extraCategories || []).includes(activeCat));
   // Un mismo diseño puede estar disponible en varias prendas a la vez
   // (comparten designGroup, ver "Modelos donde está disponible" / "Vincular
   // con otro estilo" en el admin) — acá se muestra una sola tarjeta por
@@ -3662,7 +3735,12 @@ function Catalog({ products, categories, groups, onOpen, initialQuery, initialGr
   });
   if (query.trim()) {
     const q = query.trim().toLowerCase();
-    filtered = filtered.filter((p) => p.name.toLowerCase().includes(q) || p.category.toLowerCase().includes(q));
+    filtered = filtered.filter(
+      (p) =>
+        p.name.toLowerCase().includes(q) ||
+        p.category.toLowerCase().includes(q) ||
+        (p.extraCategories || []).some((c) => c.toLowerCase().includes(q))
+    );
   }
 
   // Talles y colores para mostrar como opciones — solo los que existen dentro
@@ -5337,7 +5415,11 @@ function CartDrawer({ cart, onClose, onUpdateQty, onRemove, onCheckout, customer
 /*  Order confirmation                                                 */
 /* ------------------------------------------------------------------ */
 
-function OrderConfirm({ orderId, hasCustom, onClose }) {
+// El pedido ya queda guardado en el panel y le avisamos al dueño por mail
+// apenas se confirma — eso pasa siempre, sin depender de WhatsApp. El botón
+// de WhatsApp acá es solo una opción extra para el cliente que quiera avisar
+// también por ese medio, nunca un paso obligatorio del pedido.
+function OrderConfirm({ orderId, hasCustom, whatsappText, onClose }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.65)" }} onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} className="rounded-3xl p-8 max-w-sm w-full text-center" style={{ background: "var(--ink)", border: "1px solid var(--line)" }}>
@@ -5347,11 +5429,22 @@ function OrderConfirm({ orderId, hasCustom, onClose }) {
         <h3 className="kulto-display text-xl mb-2" style={{ color: "var(--bone)" }}>Pedido enviado</h3>
         <p className="text-sm mb-1" style={{ color: "var(--slate)" }}>Tu número de orden es:</p>
         <p className="font-bold text-lg mb-5" style={{ color: "var(--sun)" }}>{orderId}</p>
-        <p className="text-sm mb-3" style={{ color: "var(--slate)" }}>Confirma el envío en la ventana de WhatsApp que se abrió. Guarda este número por si necesitas escribirnos.</p>
+        <p className="text-sm mb-3" style={{ color: "var(--slate)" }}>Ya registramos tu pedido y te vamos a escribir para coordinar el pago y la entrega. Guarda este número por si necesitas escribirnos.</p>
         {hasCustom && (
           <p className="text-sm mb-6" style={{ color: "var(--sun)" }}>
-            Como incluye una prenda personalizada, puede demorar entre 3 y 7 días. Si la necesitás antes, avisanos por WhatsApp.
+            Como incluye una prenda personalizada, puede demorar entre 3 y 7 días. Si la necesitás antes, escribinos.
           </p>
+        )}
+        {whatsappText && (
+          <a
+            href={`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(whatsappText)}`}
+            target="_blank"
+            rel="noreferrer"
+            className="kulto-btn w-full rounded-full py-3 font-semibold mb-3 flex items-center justify-center gap-2"
+            style={{ background: "#25D366", color: "#0b1a12" }}
+          >
+            <MessageCircle size={18} /> Avisar también por WhatsApp
+          </a>
         )}
         <button onClick={onClose} className="kulto-btn w-full rounded-full py-3 font-semibold" style={{ background: "var(--ink-2)", color: "var(--bone)", border: "1px solid var(--line)" }}>
           Cerrar
@@ -6012,6 +6105,11 @@ const emptyDraft = {
   sizeGuide: [], // [{ size, measurements }] — guía de talles opcional, por prenda
   sizeGuideImage: null, // alternativa (o complemento) a la tabla: una foto con las medidas
   designGroup: "", // opcional: mismo texto en varios productos = "mismo diseño, otro estilo"
+  // Categorías ADEMÁS de la principal donde este MISMO producto (mismo id,
+  // mismo precio, mismo stock) también se lista — ver "También listar en
+  // otras categorías" más abajo. Distinto de designGroup/"Duplicar", que
+  // crean copias independientes con su propio precio y stock.
+  extraCategories: [],
 };
 
 function AdminProductForm({ categories, groups, onAddCategory, onAddGroup, savedColors, onSaveColorToLibrary, onRemoveColorFromLibrary, onSave, editing, onCancelEdit, defaultTemplate = false, allProducts = [] }) {
@@ -6553,6 +6651,42 @@ function AdminProductForm({ categories, groups, onAddCategory, onAddGroup, saved
           Si vendés el mismo diseño en varias prendas a distinto precio, escribí el mismo texto acá en cada una — el cliente va a ver un botón para pasar de un estilo al otro sin perder el diseño que le gustó.
         </p>
       </div>
+
+      {categories.filter((c) => c !== draft.category).length > 0 && (
+        <div className="rounded-2xl p-3" style={{ background: "var(--ink-3)", border: "1px dashed var(--line)" }}>
+          <label className="text-xs mb-1 block font-semibold" style={{ color: "var(--bone)" }}>También listar en otras categorías (opcional)</label>
+          <p className="text-xs mb-2" style={{ color: "var(--slate)" }}>
+            Es el MISMO producto (misma foto, mismo precio, mismo stock) — tildá en qué otras categorías también querés que aparezca. Si cambiás el precio o el stock, se actualiza en todas a la vez porque es uno solo. (Distinto de "Duplicar", más abajo, que crea copias independientes.)
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {categories.filter((c) => c !== draft.category).map((c) => {
+              const checked = (draft.extraCategories || []).includes(c);
+              return (
+                <label
+                  key={c}
+                  className="kulto-btn text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1.5 cursor-pointer"
+                  style={{ background: checked ? "var(--sun)" : "var(--ink)", color: checked ? "var(--ink)" : "var(--bone)", border: "1px solid var(--line)" }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() =>
+                      setDraft((d) => ({
+                        ...d,
+                        extraCategories: (d.extraCategories || []).includes(c)
+                          ? d.extraCategories.filter((x) => x !== c)
+                          : [...(d.extraCategories || []), c],
+                      }))
+                    }
+                    className="hidden"
+                  />
+                  {c}
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {categories.filter((c) => c !== draft.category).length > 0 && (
         <div className="rounded-2xl p-3" style={{ background: "var(--ink-3)", border: "1px dashed var(--line)" }}>
@@ -7176,21 +7310,7 @@ function AdminTemplateForm({ categories, templateProducts = [], onAddCategory, o
   // generada tal cual (más pesada) como respaldo para no perder el color —
   // pero avisamos con "usedFallback" porque guardar muchos colores así de
   // pesados es lo que puede hacer fallar el guardado del producto entero.
-  const generateColorFromBase = async (hex) => {
-    const zones = TEMPLATE_ZONE_DEFS.map((z) => z.key);
-    const result = {};
-    let usedFallback = false;
-    for (const zone of zones) {
-      const base = baseImages[zone];
-      if (!base) continue;
-      const tinted = await tintImageToColor(base, hex);
-      if (!tinted) continue;
-      const uploaded = await uploadDataUrlToStorage(tinted);
-      if (!uploaded) usedFallback = true;
-      result[zone] = uploaded || tinted;
-    }
-    return { images: result, usedFallback };
-  };
+  const generateColorFromBase = (hex) => generateColorFromBaseImages(baseImages, hex);
 
   // Genera y agrega de una todos los colores que estén esperando en la cola
   // de Roly, sin tener que subirles la foto uno por uno.
@@ -7264,8 +7384,18 @@ function AdminTemplateForm({ categories, templateProducts = [], onAddCategory, o
           sleeveRightImage: c.sleeveRightImage || null,
         })),
       });
+      // La foto base queda guardada junto con la prenda, así no hay que
+      // volver a subirla cada vez que se edita (y la carga masiva por
+      // subcategoría puede usarla sin pedírsela al admin de nuevo).
+      setBaseImages({
+        frontImage: editing.baseImages?.frontImage || null,
+        backImage: editing.baseImages?.backImage || null,
+        sleeveLeftImage: editing.baseImages?.sleeveLeftImage || null,
+        sleeveRightImage: editing.baseImages?.sleeveRightImage || null,
+      });
     } else {
       setDraft({ ...emptyTemplateDraft, category: categories[0] || "" });
+      setBaseImages({ frontImage: null, backImage: null, sleeveLeftImage: null, sleeveRightImage: null });
     }
     setColorDraft(emptyTemplateColorDraft);
     setEditingColorIdx(null);
@@ -7403,6 +7533,17 @@ function AdminTemplateForm({ categories, templateProducts = [], onAddCategory, o
       imageBackground: null,
       sizeGuide: draft.sizeGuide || [],
       sizeGuideImage: draft.sizeGuideImage || null,
+      // Guardamos la foto base junto con la prenda (si se cargó una) para no
+      // tener que volver a subirla cada vez, y para que "Aplicar colores a
+      // una subcategoría" pueda generar colores de esta prenda sin pedirla.
+      baseImages: hasBaseImages
+        ? {
+            frontImage: baseImages.frontImage || null,
+            backImage: baseImages.backImage || null,
+            sleeveLeftImage: baseImages.sleeveLeftImage || null,
+            sleeveRightImage: baseImages.sleeveRightImage || null,
+          }
+        : null,
       createdAt: editing?.createdAt || Date.now(),
       salesCount: editing?.salesCount || 0,
     };
@@ -9454,7 +9595,10 @@ function AdminBrandSettings({ settings, onSave }) {
     <div className="rounded-2xl p-5 flex flex-col gap-4 max-w-md" style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}>
       <h4 className="font-semibold" style={{ color: "var(--bone)" }}>Marca</h4>
       <p className="text-xs" style={{ color: "var(--slate)" }}>
-        Subí tu logo en PNG con fondo transparente para que se vea bien sobre el fondo oscuro. Se usa en la cabecera de la web y como ícono de la pestaña del navegador (favicon) — para el favicon, lo ideal es que sea cuadrado.
+        Subí tu logo en PNG con fondo transparente para que se vea bien sobre el fondo oscuro. Se usa en la cabecera de la web, como ícono de la pestaña del navegador (favicon) y como ícono de la app cuando alguien la instala en su celular — para que se vea bien en los tres lugares, que sea cuadrado. Al cambiarlo acá y guardar, ya queda listo: no hace falta tocar nada más ni volver a publicar el sitio.
+      </p>
+      <p className="text-xs" style={{ color: "var(--sun)" }}>
+        Ojo: en los celulares donde la app ya estaba instalada, el ícono nuevo puede tardar en aparecer (Android) o directamente no actualizarse (iPhone — ahí Apple no lo permite). Siempre se ve bien en las instalaciones nuevas.
       </p>
       <div className="flex items-center gap-4">
         <div
@@ -11051,6 +11195,205 @@ function AdminContactMessages({ messages, onUpdate, onDelete, onReply }) {
   );
 }
 
+// Agrega de una el mismo conjunto de colores (por número de Roly) a TODAS
+// las prendas de una categoría/subcategoría que ya tengan su propia "foto
+// base" cargada — así no hace falta abrir prenda por prenda para repetir la
+// misma tanda de colores en, por ejemplo, todos los cortes de "Camisetas".
+// Cada prenda se pinta a partir de SU PROPIA foto base (no se mezclan fotos
+// entre prendas), así que las que todavía no tengan una quedan afuera y se
+// avisan para subirla aparte.
+function AdminBulkColorsBySubcategory({ templateProducts = [], onSaveVerbose }) {
+  const [category, setCategory] = useState("");
+  const [subcategory, setSubcategory] = useState("");
+  const [rolyInput, setRolyInput] = useState("");
+  const [queue, setQueue] = useState([]);
+  const [notFound, setNotFound] = useState([]);
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState({ done: 0, total: 0 });
+  const [results, setResults] = useState([]); // [{id, name, status: "ok"|"error"|"skipped", detail}]
+
+  const categoryOptions = Array.from(new Set(templateProducts.map((p) => p.category).filter(Boolean)));
+  const subcategoryOptions = Array.from(
+    new Set(templateProducts.filter((p) => !category || p.category === category).map((p) => p.subcategory).filter(Boolean))
+  );
+
+  const matching = templateProducts.filter(
+    (p) => (!category || p.category === category) && (!subcategory || p.subcategory === subcategory)
+  );
+  const withBase = matching.filter((p) => p.baseImages?.frontImage);
+  const withoutBase = matching.filter((p) => !p.baseImages?.frontImage);
+
+  const addToQueue = () => {
+    if (!rolyInput.trim()) return;
+    const { found, notFound: nf } = lookupRolyColorsByNumbers(rolyInput);
+    setQueue((q) => {
+      const already = new Set(q.map((c) => c.name));
+      return [...q, ...found.filter((c) => !already.has(c.name))];
+    });
+    setNotFound(nf);
+    setRolyInput("");
+  };
+
+  const removeFromQueue = (i) => setQueue((q) => q.filter((_, idx) => idx !== i));
+
+  const run = async () => {
+    if (queue.length === 0 || withBase.length === 0 || running) return;
+    setRunning(true);
+    setResults([]);
+    setProgress({ done: 0, total: withBase.length });
+    const outcomes = [];
+    for (let i = 0; i < withBase.length; i++) {
+      const product = withBase[i];
+      const existingNames = new Set((product.colors || []).map((c) => c.name));
+      const toAdd = queue.filter((c) => !existingNames.has(c.name));
+      if (toAdd.length === 0) {
+        outcomes.push({ id: product.id, name: product.name, status: "skipped", detail: "ya tenía todos esos colores" });
+        setProgress({ done: i + 1, total: withBase.length });
+        continue;
+      }
+      try {
+        const newColors = [];
+        for (const c of toAdd) {
+          const { images: zones } = await generateColorFromBaseImages(product.baseImages, c.hex);
+          newColors.push({
+            name: c.name,
+            hex: c.hex,
+            images: [zones.frontImage, zones.backImage, zones.sleeveLeftImage, zones.sleeveRightImage].filter(Boolean),
+            frontImage: zones.frontImage || null,
+            backImage: zones.backImage || null,
+            sleeveLeftImage: zones.sleeveLeftImage || null,
+            sleeveRightImage: zones.sleeveRightImage || null,
+          });
+        }
+        const updated = { ...product, colors: [...(product.colors || []), ...newColors] };
+        const res = await onSaveVerbose(updated);
+        if (res && res.ok === false) {
+          outcomes.push({ id: product.id, name: product.name, status: "error", detail: res.error || "no se pudo guardar" });
+        } else {
+          outcomes.push({ id: product.id, name: product.name, status: "ok", detail: `${newColors.length} colores agregados` });
+        }
+      } catch (err) {
+        outcomes.push({ id: product.id, name: product.name, status: "error", detail: err?.message || "error inesperado" });
+      }
+      setProgress({ done: i + 1, total: withBase.length });
+      setResults([...outcomes]);
+    }
+    setRunning(false);
+  };
+
+  return (
+    <div className="rounded-2xl p-5 flex flex-col gap-4" style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}>
+      <div>
+        <h4 className="font-semibold" style={{ color: "var(--bone)" }}>Aplicar los mismos colores a varias prendas</h4>
+        <p className="text-xs mt-1" style={{ color: "var(--slate)" }}>
+          Elegí una categoría (y opcionalmente una subcategoría), pegá los números de Roly UNA sola vez, y se generan y guardan esos colores en todas las prendas que entren en ese grupo y ya tengan su propia "Foto base" cargada — cada una pintada con su propia foto, no se mezclan entre sí.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs mb-1 block" style={{ color: "var(--bone)" }}>Categoría</label>
+          <select
+            value={category}
+            onChange={(e) => { setCategory(e.target.value); setSubcategory(""); }}
+            className="w-full rounded-xl p-3 text-sm"
+            style={{ background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" }}
+          >
+            <option value="">Todas</option>
+            {categoryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs mb-1 block" style={{ color: "var(--bone)" }}>Subcategoría</label>
+          <select
+            value={subcategory}
+            onChange={(e) => setSubcategory(e.target.value)}
+            className="w-full rounded-xl p-3 text-sm"
+            style={{ background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" }}
+            disabled={subcategoryOptions.length === 0}
+          >
+            <option value="">Todas</option>
+            {subcategoryOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <div className="rounded-xl p-3 text-xs" style={{ background: "var(--ink-3)", border: "1px solid var(--line)" }}>
+        {matching.length === 0 ? (
+          <p style={{ color: "var(--slate)" }}>No hay prendas cargadas en ese grupo todavía.</p>
+        ) : (
+          <>
+            <p style={{ color: "var(--bone)" }}>
+              {withBase.length} de {matching.length} prenda{matching.length === 1 ? "" : "s"} en este grupo tiene{withBase.length === 1 ? "" : "n"} foto base y van a recibir los colores.
+            </p>
+            {withoutBase.length > 0 && (
+              <p className="mt-1" style={{ color: "var(--sun)" }}>
+                Sin foto base (no van a recibir nada acá, hay que subírsela primero abriéndolas una por una): {withoutBase.map((p) => p.name).join(", ")}
+              </p>
+            )}
+          </>
+        )}
+      </div>
+
+      <div>
+        <label className="text-xs mb-1 block" style={{ color: "var(--bone)" }}>Números de Roly (ej: "01, 47, 56, 777")</label>
+        <div className="flex gap-2">
+          <input
+            value={rolyInput}
+            onChange={(e) => setRolyInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addToQueue(); } }}
+            placeholder="132, 73, 276, 120..."
+            className="flex-1 rounded-xl p-3 text-sm"
+            style={{ background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" }}
+          />
+          <button onClick={addToQueue} className="kulto-btn rounded-xl px-4 text-sm font-semibold" style={{ background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" }}>
+            Agregar
+          </button>
+        </div>
+        {notFound.length > 0 && (
+          <p className="text-xs mt-1" style={{ color: "var(--signal)" }}>No encontrado en el catálogo Roly: {notFound.join(", ")}</p>
+        )}
+      </div>
+
+      {queue.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {queue.map((c, i) => (
+            <span key={c.name + i} className="text-xs px-2 py-1 rounded-full flex items-center gap-1" style={{ background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" }}>
+              <span className="w-3 h-3 rounded-full inline-block" style={{ background: c.hex, border: "1px solid var(--line)" }} />
+              {c.name}
+              <button onClick={() => removeFromQueue(i)} aria-label="Quitar" style={{ color: "var(--slate)" }}><X size={12} /></button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      <button
+        onClick={run}
+        disabled={running || queue.length === 0 || withBase.length === 0}
+        className="kulto-btn rounded-xl p-3 text-sm font-semibold"
+        style={{ background: "var(--sun)", color: "var(--ink)", opacity: running || queue.length === 0 || withBase.length === 0 ? 0.5 : 1 }}
+      >
+        {running
+          ? `Generando y guardando… (${progress.done}/${progress.total})`
+          : `Generar y guardar en ${withBase.length} prenda${withBase.length === 1 ? "" : "s"}`}
+      </button>
+      {running && (
+        <p className="text-xs" style={{ color: "var(--slate)" }}>Dejá esta pantalla abierta mientras termina — puede tardar varios minutos si son muchas prendas y colores.</p>
+      )}
+
+      {results.length > 0 && (
+        <div className="flex flex-col gap-1">
+          {results.map((r) => (
+            <p key={r.id} className="text-xs" style={{ color: r.status === "error" ? "var(--signal)" : r.status === "skipped" ? "var(--slate)" : "var(--bone)" }}>
+              {r.status === "ok" ? "✓" : r.status === "error" ? "✗" : "·"} {r.name}: {r.detail}
+            </p>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // La tarjeta de cada categoría (ej: "Camisetas") en el paso 1 de
 // "Personalizar" necesitaba una foto propia, elegida por el admin — antes se
 // tomaba automáticamente de cualquiera de los modelos de adentro (Oversize,
@@ -12210,6 +12553,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
               ))}
             </div>
           </div>
+          <AdminBulkColorsBySubcategory templateProducts={templateProducts} onSaveVerbose={onSaveProductVerbose} />
           <AdminPersonalizeGroupImages templateProducts={templateProducts} settings={settings} onSave={onSaveSettings} />
           <AdminPersonalizeSubcategoryPrices templateProducts={templateProducts} settings={settings} onSave={onSaveSettings} />
           <AdminDesignLibrary
@@ -12531,6 +12875,88 @@ function MarqueeStrip() {
         ))}
       </div>
     </div>
+  );
+}
+
+// Botón para instalar la web como app (PWA). En Android/Chrome el navegador
+// dispara el evento "beforeinstallprompt" y acá lo guardamos para poder
+// mostrar nuestro propio botón "Instalar" (en vez de esperar a que el
+// cliente encuentre la opción sola en el menú del navegador). En iPhone/iPad
+// (Safari) ese evento no existe — ahí la instalación es manual, así que
+// mostramos instrucciones paso a paso en vez de un botón que no haría nada.
+function InstallAppBanner() {
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [isIos, setIsIos] = useState(false);
+  const [showIosHelp, setShowIosHelp] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
+  const [installed, setInstalled] = useState(false);
+
+  useEffect(() => {
+    const isStandalone =
+      window.matchMedia?.("(display-mode: standalone)")?.matches || window.navigator.standalone === true;
+    setInstalled(isStandalone);
+    const ua = window.navigator.userAgent || "";
+    setIsIos(/iphone|ipad|ipod/i.test(ua) && !window.MSStream);
+    const handlePrompt = (e) => { e.preventDefault(); setDeferredPrompt(e); };
+    const handleInstalled = () => setInstalled(true);
+    window.addEventListener("beforeinstallprompt", handlePrompt);
+    window.addEventListener("appinstalled", handleInstalled);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", handlePrompt);
+      window.removeEventListener("appinstalled", handleInstalled);
+    };
+  }, []);
+
+  if (installed || dismissed) return null;
+  // Si el navegador no mandó el evento (no es Android/Chrome con soporte) y
+  // tampoco es iOS, no hay nada útil que ofrecer — no molestamos a nadie.
+  if (!deferredPrompt && !isIos) return null;
+
+  const handleInstallClick = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      await deferredPrompt.userChoice.catch(() => {});
+      setDeferredPrompt(null);
+      setDismissed(true);
+    } else if (isIos) {
+      setShowIosHelp(true);
+    }
+  };
+
+  return (
+    <>
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2 text-sm" style={{ background: "var(--sun)", color: "var(--ink)" }}>
+        <span className="flex items-center gap-2 font-semibold">
+          <Download size={16} /> Instalá Kulto como app en tu celular
+        </span>
+        <div className="flex items-center gap-2 shrink-0">
+          <button onClick={handleInstallClick} className="kulto-btn text-xs font-bold px-3 py-1.5 rounded-full" style={{ background: "var(--ink)", color: "var(--bone)" }}>
+            {deferredPrompt ? "Instalar" : "Cómo instalar"}
+          </button>
+          <button onClick={() => setDismissed(true)} className="kulto-btn p-1" style={{ color: "var(--ink)" }} aria-label="Cerrar aviso">
+            <X size={16} />
+          </button>
+        </div>
+      </div>
+      {showIosHelp && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.65)" }} onClick={() => setShowIosHelp(false)}>
+          <div onClick={(e) => e.stopPropagation()} className="rounded-2xl p-6 max-w-sm w-full" style={{ background: "var(--ink)", border: "1px solid var(--line)" }}>
+            <h4 className="font-semibold mb-3" style={{ color: "var(--bone)" }}>Instalar en iPhone/iPad — 2 toques</h4>
+            <p className="text-xs mb-3" style={{ color: "var(--slate)" }}>
+              En iPhone, Apple no deja que las webs se instalen solas con un botón — hay que hacerlo así (una sola vez):
+            </p>
+            <ol className="text-sm list-decimal pl-5 flex flex-col gap-2" style={{ color: "var(--slate)" }}>
+              <li>Tocá el botón <strong>Compartir</strong> (el cuadrado con la flecha hacia arriba, abajo en Safari).</li>
+              <li>Elegí <strong>"Agregar a pantalla de inicio"</strong>.</li>
+              <li>Tocá <strong>"Agregar"</strong> arriba a la derecha.</li>
+            </ol>
+            <button onClick={() => { setShowIosHelp(false); setDismissed(true); }} className="kulto-btn w-full rounded-full py-2.5 mt-5 font-semibold" style={{ background: "var(--ink-2)", color: "var(--bone)", border: "1px solid var(--line)" }}>
+              Entendido
+            </button>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -12926,6 +13352,7 @@ export default function App() {
   const [sending, setSending] = useState(false);
   const [confirmedOrderId, setConfirmedOrderId] = useState(null);
   const [confirmedHasCustom, setConfirmedHasCustom] = useState(false);
+  const [confirmedWhatsappText, setConfirmedWhatsappText] = useState(null);
   const [cartSavedAt, setCartSavedAt] = useState(null);
   const [showAbandonedBanner, setShowAbandonedBanner] = useState(false);
 
@@ -13104,6 +13531,51 @@ export default function App() {
     link.href = settings.logoImage;
   }, [settings.logoImage]);
 
+  // El logo que el admin sube en Ajustes → Marca también se usa como ícono
+  // de la app instalable (PWA) — así, cuando lo cambia, no hay que tocar
+  // código ni volver a publicar el sitio para que el ícono se actualice.
+  // Dos límites a tener en cuenta (son restricciones de cada sistema, no de
+  // Kulto): en Android/Chrome el ícono de una copia YA instalada se termina
+  // actualizando solo, pero no al instante (Chrome revisa el manifest cada
+  // tanto); en iPhone, Apple directamente NO deja actualizar el ícono de una
+  // copia que ya está en la pantalla de inicio — ahí el ícono nuevo sólo lo
+  // van a tener quienes la agreguen de ahí en adelante.
+  useEffect(() => {
+    if (!settings.logoImage) return;
+    let appleLink = document.querySelector("link[rel='apple-touch-icon']");
+    if (!appleLink) {
+      appleLink = document.createElement("link");
+      appleLink.rel = "apple-touch-icon";
+      document.head.appendChild(appleLink);
+    }
+    appleLink.href = settings.logoImage;
+
+    const storeName = settings.logoText || "Kulto";
+    const manifest = {
+      name: `${storeName} — Camisetas y ropa estampada`,
+      short_name: storeName,
+      description: "Camisetas, sudaderas y accesorios sublimados a tu manera.",
+      theme_color: "#15131A",
+      background_color: "#15131A",
+      display: "standalone",
+      start_url: "/",
+      scope: "/",
+      icons: [
+        { src: settings.logoImage, sizes: "192x192", type: "image/png" },
+        { src: settings.logoImage, sizes: "512x512", type: "image/png" },
+        { src: settings.logoImage, sizes: "512x512", type: "image/png", purpose: "maskable" },
+      ],
+    };
+    const manifestUrl = URL.createObjectURL(new Blob([JSON.stringify(manifest)], { type: "application/json" }));
+    let manifestLink = document.querySelector("link[rel='manifest']");
+    if (!manifestLink) {
+      manifestLink = document.createElement("link");
+      manifestLink.rel = "manifest";
+      document.head.appendChild(manifestLink);
+    }
+    manifestLink.href = manifestUrl;
+  }, [settings.logoImage, settings.logoText]);
+
   const cartCount = cart.reduce((s, it) => s + it.qty, 0);
   // Los productos marcados "oculto" por el admin (ver botón Ocultar/Mostrar
   // en el panel) no deben aparecer para el cliente en ningún lado — inicio,
@@ -13134,16 +13606,24 @@ export default function App() {
       trackingNumber: "",
       archived: false,
     };
-    // Abrimos WhatsApp ANTES de esperar cualquier guardado — si dejamos pasar
-    // varios "await" en el medio, algunos navegadores de celular (sobre todo
-    // Safari de iPhone) bloquean la ventana emergente por no considerarla ya
-    // una acción directa del toque del cliente.
-    openWhatsApp(buildOrderMessage(order, settings));
+    // El pedido ya NO depende de que WhatsApp se abra bien en el celular del
+    // cliente (en varios navegadores, sobre todo Safari de iPhone, el popup
+    // se bloqueaba y el pedido se podía perder sin que nadie se enterara).
+    // Ahora el camino garantizado es: se guarda en el panel (Pedidos, vía
+    // persistOrder) y se le avisa al dueño por mail — eso pasa siempre, sin
+    // depender del navegador ni del celular de nadie. WhatsApp queda como una
+    // opción más para el cliente (ver botón en la pantalla de confirmación),
+    // nunca como un paso obligatorio para que el pedido quede registrado.
     try {
       await persistOrder(order);
     } catch {
-      try { await persistOrder(order); } catch { /* still proceed — el pedido ya se mandó por WhatsApp */ }
+      try { await persistOrder(order); } catch { /* seguimos igual — el mail de aviso de abajo es el otro respaldo */ }
     }
+    sendEmail({
+      to: ADMIN_EMAIL,
+      subject: `Nuevo pedido ${order.id}`,
+      html: buildAdminOrderEmailHtml(order, settings),
+    }).catch(() => { /* nunca bloquear el checkout por esto */ });
     if (order.customerEmail) {
       sendEmail({
         to: order.customerEmail,
@@ -13186,6 +13666,7 @@ export default function App() {
     setShowAbandonedBanner(false);
     setSending(false);
     setCartOpen(false);
+    setConfirmedWhatsappText(buildOrderMessage(order, settings));
     setConfirmedOrderId(order.id);
     setConfirmedHasCustom(order.items.some((it) => it.designName?.startsWith("Personalizado")));
   };
@@ -13251,8 +13732,17 @@ export default function App() {
     const next = draftCategories.map((c) => (c === oldName ? newName : c));
     setDraftCategories(next);
     await persistDraftCategories(next);
-    const affected = draftProducts.filter((p) => p.category === oldName);
-    const updated = affected.map((p) => ({ ...p, category: newName }));
+    // Un producto puede tener esta categoría como principal, o solo de
+    // "también listar en" (extraCategories) — hay que renombrarla en ambos
+    // lados para que no quede una referencia vieja colgada.
+    const affected = draftProducts.filter(
+      (p) => p.category === oldName || (p.extraCategories || []).includes(oldName)
+    );
+    const updated = affected.map((p) => ({
+      ...p,
+      category: p.category === oldName ? newName : p.category,
+      extraCategories: (p.extraCategories || []).map((c) => (c === oldName ? newName : c)),
+    }));
     if (updated.length) {
       await Promise.all(updated.map((p) => persistDraftProduct(p)));
       setDraftProducts((prev) => prev.map((p) => updated.find((u) => u.id === p.id) || p));
@@ -13264,6 +13754,15 @@ export default function App() {
   const handleDeleteCategory = async (name) => {
     const inUse = draftProducts.some((p) => p.category === name);
     if (inUse) return { ok: false, reason: "en-uso" };
+    // Si esta categoría solo se usaba como "también listar en" (no como
+    // principal de ningún producto), se puede borrar igual — solo hay que
+    // sacarla de esas listas para que no quede una referencia colgada.
+    const affected = draftProducts.filter((p) => (p.extraCategories || []).includes(name));
+    if (affected.length) {
+      const updated = affected.map((p) => ({ ...p, extraCategories: p.extraCategories.filter((c) => c !== name) }));
+      await Promise.all(updated.map((p) => persistDraftProduct(p)));
+      setDraftProducts((prev) => prev.map((p) => updated.find((u) => u.id === p.id) || p));
+    }
     const next = draftCategories.filter((c) => c !== name);
     setDraftCategories(next);
     await persistDraftCategories(next);
@@ -13908,6 +14407,7 @@ export default function App() {
           </button>
         </div>
       )}
+      <InstallAppBanner />
       <MarqueeStrip />
       {showAbandonedBanner && (
         <AbandonedCartBanner
@@ -14085,7 +14585,7 @@ export default function App() {
         />
       )}
 
-      {confirmedOrderId && <OrderConfirm orderId={confirmedOrderId} hasCustom={confirmedHasCustom} onClose={() => setConfirmedOrderId(null)} />}
+      {confirmedOrderId && <OrderConfirm orderId={confirmedOrderId} hasCustom={confirmedHasCustom} whatsappText={confirmedWhatsappText} onClose={() => { setConfirmedOrderId(null); setConfirmedWhatsappText(null); }} />}
     </div>
   );
 }

@@ -2,10 +2,20 @@
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%2315131A'/%3E%3Ctext x='32' y='42' font-family='Arial, sans-serif' font-weight='900' font-size='28' fill='%23F4C430' text-anchor='middle'%3EK%3C/text%3E%3C/svg%3E" />
     <title>KULTO — Camisetas y ropa estampada</title>
     <meta name="description" content="Camisetas, sudaderas y accesorios sublimados a tu manera. Elige la prenda, el color y el diseño." />
+    <!-- Hace que la web se pueda "Instalar"/"Agregar a pantalla de inicio" como
+         una app (PWA). El manifest y el service worker los genera automática-
+         mente vite-plugin-pwa al compilar (ver vite.config.js) — no hace falta
+         escribirlos a mano ni tocar nada acá al actualizar el sitio. -->
+    <meta name="theme-color" content="#15131A" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Kulto" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   </head>
   <body>
     <div id="root"></div>
