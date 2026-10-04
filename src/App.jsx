@@ -8449,7 +8449,15 @@ function AdminBulkProductUpload({ categories, groups = [], allProducts = [], onS
   // física (camiseta, sudadera, etc). Por eso el nombre automático y el
   // agrupado de la lista de productos usan el grupo primero.
   const [group, setGroup] = useState("");
+  // Subcategoría (opcional) — queda guardada en cada producto creado (igual
+  // que en el formulario normal) y además se puede usar como el nombre de
+  // cada producto si se elige esa opción más abajo.
+  const [subcategory, setSubcategory] = useState("");
   const [baseName, setBaseName] = useState("");
+  // Cómo se nombra cada producto creado: "auto" = nombre base/subcategoría/
+  // grupo/categoría + número (como siempre); "filename" = el nombre del
+  // archivo tal cual está en la computadora del admin, sin la extensión.
+  const [namingMode, setNamingMode] = useState("auto");
   const [price, setPrice] = useState("");
   const [stock, setStock] = useState("0");
   const [uploading, setUploading] = useState(false);
@@ -8458,6 +8466,9 @@ function AdminBulkProductUpload({ categories, groups = [], allProducts = [], onS
   const [error, setError] = useState("");
   const inputStyle = { background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" };
   const ready = category && String(price).trim();
+  const subcategorySuggestions = Array.from(
+    new Set(allProducts.filter((p) => p.category === category && p.subcategory).map((p) => p.subcategory))
+  );
 
   const handleFiles = async (fileList) => {
     const files = Array.from(fileList || []).filter((f) => f.type === "image/png" || f.type === "image/jpeg");
@@ -8466,24 +8477,41 @@ function AdminBulkProductUpload({ categories, groups = [], allProducts = [], onS
     setError("");
     setDone(0);
     setTotal(files.length);
-    const name = baseName.trim() || group || category;
+    const name = baseName.trim() || subcategory.trim() || group || category;
     // Cada producto de esta tanda necesita su propio código (sku) — vamos
     // sumando los que ya creamos acá mismo a la lista de "usados", porque
     // todos comparten el mismo nombre base (ej: "Camisetas_01", "_02"...).
     let knownProducts = allProducts;
     let n = 0;
     let failed = 0;
+    // Para el modo "nombre del archivo": si dos fotos se llaman igual, a la
+    // repetida le agregamos "(2)", "(3)"... para no confundir una con otra.
+    const usedFileNames = new Set();
     for (const file of files) {
       n += 1;
       try {
         const isPng = file.type === "image/png";
         const b64 = await new Promise((resolve) => fileToBase64(file, resolve, 1400, isPng ? 1 : 0.88, isPng ? "image/png" : "image/jpeg"));
-        const productName = `${name}_${String(n).padStart(2, "0")}`;
+        let productName;
+        if (namingMode === "filename") {
+          const base = file.name.replace(/\.[^.]+$/, "").trim() || `foto_${n}`;
+          let candidate = base;
+          let dupe = 2;
+          while (usedFileNames.has(candidate)) {
+            candidate = `${base} (${dupe})`;
+            dupe += 1;
+          }
+          usedFileNames.add(candidate);
+          productName = candidate;
+        } else {
+          productName = `${name}_${String(n).padStart(2, "0")}`;
+        }
         const product = {
           id: genId("p"),
           name: productName,
           description: "",
           category,
+          subcategory: subcategory.trim(),
           group,
           price: Number(price) || 0,
           salePrice: null,
@@ -8535,11 +8563,36 @@ function AdminBulkProductUpload({ categories, groups = [], allProducts = [], onS
           {categories.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
         <input
-          placeholder="Nombre base (opcional — si lo dejás vacío usa el grupo o la categoría)"
+          list="bulk-subcategory-options"
+          placeholder="Subcategoría (opcional, ej: frutas)"
+          value={subcategory}
+          onChange={(e) => setSubcategory(e.target.value)}
+          className="rounded-xl p-2.5 text-sm flex-1 min-w-[160px]"
+          style={inputStyle}
+        />
+        <datalist id="bulk-subcategory-options">
+          {subcategorySuggestions.map((s) => <option key={s} value={s} />)}
+        </datalist>
+      </div>
+      <div>
+        <label className="text-xs mb-1 block" style={{ color: "var(--bone)" }}>¿Cómo se nombra cada producto?</label>
+        <div className="flex flex-wrap gap-4 text-xs" style={{ color: "var(--bone)" }}>
+          <label className="flex items-center gap-2">
+            <input type="radio" name="bulkNamingMode" checked={namingMode === "auto"} onChange={() => setNamingMode("auto")} />
+            Nombre automático + número (como siempre)
+          </label>
+          <label className="flex items-center gap-2">
+            <input type="radio" name="bulkNamingMode" checked={namingMode === "filename"} onChange={() => setNamingMode("filename")} />
+            El nombre del archivo, tal como está en tu computadora
+          </label>
+        </div>
+        <input
+          placeholder="Nombre base (opcional — si lo dejás vacío usa la subcategoría, el grupo o la categoría)"
           value={baseName}
           onChange={(e) => setBaseName(e.target.value)}
-          className="rounded-xl p-2.5 text-sm flex-1 min-w-[180px]"
-          style={inputStyle}
+          disabled={namingMode === "filename"}
+          className="rounded-xl p-2.5 text-sm w-full mt-2"
+          style={{ ...inputStyle, opacity: namingMode === "filename" ? 0.5 : 1 }}
         />
       </div>
       <div className="flex flex-wrap items-center gap-2">
