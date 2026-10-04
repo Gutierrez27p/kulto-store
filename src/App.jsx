@@ -838,11 +838,15 @@ async function storageGetMany(keys, shared) {
     const CHUNK_SIZE = 8;
     const chunks = [];
     for (let i = 0; i < keys.length; i += CHUNK_SIZE) chunks.push(keys.slice(i, i + CHUNK_SIZE));
+    // Las tandas se piden TODAS a la vez (antes se pedían una por una, de a
+    // una por vez) — cada una ya es chica y liviana, así que no hay motivo
+    // para esperar a que termine una para recién pedir la siguiente. Con
+    // varias tandas (ej: muchos productos) esto ahorra varias "idas y
+    // vueltas" al servidor, que es lo que más se nota en una conexión lejana
+    // o lenta.
     const out = {};
-    for (const chunk of chunks) {
-      const rows = await fetchChunk(chunk);
-      rows.forEach((row) => { out[row.key] = row.value; });
-    }
+    const results = await Promise.all(chunks.map((chunk) => fetchChunk(chunk)));
+    results.forEach((rows) => { rows.forEach((row) => { out[row.key] = row.value; }); });
     return out;
   } catch {
     return {};
@@ -13814,21 +13818,35 @@ export default function App() {
   // que se corta) hace que alguno de estos pedidos se cuelgue, antes la
   // página se quedaba mostrando el esqueleto de carga PARA SIEMPRE, sin
   // avisar nada — eso es lo que hacía "desaparecer" la web para algunos
-  // visitantes. Ahora, si pasan 15 segundos sin terminar de cargar, se
+  // visitantes. Ahora, si pasan 30 segundos sin terminar de cargar, se
   // corta la espera y se muestra un botón para reintentar en vez de dejar
-  // a la persona mirando una pantalla en blanco sin poder hacer nada.
+  // a la persona mirando una pantalla en blanco sin poder hacer nada. Son
+  // 30s (antes eran 15s) porque para alguien muy lejos del servidor (ej:
+  // Argentina, si el servidor está en Europa/EE.UU.) con una conexión de
+  // celular floja, 15s a veces no alcanzaban a terminar de traer todo y
+  // se mostraba el aviso de error aunque la tienda SÍ estaba funcionando
+  // bien, solo yendo más lenta.
   const [loadFailed, setLoadFailed] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setLoadFailed(false);
-    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 15000));
+    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 30000));
     (async () => {
       try {
-        const [prods, cats, grps, cartState, sett, revs, designs, folders, customWork, customerSessionEmail] = await Promise.race([
+        // Lo que hace falta para mostrar la tienda apenas entra alguien
+        // (catálogo, categorías, ajustes, carrito, reseñas, el carrusel de
+        // "trabajos personalizados" de la home) se pide primero y es lo
+        // único que bloquea la pantalla de carga. La librería de diseños
+        // para "Personalizar" (designLibrary/designFolders) solo hace falta
+        // cuando alguien abre esa sección puntual — se pide después, en
+        // segundo plano, sin hacer esperar a nadie que solo quiere mirar o
+        // comprar productos normales. Esto achica bastante la primera
+        // carga, que es la que más se siente en una conexión lejana o lenta.
+        const [prods, cats, grps, cartState, sett, revs, customWork, customerSessionEmail] = await Promise.race([
           Promise.all([
-            loadProducts(), loadCategories(), loadGroups(), loadCartState(), loadSettings(), loadReviews(), loadDesignLibrary(), loadDesignFolders(), loadCustomWorkGallery(), storageGet("kulto:customer-session", false),
+            loadProducts(), loadCategories(), loadGroups(), loadCartState(), loadSettings(), loadReviews(), loadCustomWorkGallery(), storageGet("kulto:customer-session", false),
           ]),
           timeout,
         ]);
@@ -13841,8 +13859,6 @@ export default function App() {
         setGroups(grps);
         setSettings(sett);
         setReviews(revs);
-        setDesignLibrary(designs);
-        setDesignFolders(folders);
         setCustomWorkGallery(customWork);
         setCart(cartState.items || []);
         setCustomerEmail(cartState.email || "");
@@ -13855,6 +13871,16 @@ export default function App() {
           setShowAbandonedBanner(true);
         }
         setLoading(false);
+        // Librería de diseños para "Personalizar" — en segundo plano, no
+        // bloquea la tienda. Si tarda o falla, simplemente queda vacía hasta
+        // que termine (o hasta que alguien reintente abriendo esa sección).
+        Promise.all([loadDesignLibrary(), loadDesignFolders()])
+          .then(([designs, folders]) => {
+            if (cancelled) return;
+            setDesignLibrary(designs);
+            setDesignFolders(folders);
+          })
+          .catch(() => {});
       } catch {
         if (!cancelled) {
           setLoadFailed(true);
