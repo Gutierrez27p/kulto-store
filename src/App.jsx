@@ -4,7 +4,7 @@ import {
   MessageCircle, Lock, Check, Shirt, Upload, Package, Star, Sparkles, ArrowRight,
   LogOut, Loader2, ZoomIn, ZoomOut, ArrowUp, ArrowDown, Quote, Instagram, Search, Heart, GripVertical, Info,
   Sun, Moon, RotateCw, Facebook, Music2, Mail, Phone, MapPin, HelpCircle, SlidersHorizontal, RotateCcw,
-  LayoutGrid, Eye, EyeOff, TrendingUp, UserPlus, KeyRound, Boxes, FolderPlus, ArrowLeft, Move, WifiOff, Download
+  LayoutGrid, Eye, EyeOff, TrendingUp, UserPlus, KeyRound, Boxes, FolderPlus, ArrowLeft, Move, WifiOff, Download, BarChart3
 } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
 
@@ -65,6 +65,7 @@ const ADMIN_TABS = [
   ["personalizar", "Personalizar"],
   ["pedidos", "Pedidos"],
   ["ventas", "Ventas"],
+  ["estadisticas", "Estadísticas"],
   ["compras", "Compras"],
   ["clientes", "Clientes"],
   ["resenas", "Reseñas"],
@@ -1461,6 +1462,13 @@ const DEFAULT_SETTINGS = {
   // Umbral de stock bajo para el apartado "Compras" del panel — ver
   // AdminRestockPanel.
   lowStockThreshold: 3,
+  // Link para mostrar las estadísticas de Google (Looker Studio) adentro de
+  // la pestaña "Estadísticas" del panel — ver AdminAnalyticsPanel. Google
+  // Analytics en sí no se puede "incrustar" dentro de otra página (Google no
+  // lo permite por seguridad), pero un reporte de Looker Studio (otra
+  // herramienta gratis de Google, conectada a los mismos datos) sí se puede
+  // insertar así, con gráficos reales actualizados solos.
+  analyticsEmbedUrl: "",
 };
 
 const HOME_SECTION_DEFS = [
@@ -9303,9 +9311,99 @@ function AdminSalesPanel({ products, orders, settings, onSaveSettings }) {
 /*  Compras — qué reponer o encargar, según stock y pedidos de aviso   */
 /* ------------------------------------------------------------------ */
 
+// Google Analytics en sí no se puede mostrar adentro de otra página (Google
+// no lo permite, por seguridad, ni siquiera para el dueño de la cuenta) —
+// pero Looker Studio (otra herramienta gratis de Google, que lee los mismos
+// datos de Analytics) sí permite insertar un reporte así, con gráficos
+// reales que se actualizan solos. Acá el admin pega el link de ESE reporte
+// una sola vez y después lo ve directo en esta pestaña, sin entrar a Google.
+function AdminAnalyticsPanel({ settings, onSaveSettings }) {
+  const [urlDraft, setUrlDraft] = useState(settings?.analyticsEmbedUrl || "");
+  const [editing, setEditing] = useState(!settings?.analyticsEmbedUrl);
+  const [saved, setSaved] = useState(false);
+
+  const save = async () => {
+    await onSaveSettings({ ...settings, analyticsEmbedUrl: urlDraft.trim() });
+    setSaved(true);
+    setEditing(false);
+    setTimeout(() => setSaved(false), 1800);
+  };
+
+  if (!editing && settings?.analyticsEmbedUrl) {
+    return (
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <BarChart3 size={18} style={{ color: "var(--sun)" }} />
+            <p className="text-sm font-semibold" style={{ color: "var(--bone)" }}>Estadísticas (Google Analytics / Looker Studio)</p>
+          </div>
+          <button onClick={() => { setUrlDraft(settings.analyticsEmbedUrl); setEditing(true); }} className="kulto-btn text-xs font-semibold rounded-lg px-3 py-2" style={{ background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" }}>
+            Cambiar link
+          </button>
+        </div>
+        <iframe
+          src={settings.analyticsEmbedUrl}
+          title="Estadísticas"
+          className="w-full rounded-2xl"
+          style={{ height: "80vh", border: "1px solid var(--line)", background: "var(--ink-2)" }}
+          allowFullScreen
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center gap-2">
+        <BarChart3 size={18} style={{ color: "var(--sun)" }} />
+        <p className="text-sm font-semibold" style={{ color: "var(--bone)" }}>Estadísticas (Google Analytics / Looker Studio)</p>
+      </div>
+      <p className="text-xs" style={{ color: "var(--slate)" }}>
+        Google no deja mostrar Analytics directamente dentro de otra página. La forma de tener tus estadísticas acá, sin entrar a Google cada vez, es crear un reporte gratis en Looker Studio (conectado a tu misma cuenta de Analytics) y pegar acá el link para "insertar" ese reporte:
+      </p>
+      <ol className="text-xs flex flex-col gap-1.5 list-decimal pl-4" style={{ color: "var(--slate)" }}>
+        <li>Entrá a <span style={{ color: "var(--bone)" }}>lookerstudio.google.com</span> con el mismo Gmail de Analytics y creá un "Informe en blanco".</li>
+        <li>Como fuente de datos, elegí el conector "Google Analytics" y seleccioná tu propiedad de Kulto.</li>
+        <li>Agregá los gráficos que quieras ver (Looker Studio trae plantillas ya armadas con un clic, si no querés armarlo a mano).</li>
+        <li>Arriba a la derecha, "Compartir" → "Insertar informe" → activalo y copiá el link que te da (empieza con lookerstudio.google.com/embed/...).</li>
+        <li>Pegá ese link acá abajo y guardá.</li>
+      </ol>
+      <input
+        placeholder="https://lookerstudio.google.com/embed/reporting/..."
+        value={urlDraft}
+        onChange={(e) => setUrlDraft(e.target.value)}
+        className="rounded-xl p-2.5 text-sm w-full"
+        style={{ background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" }}
+      />
+      <div className="flex items-center gap-2">
+        <button onClick={save} disabled={!urlDraft.trim()} className="kulto-btn text-sm font-semibold rounded-full px-4 py-2.5 self-start" style={{ background: saved ? "var(--sun)" : "var(--signal)", color: saved ? "var(--ink)" : "var(--bone)", opacity: !urlDraft.trim() ? 0.6 : 1 }}>
+          {saved ? "Guardado" : "Guardar"}
+        </button>
+        {settings?.analyticsEmbedUrl && (
+          <button onClick={() => setEditing(false)} className="kulto-btn text-xs font-semibold rounded-lg px-3 py-2" style={{ background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" }}>
+            Cancelar
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function AdminRestockPanel({ products, onQuickRestock, settings, onSaveSettings }) {
   const threshold = settings?.lowStockThreshold ?? 3;
   const lowStock = products.filter((p) => (p.stock ?? 0) <= threshold).sort((a, b) => (a.stock ?? 0) - (b.stock ?? 0));
+  // Se agrupan por grupo/temática (ej: "anime", "kulto") en vez de mostrar
+  // todo junto en una sola lista larga — igual que en la pestaña
+  // "Productos", para que sea más fácil ubicar qué carpeta conviene
+  // reponer. Empiezan todas desplegadas (no se esconde nada, solo se
+  // organiza), pero se pueden plegar para ver menos de una vez.
+  const groupedLowStock = lowStock.reduce((acc, p) => {
+    const grp = p.group || "Sin grupo / temática";
+    (acc[grp] = acc[grp] || []).push(p);
+    return acc;
+  }, {});
+  const [collapsedGroups, setCollapsedGroups] = useState([]);
+  const toggleGroup = (grp) => setCollapsedGroups((prev) => (prev.includes(grp) ? prev.filter((g) => g !== grp) : [...prev, grp]));
 
   const [subscriberCounts, setSubscriberCounts] = useState({});
   useEffect(() => {
@@ -9365,28 +9463,49 @@ function AdminRestockPanel({ products, onQuickRestock, settings, onSaveSettings 
       {lowStock.length === 0 ? (
         <EmptyState text="Por ahora ninguna prenda está por debajo del umbral de stock bajo." />
       ) : (
-        <div className="flex flex-col gap-2">
-          {lowStock.map((p) => (
-            <div key={p.id} className="rounded-xl p-3 flex flex-wrap items-center gap-3" style={{ background: "var(--ink-2)", border: (p.stock ?? 0) <= 0 ? "1px solid var(--signal)" : "1px solid var(--line)" }}>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold truncate" style={{ color: "var(--bone)" }}>{p.name}</p>
-                <p className="text-xs" style={{ color: (p.stock ?? 0) <= 0 ? "var(--signal)" : "var(--slate)" }}>
-                  {p.category} · Stock: {p.stock ?? 0}
-                  {subscriberCounts[p.id] > 0 && ` · ${subscriberCounts[p.id]} cliente${subscriberCounts[p.id] === 1 ? "" : "s"} esperando aviso`}
-                </p>
+        <div className="flex flex-col gap-3">
+          {Object.entries(groupedLowStock).map(([grp, items]) => {
+            const isOpen = !collapsedGroups.includes(grp);
+            return (
+              <div key={grp} className="rounded-2xl overflow-hidden" style={{ border: "1px solid var(--line)" }}>
+                <button
+                  type="button"
+                  onClick={() => toggleGroup(grp)}
+                  className="kulto-btn w-full flex items-center gap-2 p-3 text-left"
+                  style={{ background: "var(--ink-2)" }}
+                >
+                  {isOpen ? <ChevronDown size={16} color="var(--slate)" /> : <ChevronRight size={16} color="var(--slate)" />}
+                  <span className="text-sm font-semibold flex-1" style={{ color: "var(--bone)" }}>{grp}</span>
+                  <span className="text-xs" style={{ color: "var(--slate)" }}>{items.length} prenda{items.length === 1 ? "" : "s"}</span>
+                </button>
+                {isOpen && (
+                  <div className="flex flex-col gap-2 p-2 pt-0" style={{ background: "var(--ink-2)" }}>
+                    {items.map((p) => (
+                      <div key={p.id} className="rounded-xl p-3 flex flex-wrap items-center gap-3" style={{ background: "var(--ink-3)", border: (p.stock ?? 0) <= 0 ? "1px solid var(--signal)" : "1px solid var(--line)" }}>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold truncate" style={{ color: "var(--bone)" }}>{p.name}</p>
+                          <p className="text-xs" style={{ color: (p.stock ?? 0) <= 0 ? "var(--signal)" : "var(--slate)" }}>
+                            {p.category}{p.subcategory ? ` · ${p.subcategory}` : ""} · Stock: {p.stock ?? 0}
+                            {subscriberCounts[p.id] > 0 && ` · ${subscriberCounts[p.id]} cliente${subscriberCounts[p.id] === 1 ? "" : "s"} esperando aviso`}
+                          </p>
+                        </div>
+                        <input
+                          type="number" min="1" placeholder="Cant."
+                          value={addDrafts[p.id] || ""}
+                          onChange={(e) => setAddDrafts((d) => ({ ...d, [p.id]: e.target.value }))}
+                          className="w-20 rounded-lg p-2 text-sm text-center"
+                          style={{ background: "var(--ink)", color: "var(--bone)", border: "1px solid var(--line)" }}
+                        />
+                        <button onClick={() => addStock(p)} className="kulto-btn text-xs font-semibold rounded-lg px-3 py-2" style={{ background: savedId === p.id ? "var(--sun)" : "var(--signal)", color: savedId === p.id ? "var(--ink)" : "var(--bone)" }}>
+                          {savedId === p.id ? "Sumado" : "Sumar stock"}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-              <input
-                type="number" min="1" placeholder="Cant."
-                value={addDrafts[p.id] || ""}
-                onChange={(e) => setAddDrafts((d) => ({ ...d, [p.id]: e.target.value }))}
-                className="w-20 rounded-lg p-2 text-sm text-center"
-                style={{ background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" }}
-              />
-              <button onClick={() => addStock(p)} className="kulto-btn text-xs font-semibold rounded-lg px-3 py-2" style={{ background: savedId === p.id ? "var(--sun)" : "var(--signal)", color: savedId === p.id ? "var(--ink)" : "var(--bone)" }}>
-                {savedId === p.id ? "Sumado" : "Sumar stock"}
-              </button>
-            </div>
-          ))}
+            );
+          })}
           <p className="text-xs" style={{ color: "var(--slate)" }}>
             Sumar stock acá lo hace directo, sin pasar por "Publicar cambios" — si el stock pasa de 0 para arriba, se les avisa por mail automáticamente a los clientes que pidieron que les notifiquen.
           </p>
@@ -12866,6 +12985,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
 
       {tab === "pedidos" && <AdminOrders orders={orders} onToggleStatus={onToggleOrderStatus} onUpdateTracking={onUpdateTracking} onApplyDiscount={onApplyDiscount} onRequestReview={onRequestReview} onBulkComplete={onBulkComplete} onBulkArchive={onBulkArchive} onBulkDelete={onBulkDelete} />}
       {tab === "ventas" && <AdminSalesPanel products={sellableProducts} orders={orders} settings={settings} onSaveSettings={onSaveSettings} />}
+      {tab === "estadisticas" && <AdminAnalyticsPanel settings={settings} onSaveSettings={onSaveSettings} />}
       {tab === "compras" && <AdminRestockPanel products={sellableProducts} onQuickRestock={onQuickRestock} settings={settings} onSaveSettings={onSaveSettings} />}
       {tab === "clientes" && <AdminCustomers customers={customers} onAdjustPoints={onAdjustCustomerPoints} loyaltyThreshold={settings?.loyaltyRewardThreshold} isOwner={isOwner} onSetAdminPermissions={onSetAdminPermissions} onDeleteCustomer={onDeleteCustomer} onCreateCustomer={onCreateCustomer} onUpdateCustomerInfo={onUpdateCustomerInfo} onSendPasswordHelp={onSendPasswordHelp} />}
       {tab === "resenas" && <AdminReviews reviews={reviews} onSave={onSaveReview} onDelete={onDeleteReview} onReorder={onReorderReview} />}
