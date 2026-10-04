@@ -332,6 +332,7 @@ function buildOrderMessage(order, settings) {
   order.items.forEach((it, i) => {
     lines.push(`${i + 1}. ${it.name}  (ref. ${it.sku})`);
     lines.push(`   Categoría: ${it.category}`);
+    if (it.subcategory) lines.push(`   Modelo: ${it.subcategory}`);
     lines.push(`   Color: ${it.colorName}`);
     if (it.size) lines.push(`   Talle: ${it.size}`);
     if (it.designName) lines.push(`   Diseño: ${it.designName}`);
@@ -485,13 +486,20 @@ function buildReviewRequestEmailHtml(order, settings) {
 
 function buildOrderEmailHtml(order, settings) {
   const storeName = settings?.logoText || "Kulto";
+  // El detalle de cada prenda se muestra como una lista de campos con su
+  // nombre (Ítem/Modelo/Talla/Color/Diseño) en vez de una sola línea corrida
+  // — para que el cliente vea reflejado, tal cual, lo que eligió al comprar.
   const itemsHtml = order.items.map((it) => `
     <tr>
       <td style="padding:8px 0;border-bottom:1px solid #2c2833;">
-        <p style="margin:0;font-weight:bold;">${it.name} ${it.qty > 1 ? `× ${it.qty}` : ""}</p>
-        <p style="margin:2px 0 0;font-size:13px;color:#a9a2b0;">
-          ${it.colorName || ""}${it.size ? ` · Talle ${it.size}` : ""}${it.designName ? ` · ${it.designName}` : ""}
-        </p>
+        <p style="margin:0 0 4px;font-weight:bold;">${it.name} ${it.qty > 1 ? `× ${it.qty}` : ""}</p>
+        <table style="font-size:13px;color:#a9a2b0;border-collapse:collapse;">
+          <tr><td style="padding:1px 6px 1px 0;">Ítem:</td><td>${it.category || "—"}</td></tr>
+          ${it.subcategory ? `<tr><td style="padding:1px 6px 1px 0;">Modelo:</td><td>${it.subcategory}</td></tr>` : ""}
+          ${it.size ? `<tr><td style="padding:1px 6px 1px 0;">Talla:</td><td>${it.size}</td></tr>` : ""}
+          <tr><td style="padding:1px 6px 1px 0;">Color:</td><td>${it.colorName || "—"}</td></tr>
+          ${it.designName ? `<tr><td style="padding:1px 6px 1px 0;vertical-align:top;">Diseño:</td><td>${it.designName}</td></tr>` : ""}
+        </table>
       </td>
       <td style="padding:8px 0;border-bottom:1px solid #2c2833;text-align:right;white-space:nowrap;">${formatPrice(it.unitPrice * it.qty)}</td>
     </tr>
@@ -521,13 +529,22 @@ function buildOrderEmailHtml(order, settings) {
 // popup), así que podía perderse un pedido sin que nadie se diera cuenta.
 function buildAdminOrderEmailHtml(order, settings) {
   const storeName = settings?.logoText || "Kulto";
+  // El detalle de cada prenda se muestra como una lista de campos con su
+  // nombre (Ítem/Modelo/Talla/Color/Diseño) en vez de una sola línea corrida
+  // — es la misma información que el cliente eligió al comprar, pero así se
+  // lee de un vistazo sin tener que descifrar qué es cada dato.
   const itemsHtml = order.items.map((it) => `
     <tr>
       <td style="padding:8px 0;border-bottom:1px solid #2c2833;">
-        <p style="margin:0;font-weight:bold;">${it.name} ${it.qty > 1 ? `× ${it.qty}` : ""}</p>
-        <p style="margin:2px 0 0;font-size:13px;color:#a9a2b0;">
-          ${it.colorName || ""}${it.size ? ` · Talle ${it.size}` : ""}${it.designName ? ` · ${it.designName}` : ""}${it.sku ? ` · ref. ${it.sku}` : ""}
-        </p>
+        <p style="margin:0 0 4px;font-weight:bold;">${it.name} ${it.qty > 1 ? `× ${it.qty}` : ""}</p>
+        <table style="font-size:13px;color:#a9a2b0;border-collapse:collapse;">
+          <tr><td style="padding:1px 6px 1px 0;">Ítem:</td><td>${it.category || "—"}</td></tr>
+          ${it.subcategory ? `<tr><td style="padding:1px 6px 1px 0;">Modelo:</td><td>${it.subcategory}</td></tr>` : ""}
+          ${it.size ? `<tr><td style="padding:1px 6px 1px 0;">Talla:</td><td>${it.size}</td></tr>` : ""}
+          <tr><td style="padding:1px 6px 1px 0;">Color:</td><td>${it.colorName || "—"}</td></tr>
+          ${it.designName ? `<tr><td style="padding:1px 6px 1px 0;vertical-align:top;">Diseño:</td><td>${it.designName}</td></tr>` : ""}
+        </table>
+        <p style="margin:4px 0 0;font-size:11px;color:#6f6878;">ref. ${it.sku}</p>
         ${(it.designImage || it.previewImageFront || it.previewImageBack || it.previewImageSleeveLeft || it.previewImageSleeveRight) ? `<p style="margin:2px 0 0;font-size:12px;color:#E8452C;">(tiene imagen de diseño o vista previa — se ve en el panel, pestaña Pedidos)</p>` : ""}
       </td>
       <td style="padding:8px 0;border-bottom:1px solid #2c2833;text-align:right;white-space:nowrap;">${formatPrice(it.unitPrice * it.qty)}</td>
@@ -2046,6 +2063,7 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
       sku: product.sku || product.id,
       name: product.name,
       category: product.category,
+      subcategory: product.subcategory || "",
       colorName: qColor ? qColor.name : "Único",
       colorHex: qColor ? qColor.hex : "#999",
       size: hasSizes ? product.sizes[quickSizeIdx] : null,
@@ -2470,6 +2488,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
       sku: product.sku || product.id,
       name: product.name,
       category: product.category,
+      subcategory: product.subcategory || "",
       colorName: color ? color.name : "Único",
       colorHex: color ? color.hex : "#999",
       size,
@@ -4700,6 +4719,7 @@ function Wizard({ products, categories, settings, designLibrary, designFolders, 
       sku: prod.sku || prod.id,
       name: prod.name,
       category: prod.category,
+      subcategory: prod.subcategory || "",
       colorName: color ? color.name : "Único",
       colorHex: color ? color.hex : "#999",
       size,
@@ -8927,6 +8947,12 @@ function AdminOrders({ orders, onToggleStatus, onUpdateTracking, onApplyDiscount
   const [discountDrafts, setDiscountDrafts] = useState({});
   const [discountSavedId, setDiscountSavedId] = useState(null);
   const [reviewRequestState, setReviewRequestState] = useState({}); // { [orderId]: "sending" | "ok" | "error" }
+  // Vista "básica" (por defecto) vs "detallada" de los artículos de un pedido
+  // — básica muestra solo lo que el cliente eligió (ítem, modelo, talla,
+  // color, diseño); detallada agrega el resto (código/sku, imágenes de
+  // diseño o vista previa que subió el cliente).
+  const [detailedIds, setDetailedIds] = useState([]);
+  const toggleDetailed = (id) => setDetailedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
   const requestReview = async (o) => {
     setReviewRequestState((s) => ({ ...s, [o.id]: "sending" }));
@@ -9063,39 +9089,58 @@ function AdminOrders({ orders, onToggleStatus, onUpdateTracking, onApplyDiscount
             </div>
             {openId === o.id && (
               <div className="mt-3 pt-3 flex flex-col gap-2" style={{ borderTop: "1px solid var(--line)" }}>
+                <button
+                  onClick={() => toggleDetailed(o.id)}
+                  className="kulto-btn text-xs font-semibold self-start px-2.5 py-1 rounded-full"
+                  style={{ background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" }}
+                >
+                  {detailedIds.includes(o.id) ? "Ver básico" : "Ver detallado"}
+                </button>
                 {o.items.map((it, i) => (
-                  <div key={i} className="flex items-start gap-2">
-                    <p className="text-xs flex-1" style={{ color: "var(--slate)" }}>
-                      {i + 1}. {it.name} · {it.colorName}{it.size ? ` · Talle ${it.size}` : ""}{it.designName ? ` · ${it.designName}` : ""} · x{it.qty} · {formatPrice(it.unitPrice)}
-                    </p>
-                    {it.designImage && (
-                      <a href={it.designImage} target="_blank" rel="noreferrer" className="kulto-btn shrink-0 w-10 h-10 rounded-lg overflow-hidden" style={{ border: "1px solid var(--sun)" }} title="Ver diseño que subió el cliente">
-                        <img loading="lazy" src={it.designImage} className="w-full h-full object-cover" alt="Diseño del cliente" />
-                      </a>
-                    )}
-                    {it.previewImageFront && (
-                      <a href={it.previewImageFront} target="_blank" rel="noreferrer" className="kulto-btn shrink-0 w-10 h-10 rounded-lg overflow-hidden relative" style={{ border: "1px solid var(--sun)" }} title="Ver cómo quedó adelante">
-                        <img loading="lazy" src={it.previewImageFront} className="w-full h-full object-cover" alt="Adelante" />
-                        <span className="absolute bottom-0 left-0 right-0 text-center text-[7px] font-bold" style={{ background: "rgba(21,19,26,0.8)", color: "var(--sun)" }}>ADEL.</span>
-                      </a>
-                    )}
-                    {it.previewImageBack && (
-                      <a href={it.previewImageBack} target="_blank" rel="noreferrer" className="kulto-btn shrink-0 w-10 h-10 rounded-lg overflow-hidden relative" style={{ border: "1px solid var(--sun)" }} title="Ver cómo quedó atrás">
-                        <img loading="lazy" src={it.previewImageBack} className="w-full h-full object-cover" alt="Atrás" />
-                        <span className="absolute bottom-0 left-0 right-0 text-center text-[7px] font-bold" style={{ background: "rgba(21,19,26,0.8)", color: "var(--sun)" }}>ATRÁS</span>
-                      </a>
-                    )}
-                    {it.previewImageSleeveLeft && (
-                      <a href={it.previewImageSleeveLeft} target="_blank" rel="noreferrer" className="kulto-btn shrink-0 w-10 h-10 rounded-lg overflow-hidden relative" style={{ border: "1px solid var(--sun)" }} title="Ver cómo quedó la manga izquierda">
-                        <img loading="lazy" src={it.previewImageSleeveLeft} className="w-full h-full object-cover" alt="Manga izquierda" />
-                        <span className="absolute bottom-0 left-0 right-0 text-center text-[6px] font-bold" style={{ background: "rgba(21,19,26,0.8)", color: "var(--sun)" }}>M.IZQ.</span>
-                      </a>
-                    )}
-                    {it.previewImageSleeveRight && (
-                      <a href={it.previewImageSleeveRight} target="_blank" rel="noreferrer" className="kulto-btn shrink-0 w-10 h-10 rounded-lg overflow-hidden relative" style={{ border: "1px solid var(--sun)" }} title="Ver cómo quedó la manga derecha">
-                        <img loading="lazy" src={it.previewImageSleeveRight} className="w-full h-full object-cover" alt="Manga derecha" />
-                        <span className="absolute bottom-0 left-0 right-0 text-center text-[6px] font-bold" style={{ background: "rgba(21,19,26,0.8)", color: "var(--sun)" }}>M.DER.</span>
-                      </a>
+                  <div key={i} className="flex items-start gap-2 rounded-lg p-2" style={{ background: "var(--ink-3)" }}>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold" style={{ color: "var(--bone)" }}>{i + 1}. {it.name}{it.qty > 1 ? ` × ${it.qty}` : ""} — {formatPrice(it.unitPrice)}</p>
+                      <div className="text-xs mt-1" style={{ color: "var(--slate)" }}>
+                        <p>Ítem: {it.category || "—"}</p>
+                        {it.subcategory && <p>Modelo: {it.subcategory}</p>}
+                        {it.size && <p>Talla: {it.size}</p>}
+                        <p>Color: {it.colorName || "—"}</p>
+                        {it.designName && <p>Diseño: {it.designName}</p>}
+                        {detailedIds.includes(o.id) && <p>Ref. (sku): {it.sku}</p>}
+                      </div>
+                    </div>
+                    {detailedIds.includes(o.id) && (
+                      <div className="flex items-start gap-2 shrink-0">
+                        {it.designImage && (
+                          <a href={it.designImage} target="_blank" rel="noreferrer" className="kulto-btn shrink-0 w-10 h-10 rounded-lg overflow-hidden" style={{ border: "1px solid var(--sun)" }} title="Ver diseño que subió el cliente">
+                            <img loading="lazy" src={it.designImage} className="w-full h-full object-cover" alt="Diseño del cliente" />
+                          </a>
+                        )}
+                        {it.previewImageFront && (
+                          <a href={it.previewImageFront} target="_blank" rel="noreferrer" className="kulto-btn shrink-0 w-10 h-10 rounded-lg overflow-hidden relative" style={{ border: "1px solid var(--sun)" }} title="Ver cómo quedó adelante">
+                            <img loading="lazy" src={it.previewImageFront} className="w-full h-full object-cover" alt="Adelante" />
+                            <span className="absolute bottom-0 left-0 right-0 text-center text-[7px] font-bold" style={{ background: "rgba(21,19,26,0.8)", color: "var(--sun)" }}>ADEL.</span>
+                          </a>
+                        )}
+                        {it.previewImageBack && (
+                          <a href={it.previewImageBack} target="_blank" rel="noreferrer" className="kulto-btn shrink-0 w-10 h-10 rounded-lg overflow-hidden relative" style={{ border: "1px solid var(--sun)" }} title="Ver cómo quedó atrás">
+                            <img loading="lazy" src={it.previewImageBack} className="w-full h-full object-cover" alt="Atrás" />
+                            <span className="absolute bottom-0 left-0 right-0 text-center text-[7px] font-bold" style={{ background: "rgba(21,19,26,0.8)", color: "var(--sun)" }}>ATRÁS</span>
+                          </a>
+                        )}
+                        {it.previewImageSleeveLeft && (
+                          <a href={it.previewImageSleeveLeft} target="_blank" rel="noreferrer" className="kulto-btn shrink-0 w-10 h-10 rounded-lg overflow-hidden relative" style={{ border: "1px solid var(--sun)" }} title="Ver cómo quedó la manga izquierda">
+                            <img loading="lazy" src={it.previewImageSleeveLeft} className="w-full h-full object-cover" alt="Manga izquierda" />
+                            <span className="absolute bottom-0 left-0 right-0 text-center text-[6px] font-bold" style={{ background: "rgba(21,19,26,0.8)", color: "var(--sun)" }}>M.IZQ.</span>
+                          </a>
+                        )}
+                        {it.previewImageSleeveRight && (
+                          <a href={it.previewImageSleeveRight} target="_blank" rel="noreferrer" className="kulto-btn shrink-0 w-10 h-10 rounded-lg overflow-hidden relative" style={{ border: "1px solid var(--sun)" }} title="Ver cómo quedó la manga derecha">
+                            <img loading="lazy" src={it.previewImageSleeveRight} className="w-full h-full object-cover" alt="Manga derecha" />
+                            <span className="absolute bottom-0 left-0 right-0 text-center text-[6px] font-bold" style={{ background: "rgba(21,19,26,0.8)", color: "var(--sun)" }}>M.DER.</span>
+                          </a>
+                        )}
+                      </div>
                     )}
                   </div>
                 ))}
