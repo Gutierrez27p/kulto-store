@@ -6131,6 +6131,10 @@ const emptyDraft = {
   // otras categorías" más abajo. Distinto de designGroup/"Duplicar", que
   // crean copias independientes con su propio precio y stock.
   extraCategories: [],
+  // Foto base (frente/espalda) para generar los demás colores solos — igual
+  // que en Personalizar. Se guarda junto con la prenda para no tener que
+  // volver a subirla cada vez que se agrega un color nuevo.
+  baseImages: null,
 };
 
 function AdminProductForm({ categories, groups, onAddCategory, onAddGroup, savedColors, onSaveColorToLibrary, onRemoveColorFromLibrary, onSave, editing, onCancelEdit, defaultTemplate = false, allProducts = [] }) {
@@ -6152,6 +6156,12 @@ function AdminProductForm({ categories, groups, onAddCategory, onAddGroup, saved
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState("");
+  // Foto base (frente/espalda) para generar automáticamente los demás
+  // colores de esta prenda — igual técnica que usa Personalizar.
+  const [baseImagesForColors, setBaseImagesForColors] = useState({ frontImage: null, backImage: null });
+  const [removingBaseBg, setRemovingBaseBg] = useState(false);
+  const [autoGenerating, setAutoGenerating] = useState(false);
+  const [autoFromBase, setAutoFromBase] = useState(true);
   // Al crear una prenda nueva, la mostramos paso a paso (como Personalizar) en
   // vez de un formulario larguísimo de una — más fácil de seguir sin perderse.
   // Al editar una ya existente dejamos todo visible junto, como hasta ahora,
@@ -6187,6 +6197,7 @@ function AdminProductForm({ categories, groups, onAddCategory, onAddGroup, saved
     setCustomSize("");
     setShowAdvanced(false);
     setAiError("");
+    setBaseImagesForColors({ frontImage: editing?.baseImages?.frontImage || null, backImage: editing?.baseImages?.backImage || null });
     setStep(1);
   }, [editing, defaultTemplate]);
 
@@ -6313,6 +6324,32 @@ function AdminProductForm({ categories, groups, onAddCategory, onAddGroup, saved
     });
   };
 
+  // Foto base para generar colores solos (ver sección "Generar colores
+  // automáticamente" más abajo) — misma técnica que usa Personalizar, pero
+  // acá solo con frente/espalda (sin mangas por separado).
+  const hasBaseImagesForColors = !!baseImagesForColors.frontImage;
+  const handleBaseColorZoneUpload = (zone, file) => {
+    if (!file) return;
+    const isPng = file.type === "image/png";
+    fileToBase64(file, (b64) => setBaseImagesForColors((b) => ({ ...b, [zone]: b64 })), 1400, isPng ? 1 : 0.9, isPng ? "image/png" : "image/jpeg");
+  };
+  const removeBaseColorZoneImage = (zone) => setBaseImagesForColors((b) => ({ ...b, [zone]: null }));
+  // Les quita el fondo a las fotos base de una — para que el recoloreado
+  // pinte solo la prenda y no el fondo de la foto.
+  const handleRemoveBaseColorBackground = async () => {
+    setRemovingBaseBg(true);
+    for (const zone of ["frontImage", "backImage"]) {
+      const current = baseImagesForColors[zone];
+      if (!current) continue;
+      const cleaned = await removeImageBackground(current);
+      if (cleaned) {
+        const uploaded = await uploadDataUrlToStorage(cleaned);
+        setBaseImagesForColors((b) => ({ ...b, [zone]: uploaded || cleaned }));
+      }
+    }
+    setRemovingBaseBg(false);
+  };
+
   const handleAiFill = async () => {
     if (!draft.photoPool.length) return;
     setAiLoading(true);
@@ -6334,16 +6371,27 @@ function AdminProductForm({ categories, groups, onAddCategory, onAddGroup, saved
     }
   };
 
-  const addColor = () => {
+  const addColor = async () => {
     // La foto ya no es obligatoria para agregar un color: así podés primero
     // elegir/cargar todos los colores disponibles de la prenda (por nombre o
     // por número de Roly) y después volver, de a uno, a anclarle su foto —
     // en vez de tener que subir la foto en el momento sí o sí. Un color sin
     // foto todavía se ve marcado como "Sin foto" en la lista de abajo.
     setColorError("");
-    const finalColor = colorDraft.name.trim()
-      ? colorDraft
-      : { ...colorDraft, name: `Color ${draft.colors.length + 1}` };
+    let source = colorDraft;
+    // Si no le subiste fotos propias a este color pero hay una foto base
+    // cargada arriba y el modo automático está activado, se la generamos
+    // sola antes de agregarlo — misma técnica que Personalizar.
+    if (!colorHasAnyZoneImage(colorDraft) && autoFromBase && hasBaseImagesForColors) {
+      setAutoGenerating(true);
+      const { images: zones } = await generateColorFromBaseImages(baseImagesForColors, colorDraft.hex);
+      setAutoGenerating(false);
+      const generated = [zones.frontImage, zones.backImage].filter(Boolean);
+      source = { ...colorDraft, ...zones, images: [...colorDraft.images, ...generated] };
+    }
+    const finalColor = source.name.trim()
+      ? source
+      : { ...source, name: `Color ${draft.colors.length + 1}` };
     if (editingColorIdx !== null) {
       setDraft((d) => ({ ...d, colors: d.colors.map((c, idx) => (idx === editingColorIdx ? finalColor : c)) }));
       setEditingColorIdx(null);
@@ -6416,6 +6464,11 @@ function AdminProductForm({ categories, groups, onAddCategory, onAddGroup, saved
       viewsCount: draft.viewsCount || 0,
       designGroup: (draft.designGroup || "").trim(),
       subcategory: (draft.subcategory || "").trim(),
+      // Foto base para generar colores solos (si se cargó una) — se guarda
+      // junto con la prenda para no tener que volver a subirla cada vez.
+      baseImages: hasBaseImagesForColors
+        ? { frontImage: baseImagesForColors.frontImage || null, backImage: baseImagesForColors.backImage || null }
+        : null,
       ...overrides,
     };
   };
@@ -7017,6 +7070,70 @@ function AdminProductForm({ categories, groups, onAddCategory, onAddGroup, saved
             <p className="text-xs mb-2" style={{ color: "var(--slate)" }}>
               Si no agregás colores, la web muestra directamente todas las fotos de arriba. Agregá colores solo si querés que, al elegir uno, cambien las fotos que se ven.
             </p>
+
+            <div className="mb-3 rounded-xl p-3 flex flex-col gap-3" style={{ background: "var(--ink-3)", border: "1px dashed var(--sun)" }}>
+              <div>
+                <p className="text-sm font-semibold mb-1" style={{ color: "var(--sun)" }}>Generar colores automáticamente (opcional)</p>
+                <p className="text-xs" style={{ color: "var(--slate)" }}>
+                  Subí acá la foto de esta prenda — lo ideal es que sea blanca o de un color bien clarito. A partir de esto, el sistema puede generar solo la foto de cualquier otro color que agregues (sin tener que fotografiar cada uno), conservando los pliegues y las sombras de la tela. Funciona mejor si primero le quitás el fondo con el botón de abajo.
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-3 max-w-xs">
+                {[{ key: "frontImage", label: "Frente" }, { key: "backImage", label: "Espalda" }].map((zdef) => {
+                  const img = baseImagesForColors[zdef.key];
+                  return (
+                    <div key={zdef.key} className="flex flex-col items-center gap-1">
+                      <label
+                        className="kulto-btn relative w-full rounded-xl overflow-hidden flex items-center justify-center cursor-pointer"
+                        style={{ aspectRatio: "4 / 5", background: "var(--ink)", border: img ? "2px solid var(--sun)" : "1px dashed var(--line)" }}
+                      >
+                        {img ? (
+                          <img loading="lazy" src={img} className="w-full h-full object-contain" alt={zdef.label} />
+                        ) : (
+                          <span className="flex flex-col items-center gap-1 px-1 text-center">
+                            <Upload size={18} style={{ color: "var(--slate)" }} />
+                            <span className="text-[10px]" style={{ color: "var(--slate)" }}>Subir foto</span>
+                          </span>
+                        )}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => { const f = e.target.files[0]; if (f) handleBaseColorZoneUpload(zdef.key, f); e.target.value = ""; }}
+                        />
+                      </label>
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] font-semibold" style={{ color: img ? "var(--sun)" : "var(--slate)" }}>{zdef.label}</span>
+                        {img && (
+                          <button type="button" onClick={() => removeBaseColorZoneImage(zdef.key)} className="kulto-btn" style={{ color: "var(--slate)" }} title="Quitar foto">
+                            <X size={11} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {hasBaseImagesForColors && (
+                <button
+                  type="button"
+                  onClick={handleRemoveBaseColorBackground}
+                  disabled={removingBaseBg}
+                  className="kulto-btn text-xs font-semibold rounded-xl px-3 py-2 self-start"
+                  style={{ background: "var(--ink)", color: "var(--bone)", border: "1px solid var(--line)" }}
+                >
+                  {removingBaseBg ? "Quitando fondo…" : "Quitar fondo automáticamente a estas fotos"}
+                </button>
+              )}
+              {hasBaseImagesForColors && (
+                <label className="flex items-center gap-2 text-xs" style={{ color: "var(--bone)" }}>
+                  <input type="checkbox" checked={autoFromBase} onChange={(e) => setAutoFromBase(e.target.checked)} />
+                  Generar automáticamente los colores que agregue de ahora en más (si no les subo fotos propias)
+                </label>
+              )}
+              {autoGenerating && <p className="text-xs" style={{ color: "var(--sun)" }}>Generando el color…</p>}
+            </div>
+
             <div className="flex flex-wrap gap-2 mb-2">
               {draft.colors.map((c, i) => (
                 <div
@@ -7159,8 +7276,8 @@ function AdminProductForm({ categories, groups, onAddCategory, onAddGroup, saved
               <p className="text-xs mb-2" style={{ color: "var(--signal)" }}>{colorError}</p>
             )}
             <div className="flex flex-wrap items-center gap-2">
-              <button onClick={addColor} className="kulto-btn text-xs font-semibold rounded-xl px-3 py-2" style={{ background: "var(--sun)", color: "var(--ink)" }}>
-                {editingColorIdx !== null ? "Guardar color" : "Agregar color"}
+              <button onClick={addColor} disabled={autoGenerating} className="kulto-btn text-xs font-semibold rounded-xl px-3 py-2" style={{ background: "var(--sun)", color: "var(--ink)", opacity: autoGenerating ? 0.7 : 1 }}>
+                {autoGenerating ? "Generando…" : editingColorIdx !== null ? "Guardar color" : "Agregar color"}
               </button>
               {editingColorIdx !== null && (
                 <button onClick={() => { setEditingColorIdx(null); setColorDraft({ name: "", hex: "#E8452C", images: [], frontImage: null, backImage: null, sleeveLeftImage: null, sleeveRightImage: null }); }} className="kulto-btn text-xs px-3 py-2" style={{ color: "var(--slate)" }}>
@@ -7293,6 +7410,8 @@ const emptyTemplateDraft = {
   sizeGuide: [],
   sizeGuideImage: null,
   colors: [],
+  imageFit: "contain",
+  imageBackground: null,
 };
 
 const emptyTemplateColorDraft = { name: "", hex: "#E8452C", frontImage: null, backImage: null, sleeveLeftImage: null, sleeveRightImage: null };
@@ -7432,6 +7551,8 @@ function AdminTemplateForm({ categories, templateProducts = [], onAddCategory, o
           sleeveLeftImage: c.sleeveLeftImage || null,
           sleeveRightImage: c.sleeveRightImage || null,
         })),
+        imageFit: editing.imageFit || "contain",
+        imageBackground: editing.imageBackground ?? null,
       });
       // La foto base queda guardada junto con la prenda, así no hay que
       // volver a subirla cada vez que se edita (y la carga masiva por
@@ -7578,8 +7699,8 @@ function AdminTemplateForm({ categories, templateProducts = [], onAddCategory, o
       designs: [],
       sizes: draft.sizes,
       photoPool: [],
-      imageFit: "contain",
-      imageBackground: null,
+      imageFit: draft.imageFit || "contain",
+      imageBackground: draft.imageBackground ?? null,
       sizeGuide: draft.sizeGuide || [],
       sizeGuideImage: draft.sizeGuideImage || null,
       // Guardamos la foto base junto con la prenda (si se cargó una) para no
@@ -7669,6 +7790,34 @@ function AdminTemplateForm({ categories, templateProducts = [], onAddCategory, o
         </select>
         <p className="text-xs mt-1" style={{ color: "var(--slate)" }}>
           Elegí "Unisex" si el corte es suelto y le queda bien a cualquiera (ej: la mayoría de las oversize). Si el proveedor la vende puntualmente para hombre, mujer o niños, elegí esa opción — el cliente va a poder filtrar por esto al elegir el modelo.
+        </p>
+      </div>
+
+      <div>
+        <label className="text-xs mb-1 block" style={{ color: "var(--bone)" }}>Fondo de la prenda (opcional)</label>
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-2 text-xs" style={{ color: "var(--bone)" }}>
+            <input
+              type="checkbox"
+              checked={draft.imageBackground !== null}
+              onChange={(e) => setDraft((d) => ({ ...d, imageBackground: e.target.checked ? "#FFFFFF" : null }))}
+            />
+            Elegir un color de fondo para el espacio que sobra
+          </label>
+          {draft.imageBackground !== null && (
+            <input
+              type="color"
+              value={draft.imageBackground}
+              onChange={(e) => setDraft((d) => ({ ...d, imageBackground: e.target.value }))}
+              className="w-9 h-9 rounded"
+              style={{ background: "transparent" }}
+            />
+          )}
+        </div>
+        <p className="text-xs mt-1" style={{ color: "var(--slate)" }}>
+          {draft.imageBackground === null
+            ? "Por defecto, el espacio alrededor de la foto usa el color de la prenda."
+            : "Ese color se usa detrás de la foto en vez del color de la prenda."}
         </p>
       </div>
 
