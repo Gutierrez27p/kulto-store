@@ -1158,6 +1158,30 @@ const ROLY_2026_COLORS = [
   { name: "Color 652", hex: "#ee436f" },
   { name: "711 Iris Púrpura", hex: "#6d5fa9" },
   { name: "777 Arándano", hex: "#80315f" },
+  // Acabados "Vigoré" (jaspeados) y "Lavado" de la página de colores del
+  // catálogo — el tono es el promedio de la muestra impresa.
+  { name: "013 Blanco Vigoré", hex: "#d3d4d5" },
+  { name: "177 Blanco Ceniza Vigoré", hex: "#f0f1f1" },
+  { name: "249 Amarillo Flúor Vigoré", hex: "#e8e857" },
+  { name: "39 Mostaza Vigoré", hex: "#edbf61" },
+  { name: "244 Coral Flúor Vigoré", hex: "#f69e97" },
+  { name: "245 Rojo Vigoré", hex: "#eb3c63" },
+  { name: "256 Granate Vigoré", hex: "#913b4d" },
+  { name: "252 Rosetón Vigoré", hex: "#d24f7d" },
+  { name: "248 Royal Vigoré", hex: "#247cae" },
+  { name: "255 Azul Dénim Vigoré", hex: "#5d6988" },
+  { name: "247 Azul Marino Vigoré", hex: "#2a465f" },
+  { name: "246 Turquesa Vigoré", hex: "#23b3c7" },
+  { name: "693 Verde Mantis Vigoré", hex: "#c7de86" },
+  { name: "250 Lima Vigoré", hex: "#96cb5f" },
+  { name: "257 Verde Militar Oscuro Vigoré", hex: "#32705b" },
+  { name: "243 Negro Vigoré", hex: "#5f6369" },
+  { name: "801 Amarillo Sweet Lavado", hex: "#e5d99f" },
+  { name: "805 Papaya Claro Lavado", hex: "#f79d6a" },
+  { name: "804 Kaki Claro Lavado", hex: "#9b8d68" },
+  { name: "806 Verde Pato Lavado", hex: "#51685e" },
+  { name: "802 Gris Piedra Lavado", hex: "#989897" },
+  { name: "803 Gris Cielo Lavado", hex: "#434755" },
 ];
 
 // La primera vez que el admin entra después de esta actualización, suma
@@ -4616,8 +4640,13 @@ function Wizard({ products, categories, settings, designLibrary, designFolders, 
   // base, si el admin le puso uno puntual; (2) el precio que el admin le
   // haya puesto a esa subcategoría/estilo (Beagle, Oversize, etc.) en
   // "Precios por estilo"; (3) el precio general de Personalizar, como
-  // último respaldo si no se configuró nada más específico.
-  const subcategoryPrice = prod?.subcategory ? settings.personalizeSubcategoryPrices?.[prod.subcategory] : null;
+  // último respaldo si no se configuró nada más específico. Si la prenda no
+  // tiene un "Subgrupo / estilo" cargado, "Precios por estilo" la identifica
+  // por su nombre en su lugar (ver AdminPersonalizeSubcategoryPrices) — acá
+  // hay que buscar con esa misma clave para que ese precio se aplique de
+  // verdad al comprar, y no solo se vea guardado en el panel.
+  const styleKey = prod?.subcategory || prod?.name;
+  const subcategoryPrice = styleKey ? settings.personalizeSubcategoryPrices?.[styleKey] : null;
   const unitPrice = prod
     ? (prod.price != null
         ? Number(prod.price)
@@ -11924,7 +11953,13 @@ function AdminPersonalizeGroupImages({ templateProducts = [], settings, onSave }
 // una por una. Las subcategorías aparecen solas a medida que se cargan prendas
 // base con ese campo completado.
 function AdminPersonalizeSubcategoryPrices({ templateProducts = [], settings, onSave }) {
-  const subcategories = Array.from(new Set(templateProducts.map((p) => p.subcategory).filter(Boolean)));
+  // Antes esto solo juntaba las prendas que YA tenían un "Subgrupo / estilo"
+  // cargado — si una prenda nueva se subía sin llenar ese campo (es
+  // opcional), se quedaba afuera de esta lista entera y no se le podía poner
+  // precio acá. Ahora, a la prenda que no tiene subgrupo le usamos su nombre
+  // como identificador, así SIEMPRE aparece una fila por cada prenda que se
+  // suba a "Personalizar", tenga o no un subgrupo cargado.
+  const subcategories = Array.from(new Set(templateProducts.map((p) => p.subcategory || p.name).filter(Boolean)));
   const prices = settings.personalizeSubcategoryPrices || {};
   const [drafts, setDrafts] = useState({});
   const [savedSub, setSavedSub] = useState(null);
