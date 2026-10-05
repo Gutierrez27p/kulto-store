@@ -3793,6 +3793,9 @@ function Catalog({ products, categories, groups, onOpen, initialQuery, initialGr
   filtered = activeCat === "Todas" ? filtered : filtered.filter((p) => p.category === activeCat || (p.extraCategories || []).includes(activeCat));
   // Subcategoría (ej: dentro de "Sudaderas" separar "Con capucha" de "Sin
   // capucha") — llega sobre todo desde el submenú del header, ver AdminProductForm.
+  // Carpetas de diseños (ej: dentro de "anime": Naruto, Dragon Ball) — se
+  // arman con la subcategoría de cada producto, según el grupo/prenda elegidos.
+  const subcatsInView = [...new Set(filtered.map((p) => p.subcategory).filter(Boolean))].sort((x, y) => x.localeCompare(y, "es"));
   filtered = activeSubcat === "Todas" ? filtered : filtered.filter((p) => p.subcategory === activeSubcat);
   // Un mismo diseño puede estar disponible en varias prendas a la vez
   // (comparten designGroup, ver "Modelos donde está disponible" / "Vincular
@@ -4002,6 +4005,24 @@ function Catalog({ products, categories, groups, onOpen, initialQuery, initialGr
           </button>
         ))}
       </div>
+      {(subcatsInView.length > 0 || activeSubcat !== "Todas") && (
+        <div className="flex gap-2 overflow-x-auto kulto-scrollbar pb-3 mb-6 -mt-3">
+          {["Todas", ...subcatsInView].map((sc) => (
+            <button
+              key={sc}
+              onClick={() => setActiveSubcat(sc)}
+              className="kulto-btn shrink-0 text-xs font-semibold px-3 py-1.5 rounded-full"
+              style={{
+                background: activeSubcat === sc ? "var(--sun)" : "var(--ink-2)",
+                color: activeSubcat === sc ? "var(--ink)" : "var(--bone)",
+                border: "1px solid var(--line)",
+              }}
+            >
+              {sc === "Todas" ? "Todos los diseños" : sc}
+            </button>
+          ))}
+        </div>
+      )}
       {filtered.length ? (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
           {filtered.map((p) => <ProductCard key={p.id} product={p} onOpen={onOpen} isFavorite={favorites?.includes(p.id)} onToggleFavorite={onToggleFavorite} onAddToCart={onAddToCart} />)}
@@ -12464,6 +12485,23 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
   // Para mandar de una varios productos sueltos ("Sin grupo / temática" o
   // un grupo equivocado) al grupo correcto, sin editarlos uno por uno.
   const [bulkGroupTarget, setBulkGroupTarget] = useState("");
+  // Carpetas dentro de un grupo (ej: "anime" → Naruto, Dragon Ball): se
+  // guardan en la subcategoría de cada producto.
+  const [bulkFolderTarget, setBulkFolderTarget] = useState("");
+  const [expandedFolders, setExpandedFolders] = useState([]);
+  const toggleFolder = (key) => setExpandedFolders((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+  const moveSelectedToFolder = async (clear) => {
+    const target = clear ? "" : bulkFolderTarget.trim();
+    if (!selectedProductIds.length || (!clear && !target)) return;
+    setMovingSelected(true);
+    for (const id of selectedProductIds) {
+      const p = sellableProducts.find((x) => x.id === id);
+      if (p) await onSaveProduct({ ...p, subcategory: target });
+    }
+    setMovingSelected(false);
+    setSelectedProductIds([]);
+    setBulkFolderTarget("");
+  };
   const [movingSelected, setMovingSelected] = useState(false);
   const moveSelectedToGroup = async () => {
     if (!selectedProductIds.length || !bulkGroupTarget) return;
@@ -12706,6 +12744,35 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                         </button>
                       </>
                     )}
+                    <input
+                      list="kulto-folder-options"
+                      value={bulkFolderTarget}
+                      onChange={(e) => setBulkFolderTarget(e.target.value)}
+                      placeholder="Carpeta (ej: Naruto)…"
+                      className="rounded-full text-xs px-3 py-1.5"
+                      style={{ background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)", width: 170 }}
+                    />
+                    <datalist id="kulto-folder-options">
+                      {Array.from(new Set(sellableProducts.map((p) => p.subcategory).filter(Boolean))).sort((x, y) => x.localeCompare(y, "es")).map((f) => <option key={f} value={f} />)}
+                    </datalist>
+                    <button
+                      type="button"
+                      disabled={!bulkFolderTarget.trim() || movingSelected}
+                      onClick={() => moveSelectedToFolder(false)}
+                      className="kulto-btn text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1 shrink-0"
+                      style={{ background: "var(--sun)", color: "var(--ink)", opacity: !bulkFolderTarget.trim() || movingSelected ? 0.5 : 1 }}
+                    >
+                      <FolderPlus size={13} /> Meter en carpeta
+                    </button>
+                    <button
+                      type="button"
+                      disabled={movingSelected}
+                      onClick={() => moveSelectedToFolder(true)}
+                      className="kulto-btn text-xs font-semibold px-3 py-1.5 rounded-full shrink-0"
+                      style={{ background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" }}
+                    >
+                      Sacar de carpeta
+                    </button>
                     <button
                       type="button"
                       onClick={() => setBulkModelsOpen((v) => !v)}
@@ -12877,7 +12944,11 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                             (acc[cat] = acc[cat] || []).push(p);
                             return acc;
                           }, {})
-                        ).map(([cat, catItems]) => {
+                        ).map(([cat, catItemsRaw]) => {
+                          // Dentro de cada prenda, los diseños se ordenan en
+                          // carpetas según su subcategoría (ej: Naruto, Dragon Ball).
+                          const catItems = [...catItemsRaw].sort((x, y) => (x.subcategory || "\uffff").localeCompare(y.subcategory || "\uffff", "es"));
+                          const hasFolders = catItems.some((p) => p.subcategory);
                           const catAllSelected = catItems.length > 0 && catItems.every((p) => selectedProductIds.includes(p.id));
                           const toggleSelectCat = () => {
                             const ids = catItems.map((p) => p.id);
@@ -12898,11 +12969,40 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                               </p>
                             </label>
                             <div className="flex flex-col gap-2 p-2">
-                        {catItems.map((p) => {
+                        {catItems.map((p, pIdx) => {
                           const modelsOpen = expandedModelsFor === p.id;
                           const variants = linkedVariants(p);
+                          const folderName = p.subcategory || "";
+                          const folderKey = `${grp}|${cat}|${folderName}`;
+                          const folderItems = hasFolders ? catItems.filter((x) => (x.subcategory || "") === folderName) : [];
+                          const isFirstInFolder = hasFolders && (pIdx === 0 || (catItems[pIdx - 1].subcategory || "") !== folderName);
+                          const folderOpen = !hasFolders || expandedFolders.includes(folderKey) || (editingProduct && folderItems.some((x) => x.id === editingProduct.id));
+                          const folderAllSelected = folderItems.length > 0 && folderItems.every((x) => selectedProductIds.includes(x.id));
+                          const toggleSelectFolder = () => {
+                            const ids = folderItems.map((x) => x.id);
+                            setSelectedProductIds((prev) => (folderAllSelected ? prev.filter((id) => !ids.includes(id)) : Array.from(new Set([...prev, ...ids]))));
+                          };
                           return (
-                          <div key={p.id} className="flex flex-col gap-1.5">
+                          <React.Fragment key={p.id}>
+                          {isFirstInFolder && (
+                            <div className="flex items-center gap-2 rounded-xl px-3 py-2" style={{ background: "var(--ink-3)", border: "1px solid var(--line)" }}>
+                              <input
+                                type="checkbox"
+                                checked={folderAllSelected}
+                                onChange={toggleSelectFolder}
+                                style={{ accentColor: "var(--signal)" }}
+                                aria-label={`Seleccionar carpeta "${folderName || "Sin carpeta"}"`}
+                              />
+                              <button type="button" onClick={() => toggleFolder(folderKey)} className="kulto-btn flex-1 flex items-center gap-2 text-left">
+                                {folderOpen ? <ChevronDown size={14} color="var(--slate)" /> : <ChevronRight size={14} color="var(--slate)" />}
+                                <FolderPlus size={13} color="var(--sun)" />
+                                <span className="text-xs font-semibold flex-1" style={{ color: "var(--bone)" }}>{folderName || "Sin carpeta"}</span>
+                                <span className="text-[11px]" style={{ color: "var(--slate)" }}>{folderItems.length}</span>
+                              </button>
+                            </div>
+                          )}
+                          {folderOpen && (
+                          <div className="flex flex-col gap-1.5">
                             <div
                               onClick={() => setEditingProduct(p)}
                               className="kulto-btn flex items-center gap-3 rounded-2xl p-3 text-left"
@@ -12970,6 +13070,8 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                               </div>
                             )}
                           </div>
+                          )}
+                          </React.Fragment>
                           );
                         })}
                             </div>
