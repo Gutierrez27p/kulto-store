@@ -118,13 +118,25 @@ function generateSku(name, existingProducts = []) {
 // vuelo con los datos que ya hay, así siempre está al día.
 function computeTrendingIds(products, settings) {
   if (!settings?.trendingAutoEnabled) return new Set();
-  const ranked = (products || [])
+  // Un mismo diseño puede estar en varias prendas (mismo designGroup) y en
+  // Inicio se muestra una sola tarjeta por diseño — por eso el puntaje se
+  // junta por diseño y se eligen los N diseños con más puntos. Si no, los N
+  // primeros podían ser el mismo diseño en N prendas y quedaba solo 1.
+  const byDesign = new Map();
+  (products || [])
     .filter((p) => !p.tags?.template)
-    .map((p) => ({ id: p.id, score: (p.salesCount || 0) * 3 + (p.viewsCount || 0) }))
-    .filter((p) => p.score > 0)
+    .forEach((p) => {
+      const key = p.designGroup || p.id;
+      const entry = byDesign.get(key) || { ids: [], score: 0 };
+      entry.ids.push(p.id);
+      entry.score += (p.salesCount || 0) * 3 + (p.viewsCount || 0);
+      byDesign.set(key, entry);
+    });
+  const ranked = [...byDesign.values()]
+    .filter((e) => e.score > 0)
     .sort((a, b) => b.score - a.score)
     .slice(0, settings?.trendingAutoCount ?? 8);
-  return new Set(ranked.map((p) => p.id));
+  return new Set(ranked.flatMap((e) => e.ids));
 }
 
 function formatPrice(n) {
@@ -1005,7 +1017,16 @@ async function publishDraft() {
   const toDelete = pubProducts.filter((p) => !draftIds.has(p.id));
   await Promise.all([
     ...toDelete.map((p) => storageDelete(`${PUB_PREFIX}product:${p.id}`, true)),
-    ...draftProducts.map((p) => persistProductToPrefix(PUB_PREFIX, p, false)),
+    // Las ventas y vistas se suman directo sobre el producto publicado; el
+    // borrador tiene copias viejas — sin esto, cada "Publicar cambios" las
+    // pisaba y el "En tendencia" automático volvía a cero.
+    ...draftProducts.map((p) => {
+      const live = pubProducts.find((x) => x.id === p.id);
+      const merged = live
+        ? { ...p, salesCount: Math.max(p.salesCount || 0, live.salesCount || 0), viewsCount: Math.max(p.viewsCount || 0, live.viewsCount || 0) }
+        : p;
+      return persistProductToPrefix(PUB_PREFIX, merged, false);
+    }),
     persistCategories(draftCats),
     persistGroups(draftGroups),
   ]);
