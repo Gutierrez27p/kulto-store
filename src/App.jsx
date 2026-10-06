@@ -13161,7 +13161,7 @@ function AdminCustomWorkGallery({ items, onAdd, onRemove, speed = 0.5, onSpeedCh
   );
 }
 
-function AdminPanel({ products, categories, groups, orders, customers, onAdjustCustomerPoints, onDeleteCustomer, onCreateCustomer, onUpdateCustomerInfo, onSendPasswordHelp, reviews, settings, hasDraftChanges, publishing, onPublishChanges, onDiscardChanges, photoInbox, onAddToInbox, onCreateProductFromInbox, onAddInboxToExisting, onRemoveFromInbox, savedColors, onSaveColorToLibrary, onRemoveColorFromLibrary, designLibrary, onAddDesignToLibrary, onRemoveDesignFromLibrary, designFolders, onAddDesignFolder, onRenameDesignFolder, onRemoveDesignFolder, onToggleDesignFolderCover, onAssignDesignToFolder, onSetDesignFolderCategory, onSetDesignFolderGarments, customWorkGallery, onAddCustomWork, onRemoveCustomWork, onAddCategory, onRenameCategory, onDeleteCategory, onAddGroup, onRenameGroup, onDeleteGroup, onSaveProduct, onSaveProductVerbose, onQuickRestock, onDeleteProduct, onToggleOrderStatus, onSetLocalStatus, onSetLocalTracking, onUpdateTracking, onApplyDiscount, onRequestReview, onBulkComplete, onBulkArchive, onBulkDelete, onSaveReview, onDeleteReview, onReorderReview, onSaveSettings, onLogout, permissions, isOwner, onSetAdminPermissions, jumpTo }) {
+function AdminPanel({ products, categories, groups, orders, customers, onAdjustCustomerPoints, onDeleteCustomer, onCreateCustomer, onUpdateCustomerInfo, onSendPasswordHelp, reviews, settings, hasDraftChanges, publishing, onPublishChanges, onDiscardChanges, photoInbox, onAddToInbox, onCreateProductFromInbox, onAddInboxToExisting, onRemoveFromInbox, savedColors, onSaveColorToLibrary, onRemoveColorFromLibrary, designLibrary, onAddDesignToLibrary, onRemoveDesignFromLibrary, designFolders, onAddDesignFolder, onRenameDesignFolder, onRemoveDesignFolder, onToggleDesignFolderCover, onAssignDesignToFolder, onSetDesignFolderCategory, onSetDesignFolderGarments, customWorkGallery, onAddCustomWork, onRemoveCustomWork, onAddCategory, onRenameCategory, onDeleteCategory, onAddGroup, onRenameGroup, onDeleteGroup, onSaveProduct, onSaveProductVerbose, onSaveProductsBulk, onQuickRestock, onDeleteProduct, onToggleOrderStatus, onSetLocalStatus, onSetLocalTracking, onUpdateTracking, onApplyDiscount, onRequestReview, onBulkComplete, onBulkArchive, onBulkDelete, onSaveReview, onDeleteReview, onReorderReview, onSaveSettings, onLogout, permissions, isOwner, onSetAdminPermissions, jumpTo }) {
   // El dueño (isOwner) siempre ve todas las pestañas. Una cuenta de admin con
   // permisos limitados solo ve — y solo puede abrir — las que le dieron.
   const allowedTabs = isOwner ? ADMIN_TAB_KEYS : (permissions || []);
@@ -13205,27 +13205,57 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
   const [bulkFolderTarget, setBulkFolderTarget] = useState("");
   const [expandedFolders, setExpandedFolders] = useState([]);
   const toggleFolder = (key) => setExpandedFolders((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+  const [movingSelected, setMovingSelected] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState(null); // { done, total } mientras guarda
+  const [bulkMessage, setBulkMessage] = useState("");
+  // Aplica un cambio a muchos productos a la vez, siempre con aviso de
+  // progreso y de resultado — y pase lo que pase, al final se destraban los
+  // botones (antes, si algo fallaba a la mitad, quedaban trabados para siempre).
+  const applyBulk = async (changes) => {
+    // changes: [{ id, patch }]
+    const list = changes
+      .map(({ id, patch }) => {
+        const p = sellableProducts.find((x) => x.id === id);
+        return p ? { ...p, ...patch } : null;
+      })
+      .filter(Boolean);
+    if (!list.length) return { ok: 0, failed: 0 };
+    setMovingSelected(true);
+    setBulkMessage("");
+    setBulkProgress({ done: 0, total: list.length });
+    try {
+      const res = onSaveProductsBulk
+        ? await onSaveProductsBulk(list, (done, total) => setBulkProgress({ done, total }))
+        : await (async () => { for (const p of list) await onSaveProduct(p); return { ok: list.length, failed: 0 }; })();
+      setBulkMessage(res.failed ? `Se guardaron ${res.ok} y ${res.failed} no se pudieron guardar. Probá de nuevo con esos.` : `Listo: ${res.ok} producto${res.ok === 1 ? "" : "s"} actualizado${res.ok === 1 ? "" : "s"}. Recordá "Publicar cambios" para que lo vean los clientes.`);
+      return res;
+    } catch (e) {
+      setBulkMessage("No se pudo guardar: " + (e?.message || "error de conexión") + ". Probá de nuevo.");
+      return { ok: 0, failed: list.length };
+    } finally {
+      setMovingSelected(false);
+      setBulkProgress(null);
+    }
+  };
   const moveSelectedToFolder = async (clear) => {
     const target = clear ? "" : bulkFolderTarget.trim();
     if (!selectedProductIds.length || (!clear && !target)) return;
-    setMovingSelected(true);
-    for (const id of selectedProductIds) {
-      const p = sellableProducts.find((x) => x.id === id);
-      if (p) await onSaveProduct({ ...p, subcategory: target });
-    }
-    setMovingSelected(false);
+    await applyBulk(selectedProductIds.map((id) => ({ id, patch: { subcategory: target } })));
     setSelectedProductIds([]);
     setBulkFolderTarget("");
   };
-  const [movingSelected, setMovingSelected] = useState(false);
+  // Cambia el nombre de una carpeta (en ese grupo): todos sus productos pasan
+  // a llamarse con el nombre nuevo. Dejarlo vacío saca a todos de la carpeta.
+  const renameFolder = async (folderItems, oldName) => {
+    const input = window.prompt(`Nuevo nombre para la carpeta "${oldName}" (dejalo vacío para sacar todos los productos de la carpeta):`, oldName);
+    if (input === null) return;
+    const next = input.trim();
+    if (next === oldName) return;
+    await applyBulk(folderItems.map((p) => ({ id: p.id, patch: { subcategory: next } })));
+  };
   const moveSelectedToGroup = async () => {
     if (!selectedProductIds.length || !bulkGroupTarget) return;
-    setMovingSelected(true);
-    for (const id of selectedProductIds) {
-      const p = sellableProducts.find((x) => x.id === id);
-      if (p) await onSaveProduct({ ...p, group: bulkGroupTarget });
-    }
-    setMovingSelected(false);
+    await applyBulk(selectedProductIds.map((id) => ({ id, patch: { group: bulkGroupTarget } })));
     setSelectedProductIds([]);
     setBulkGroupTarget("");
   };
@@ -13436,6 +13466,12 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                 <div className="rounded-xl p-3 text-xs flex gap-2 items-start" style={{ background: "var(--ink-2)", border: "1px dashed var(--line)", color: "var(--slate)" }}>
                   <FolderPlus size={14} className="shrink-0 mt-0.5" style={{ color: "var(--sun)" }} />
                   <span>Para crear carpetas dentro de un grupo (ej: Naruto dentro de "anime"): abrí el grupo, tildá los productos que van juntos y arriba va a aparecer el cuadro "Carpeta" — escribí el nombre y tocá "Meter en carpeta".</span>
+                </div>
+              )}
+              {(bulkProgress || bulkMessage) && (
+                <div className="rounded-xl p-3 text-xs flex items-center gap-2" style={{ background: "var(--ink-2)", border: "1px solid var(--sun)", color: "var(--bone)" }}>
+                  {bulkProgress ? <><Loader2 size={14} className="animate-spin shrink-0" /> Guardando {bulkProgress.done} de {bulkProgress.total}…</> : bulkMessage}
+                  {!bulkProgress && <button onClick={() => setBulkMessage("")} className="kulto-btn ml-auto text-[11px]" style={{ color: "var(--slate)" }}>Cerrar</button>}
                 </div>
               )}
               <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -13691,6 +13727,19 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                               <span className="text-sm font-semibold flex-1" style={{ color: "var(--bone)" }}>{folderName || "Sin carpeta"}</span>
                               <span className="text-[11px]" style={{ color: "var(--slate)" }}>{fItems.length}</span>
                             </button>
+                            {folderName && (
+                              <button
+                                type="button"
+                                disabled={movingSelected}
+                                onClick={() => renameFolder(fItems, folderName)}
+                                className="kulto-btn p-1.5 rounded-full shrink-0"
+                                style={{ color: "var(--bone)" }}
+                                aria-label={`Cambiar nombre de la carpeta ${folderName}`}
+                                title="Cambiar nombre de la carpeta"
+                              >
+                                <Pencil size={14} />
+                              </button>
+                            )}
                           </div>
                         )}
                         {folderOpen && (
@@ -15171,6 +15220,33 @@ export default function App() {
     });
   };
 
+  // Guarda muchos productos de una vez (mover a un grupo, a una carpeta, etc.):
+  // en tandas de 5 a la vez, un solo aviso de "cambios sin publicar" y una sola
+  // actualización de pantalla al final — antes se guardaba de a uno, con todo
+  // el catálogo redibujándose en cada uno, y con muchos productos parecía
+  // trabado. Devuelve cuántos se guardaron y cuántos fallaron.
+  const handleSaveProductsBulk = async (list, onProgress) => {
+    const queue = [...list];
+    const failedIds = [];
+    let done = 0;
+    const worker = async () => {
+      while (queue.length) {
+        const p = queue.shift();
+        try { await persistProductToPrefix(DRAFT_PREFIX, p, false); } catch { failedIds.push(p.id); }
+        done += 1;
+        onProgress?.(done, list.length);
+      }
+    };
+    await Promise.all(Array.from({ length: 5 }, worker));
+    const okList = list.filter((p) => !failedIds.includes(p.id));
+    if (okList.length) {
+      try { await markDraftChanged(); } catch { /* el aviso se reintenta en el próximo cambio */ }
+      setHasDraftChanges(true);
+      setDraftProducts((prev) => prev.map((p) => okList.find((u) => u.id === p.id) || p));
+    }
+    return { ok: okList.length, failed: failedIds.length };
+  };
+
   // Igual que handleSaveProduct, pero avisa si de verdad se guardó — la usa
   // "Personalizar" (prendas con muchos colores/fotos) para poder mostrarle al
   // admin un error real en vez de dejarlo creer que guardó cuando en realidad
@@ -16026,6 +16102,7 @@ export default function App() {
               onDeleteGroup={handleDeleteGroup}
               onSaveProduct={handleSaveProduct}
               onSaveProductVerbose={handleSaveProductVerbose}
+              onSaveProductsBulk={handleSaveProductsBulk}
               onDeleteProduct={handleDeleteProduct}
               onQuickRestock={handleQuickRestock}
               jumpTo={adminTabRequest}
