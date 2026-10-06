@@ -130,6 +130,30 @@ function generateSku(name, existingProducts = []) {
 // que el admin ya marcó a mano con el tilde "Tendencia" de cada prenda (ver
 // Home y AdminSalesPanel). No escribe nada en el producto: se recalcula al
 // vuelo con los datos que ya hay, así siempre está al día.
+// "Más vendidos" automático: igual que el de tendencia pero mirando SOLO las
+// ventas reales (salesCount). Se juntan las ventas por diseño (un mismo diseño
+// en varias prendas cuenta junto, y en Inicio se muestra una sola tarjeta) y
+// se eligen los N diseños que más vendieron. Se suma a lo que el admin ya
+// marcó a mano con "Más vendido" — nunca lo reemplaza.
+function computeBestsellerIds(products, settings) {
+  if (!settings?.bestsellerAutoEnabled) return new Set();
+  const byDesign = new Map();
+  (products || [])
+    .filter((p) => !p.tags?.template)
+    .forEach((p) => {
+      const key = p.designGroup || p.id;
+      const entry = byDesign.get(key) || { ids: [], sales: 0 };
+      entry.ids.push(p.id);
+      entry.sales += p.salesCount || 0;
+      byDesign.set(key, entry);
+    });
+  const ranked = [...byDesign.values()]
+    .filter((e) => e.sales > 0)
+    .sort((a, b) => b.sales - a.sales)
+    .slice(0, settings?.bestsellerAutoCount ?? 8);
+  return new Set(ranked.flatMap((e) => e.ids));
+}
+
 function computeTrendingIds(products, settings) {
   if (!settings?.trendingAutoEnabled) return new Set();
   // Un mismo diseño puede estar en varias prendas (mismo designGroup) y en
@@ -1654,6 +1678,8 @@ const DEFAULT_SETTINGS = {
   // computeTrendingIds y AdminSalesPanel.
   trendingAutoEnabled: true,
   trendingAutoCount: 8,
+  bestsellerAutoEnabled: true,
+  bestsellerAutoCount: 8,
   // Umbral de stock bajo para el apartado "Compras" del panel — ver
   // AdminRestockPanel.
   lowStockThreshold: 3,
@@ -3720,7 +3746,8 @@ function Home({ products, settings, reviews, customWorkGallery, onOpen, onGoCata
       return true;
     });
   };
-  const bestsellers = dedupeByDesign(products.filter((p) => p.tags?.bestseller));
+  const bestsellerAutoIds = computeBestsellerIds(products, settings);
+  const bestsellers = dedupeByDesign(products.filter((p) => p.tags?.bestseller || bestsellerAutoIds.has(p.id)));
   const ofertas = dedupeByDesign(products.filter((p) => p.tags?.oferta));
   const trendingIds = computeTrendingIds(products, settings);
   const tendencia = dedupeByDesign(products.filter((p) => p.tags?.tendencia || trendingIds.has(p.id)));
@@ -9772,6 +9799,20 @@ function AdminSalesPanel({ products, orders, settings, onSaveSettings }) {
   const totalRevenue = completedOrders.reduce((sum, o) => sum + (o.total || 0), 0);
   const activeOrders = orders.filter((o) => o.status !== "completado" && !o.archived).length;
 
+  const bestsellerIds = computeBestsellerIds(products, settings);
+  const [bestAutoEnabled, setBestAutoEnabled] = useState(settings?.bestsellerAutoEnabled ?? true);
+  const [bestAutoCount, setBestAutoCount] = useState(settings?.bestsellerAutoCount ?? 8);
+  const [bestSaved, setBestSaved] = useState(false);
+  useEffect(() => {
+    setBestAutoEnabled(settings?.bestsellerAutoEnabled ?? true);
+    setBestAutoCount(settings?.bestsellerAutoCount ?? 8);
+  }, [settings?.bestsellerAutoEnabled, settings?.bestsellerAutoCount]);
+  const saveBestConfig = async () => {
+    await onSaveSettings({ ...settings, bestsellerAutoEnabled: bestAutoEnabled, bestsellerAutoCount: Number(bestAutoCount) || 8 });
+    setBestSaved(true);
+    setTimeout(() => setBestSaved(false), 1800);
+  };
+
   const trendingIds = computeTrendingIds(products, settings);
   const ranked = [...products]
     .map((p) => ({ ...p, score: (p.salesCount || 0) * 3 + (p.viewsCount || 0) }))
@@ -9837,6 +9878,34 @@ function AdminSalesPanel({ products, orders, settings, onSaveSettings }) {
         </div>
       </div>
 
+      <div className="rounded-2xl p-4" style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}>
+        <div className="flex items-center gap-2 mb-2">
+          <TrendingUp size={16} style={{ color: "var(--sun)" }} />
+          <p className="text-sm font-semibold" style={{ color: "var(--bone)" }}>"Más vendidos" automático</p>
+        </div>
+        <p className="text-xs mb-3" style={{ color: "var(--slate)" }}>
+          Arma solo la sección "Más vendido" del inicio con las prendas que más se vendieron (cuenta solo ventas reales, no vistas) — se suma a lo que ya marcás a mano en cada producto, nunca lo reemplaza. Un mismo diseño en varias prendas cuenta junto.
+        </p>
+        <div className="flex flex-wrap items-center gap-3 mb-2">
+          <label className="kulto-btn flex items-center gap-2 text-sm" style={{ color: "var(--bone)" }}>
+            <input type="checkbox" checked={bestAutoEnabled} onChange={(e) => setBestAutoEnabled(e.target.checked)} />
+            Activado
+          </label>
+          <label className="text-xs flex items-center gap-2" style={{ color: "var(--slate)" }}>
+            Máximo de prendas más vendidas:
+            <input
+              type="number" min="1" max="30" value={bestAutoCount}
+              onChange={(e) => setBestAutoCount(e.target.value)}
+              className="w-16 rounded-lg p-1.5 text-sm text-center"
+              style={{ background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" }}
+            />
+          </label>
+          <button onClick={saveBestConfig} className="kulto-btn text-xs font-semibold rounded-lg px-3 py-2" style={{ background: bestSaved ? "var(--sun)" : "var(--signal)", color: bestSaved ? "var(--ink)" : "var(--bone)" }}>
+            {bestSaved ? "Guardado" : "Guardar"}
+          </button>
+        </div>
+      </div>
+
       <div>
         <p className="text-sm font-semibold mb-2" style={{ color: "var(--bone)" }}>Ranking de interés (ventas + vistas)</p>
         {ranked.length === 0 || ranked[0].score === 0 ? (
@@ -9851,6 +9920,9 @@ function AdminSalesPanel({ products, orders, settings, onSaveSettings }) {
                     {p.name}
                     {trendingIds.has(p.id) && (
                       <span className="text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0" style={{ background: "var(--sun)", color: "var(--ink)" }}>TENDENCIA</span>
+                    )}
+                    {bestsellerIds.has(p.id) && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0" style={{ background: "var(--signal)", color: "var(--bone)" }}>MÁS VENDIDO</span>
                     )}
                   </p>
                   <p className="text-xs" style={{ color: "var(--slate)" }}>{p.salesCount || 0} vendidas · {p.viewsCount || 0} vistas</p>
