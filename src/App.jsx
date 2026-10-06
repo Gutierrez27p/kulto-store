@@ -13247,10 +13247,14 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
   // Cambia el nombre de una carpeta (en ese grupo): todos sus productos pasan
   // a llamarse con el nombre nuevo. Dejarlo vacío saca a todos de la carpeta.
   const renameFolder = async (folderItems, oldName) => {
-    const input = window.prompt(`Nuevo nombre para la carpeta "${oldName}" (dejalo vacío para sacar todos los productos de la carpeta):`, oldName);
+    // "Sin carpeta" (oldName vacío) no es una carpeta de verdad: ponerle nombre
+    // crea una carpeta nueva con todos esos productos adentro.
+    const input = oldName
+      ? window.prompt(`Nuevo nombre para la carpeta "${oldName}" (dejalo vacío para sacar todos los productos de la carpeta):`, oldName)
+      : window.prompt(`Escribí el nombre de la carpeta nueva para estos ${folderItems.length} productos sin carpeta:`, "");
     if (input === null) return;
     const next = input.trim();
-    if (next === oldName) return;
+    if (next === oldName || (!oldName && !next)) return;
     await applyBulk(folderItems.map((p) => ({ id: p.id, patch: { subcategory: next } })));
   };
   const moveSelectedToGroup = async () => {
@@ -13688,6 +13692,21 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                         <span className="text-sm font-semibold flex-1" style={{ color: "var(--bone)" }}>{grp}</span>
                         <span className="text-xs" style={{ color: "var(--slate)" }}>{items.length} producto{items.length === 1 ? "" : "s"}</span>
                       </button>
+                      {grp !== "Sin grupo / temática" && onRenameGroup && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const input = window.prompt(`Nuevo nombre para el grupo "${grp}":`, grp);
+                            if (input && input.trim() && input.trim() !== grp) onRenameGroup(grp, input.trim());
+                          }}
+                          className="kulto-btn p-1.5 rounded-full shrink-0"
+                          style={{ color: "var(--bone)" }}
+                          aria-label={`Cambiar nombre del grupo ${grp}`}
+                          title="Cambiar nombre del grupo"
+                        >
+                          <Pencil size={14} />
+                        </button>
+                      )}
                     </div>
                     {isOpen && (
                       <div className="flex flex-col gap-3 p-2 pt-0" style={{ background: "var(--ink-2)" }}>
@@ -13727,19 +13746,17 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                               <span className="text-sm font-semibold flex-1" style={{ color: "var(--bone)" }}>{folderName || "Sin carpeta"}</span>
                               <span className="text-[11px]" style={{ color: "var(--slate)" }}>{fItems.length}</span>
                             </button>
-                            {folderName && (
-                              <button
-                                type="button"
-                                disabled={movingSelected}
-                                onClick={() => renameFolder(fItems, folderName)}
-                                className="kulto-btn p-1.5 rounded-full shrink-0"
-                                style={{ color: "var(--bone)" }}
-                                aria-label={`Cambiar nombre de la carpeta ${folderName}`}
-                                title="Cambiar nombre de la carpeta"
-                              >
-                                <Pencil size={14} />
-                              </button>
-                            )}
+                            <button
+                              type="button"
+                              disabled={movingSelected}
+                              onClick={() => renameFolder(fItems, folderName)}
+                              className="kulto-btn p-1.5 rounded-full shrink-0"
+                              style={{ color: "var(--bone)" }}
+                              aria-label={folderName ? `Cambiar nombre de la carpeta ${folderName}` : "Ponerle nombre de carpeta a estos productos"}
+                              title={folderName ? "Cambiar nombre de la carpeta" : "Crear una carpeta con estos productos"}
+                            >
+                              <Pencil size={14} />
+                            </button>
                           </div>
                         )}
                         {folderOpen && (
