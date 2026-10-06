@@ -4,7 +4,7 @@ import {
   MessageCircle, Lock, Check, Shirt, Upload, Package, Star, Sparkles, ArrowRight,
   LogOut, Loader2, ZoomIn, ZoomOut, ArrowUp, ArrowDown, Quote, Instagram, Search, Heart, GripVertical, Info,
   Sun, Moon, RotateCw, Facebook, Music2, Mail, Phone, MapPin, HelpCircle, SlidersHorizontal, RotateCcw,
-  LayoutGrid, Eye, EyeOff, TrendingUp, UserPlus, KeyRound, Boxes, FolderPlus, ArrowLeft, Move, WifiOff, Download, BarChart3
+  LayoutGrid, Eye, EyeOff, TrendingUp, UserPlus, KeyRound, Boxes, FolderPlus, ArrowLeft, Move, WifiOff, Download, BarChart3, Zap
 } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
 
@@ -192,12 +192,78 @@ async function uploadDataUrlToStorage(dataUrl) {
     const blob = dataUrlToBlob(dataUrl);
     const ext = blob.type === "image/png" ? "png" : "jpg";
     const path = `${genId("img")}.${ext}`;
-    const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(path, blob, { contentType: blob.type, upsert: false });
+    const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(path, blob, { contentType: blob.type, upsert: false, cacheControl: "31536000" });
     if (error) return null;
+    // Miniatura al lado de la foto (ver FastImg) — si falla no pasa nada,
+    // las tarjetas simplemente muestran la original.
+    if (dataUrl.length > 300) {
+      try { await uploadThumbFor(path, await loadImageEl(dataUrl)); } catch { /* sin miniatura */ }
+    }
     const { data } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path);
     return data?.publicUrl || null;
   } catch {
     return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Miniaturas — para que la web cargue rápido sin tocar las fotos originales.
+// Cada foto que se sube a Storage tiene al lado una versión chica
+// ("img_xxx_t.webp", 480 px, WebP que conserva la transparencia de los PNG).
+// Las tarjetas y listas piden la miniatura; la foto completa (la original,
+// sin cambios) solo se baja al abrir el producto o ampliar. Si una foto
+// todavía no tiene miniatura, <FastImg> muestra la original como antes.
+// ---------------------------------------------------------------------------
+const THUMB_MAX = 480;
+const STORAGE_URL_RE = new RegExp(`^(.*/storage/v1/object/public/${STORAGE_BUCKET}/[^?#]+?)\\.(png|jpe?g)$`, "i");
+function thumbUrl(url) {
+  if (typeof url !== "string") return url;
+  const m = url.match(STORAGE_URL_RE);
+  return m ? `${m[1]}_t.webp` : url;
+}
+function FastImg({ src, onError, ...rest }) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => { setFailed(false); }, [src]);
+  return (
+    <img
+      {...rest}
+      decoding="async"
+      src={failed ? src : thumbUrl(src)}
+      onError={(e) => { if (!failed && thumbUrl(src) !== src) setFailed(true); else if (onError) onError(e); }}
+    />
+  );
+}
+function loadImageEl(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+async function makeThumbBlob(img) {
+  const w0 = img.naturalWidth || img.width, h0 = img.naturalHeight || img.height;
+  if (!w0 || !h0) return null;
+  const scale = Math.min(1, THUMB_MAX / Math.max(w0, h0));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(w0 * scale));
+  canvas.height = Math.max(1, Math.round(h0 * scale));
+  canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/webp", 0.8));
+  return blob && blob.type === "image/webp" ? blob : null;
+}
+// Sube la miniatura de una foto ya subida. "fullPath" es el nombre del
+// archivo dentro del bucket (ej: "img_ab12.png").
+async function uploadThumbFor(fullPath, img) {
+  try {
+    const blob = await makeThumbBlob(img);
+    if (!blob) return false;
+    const tPath = fullPath.replace(/\.(png|jpe?g)$/i, "") + "_t.webp";
+    const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(tPath, blob, { contentType: "image/webp", upsert: true, cacheControl: "31536000" });
+    return !error;
+  } catch {
+    return false;
   }
 }
 
@@ -2138,7 +2204,7 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
         style={{ background: bg, aspectRatio: "4 / 5" }}
       >
         {images.length > 0 ? (
-          <img loading="lazy" src={images[idx]} alt={product.name} className={`kulto-card-img w-full h-full ${isCover ? "object-cover" : "object-contain"}`} />
+          <FastImg loading="lazy" src={images[idx]} alt={product.name} className={`kulto-card-img w-full h-full ${isCover ? "object-cover" : "object-contain"}`} />
         ) : (
           <div className="w-full h-full flex items-center justify-center">
             <Shirt size={36} style={{ color: "rgba(243,239,230,0.35)" }} />
@@ -2657,7 +2723,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
                 className="kulto-btn shrink-0 rounded-lg overflow-hidden"
                 style={{ width: 44, height: 44, border: i === imgIdx ? "2px solid var(--sun)" : "1px solid var(--line)", background: "var(--ink-3)" }}
               >
-                <img loading="lazy" src={img} className="w-full h-full object-contain" alt="" />
+                <FastImg loading="lazy" src={img} className="w-full h-full object-contain" alt="" />
               </button>
             ))}
           </div>
@@ -4460,7 +4526,7 @@ function DesignPlacer({ garmentImage, designs, setDesigns, sideLabel, mode = "se
                             style={{ background: "#fff", border: "1px solid var(--line)" }}
                             title={d.name}
                           >
-                            <img loading="lazy" src={d.image} className="w-full h-full object-contain p-1" alt={d.name} />
+                            <FastImg loading="lazy" src={d.image} className="w-full h-full object-contain p-1" alt={d.name} />
                           </button>
                         ))}
                       </div>
@@ -4519,7 +4585,7 @@ function TemplateProductCard({ product, onSelect }) {
           style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}
         >
           <div className="w-full flex-1 overflow-hidden flex items-center justify-center" style={{ background: product.colors?.[0]?.hex || "var(--ink-3)" }}>
-            {thumb ? <img loading="lazy" src={thumb} className="w-full h-full object-contain" alt={product.name} /> : <Shirt size={32} style={{ color: "rgba(243,239,230,0.4)" }} />}
+            {thumb ? <FastImg loading="lazy" src={thumb} className="w-full h-full object-contain" alt={product.name} /> : <Shirt size={32} style={{ color: "rgba(243,239,230,0.4)" }} />}
           </div>
           {product.audience && product.audience !== "unisex" && (
             <span
@@ -4855,7 +4921,7 @@ function Wizard({ products, categories, settings, designLibrary, designFolders, 
                         style={{ background: "var(--ink-2)", border: "1px solid var(--line)", aspectRatio: "4 / 5" }}
                       >
                         <div className="w-full flex-1 overflow-hidden flex items-center justify-center" style={{ background: sample?.colors?.[0]?.hex || "var(--ink-3)" }}>
-                          {thumb ? <img loading="lazy" src={thumb} className="w-full h-full object-contain p-3" alt={g} /> : <Shirt size={32} style={{ color: "rgba(243,239,230,0.4)" }} />}
+                          {thumb ? <FastImg loading="lazy" src={thumb} className="w-full h-full object-contain p-3" alt={g} /> : <Shirt size={32} style={{ color: "rgba(243,239,230,0.4)" }} />}
                         </div>
                         <div className="p-3">
                           <p
@@ -4893,7 +4959,7 @@ function Wizard({ products, categories, settings, designLibrary, designFolders, 
                       style={{ background: "var(--ink-2)", border: "1px solid var(--line)", aspectRatio: "4 / 5" }}
                     >
                       <div className="w-full flex-1 overflow-hidden flex items-center justify-center" style={{ background: sample?.colors?.[0]?.hex || "var(--ink-3)" }}>
-                        {thumb ? <img loading="lazy" src={thumb} className="w-full h-full object-contain p-3" alt={sg} /> : <Shirt size={32} style={{ color: "rgba(243,239,230,0.4)" }} />}
+                        {thumb ? <FastImg loading="lazy" src={thumb} className="w-full h-full object-contain p-3" alt={sg} /> : <Shirt size={32} style={{ color: "rgba(243,239,230,0.4)" }} />}
                       </div>
                       <div className="p-3">
                         <p
@@ -4988,7 +5054,7 @@ function Wizard({ products, categories, settings, designLibrary, designFolders, 
                   className="w-14 h-14 rounded-full flex items-center justify-center"
                   style={{ background: c.hex, border: colorIdx === i ? "3px solid var(--sun)" : "1px solid var(--line)" }}
                 >
-                  {(c.frontImage || c.images?.[0]) && <img loading="lazy" src={c.frontImage || c.images[0]} className="w-10 h-10 object-contain rounded-full" alt="" />}
+                  {(c.frontImage || c.images?.[0]) && <FastImg loading="lazy" src={c.frontImage || c.images[0]} className="w-10 h-10 object-contain rounded-full" alt="" />}
                 </span>
                 <span className="text-xs" style={{ color: "var(--bone)" }}>{c.name}</span>
               </button>
@@ -5325,7 +5391,7 @@ function CartDrawer({ cart, onClose, onUpdateQty, onRemove, onCheckout, customer
               {cart.map((it, idx) => (
                 <div key={it.cartId} className="flex gap-3 rounded-2xl p-3" style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}>
                   <div className="w-16 h-16 rounded-xl overflow-hidden shrink-0 flex items-center justify-center" style={{ background: it.colorHex }}>
-                    {it.previewImage ? <img loading="lazy" src={it.previewImage} className="w-full h-full object-contain p-1" alt={it.name} /> : <Shirt size={22} color="rgba(243,239,230,0.5)" />}
+                    {it.previewImage ? <FastImg loading="lazy" src={it.previewImage} className="w-full h-full object-contain p-1" alt={it.name} /> : <Shirt size={22} color="rgba(243,239,230,0.5)" />}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-2">
@@ -7987,7 +8053,7 @@ function AdminTemplateForm({ categories, templateProducts = [], onAddCategory, o
                 style={{ background: editingColorIdx === i ? "var(--signal)" : "var(--ink-3)", border: i === 0 ? "1px solid var(--sun)" : "1px solid var(--line)" }}
               >
                 <span className="w-6 h-6 rounded-full overflow-hidden flex items-center justify-center shrink-0" style={{ background: c.hex }}>
-                  {c.frontImage && <img loading="lazy" src={c.frontImage} className="w-full h-full object-contain" alt={c.name || "Color"} />}
+                  {c.frontImage && <FastImg loading="lazy" src={c.frontImage} className="w-full h-full object-contain" alt={c.name || "Color"} />}
                 </span>
                 <span className="text-xs" style={{ color: "var(--bone)" }}>{c.name || "(sin nombre)"}</span>
                 {i === 0 ? (
@@ -9419,6 +9485,108 @@ function AdminSalesPanel({ products, orders, settings, onSaveSettings }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Optimizar fotos — miniaturas para que la web cargue rápido          */
+/* ------------------------------------------------------------------ */
+function AdminImageOptimizer() {
+  const [running, setRunning] = useState(false);
+  const [status, setStatus] = useState("");
+  const [progress, setProgress] = useState({ done: 0, total: 0 });
+  const [result, setResult] = useState(null);
+
+  const collectUrls = (value, out) => {
+    if (Array.isArray(value)) value.forEach((v) => collectUrls(v, out));
+    else if (value && typeof value === "object") Object.values(value).forEach((v) => collectUrls(v, out));
+    else if (typeof value === "string" && thumbUrl(value) !== value) out.add(value);
+  };
+
+  const run = async () => {
+    setRunning(true);
+    setResult(null);
+    setProgress({ done: 0, total: 0 });
+    try {
+      setStatus("Comprobando el almacenamiento de fotos…");
+      const probe = await uploadDataUrlToStorage(
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+      );
+      if (!probe) {
+        setResult({ ok: false, msg: 'No se pudo usar el almacenamiento de fotos. Falta crear el "bucket" kulto-photos en Supabase (ejecutá el archivo storage-setup.sql en Supabase → SQL Editor) y volvé a probar.' });
+        return;
+      }
+      setStatus("Leyendo productos, diseños y ajustes…");
+      const [products, draftProducts, designLibrary, customWorkGallery, settings] = await Promise.all([
+        loadProducts(), loadDraftProducts(), loadDesignLibrary(), loadCustomWorkGallery(), loadSettings(),
+      ]);
+      // 1) Fotos viejas guardadas como texto dentro de la base → a Storage.
+      setStatus("Pasando las fotos viejas a archivos…");
+      await migrateLegacyImages({ products, draftProducts, designLibrary, customWorkGallery });
+      // 2) Miniaturas de todas las fotos que ya están en Storage.
+      const [p2, d2, l2, c2, s2] = await Promise.all([
+        loadProducts(), loadDraftProducts(), loadDesignLibrary(), loadCustomWorkGallery(), loadSettings(),
+      ]);
+      const urls = new Set();
+      [p2, d2, l2, c2, s2].forEach((v) => collectUrls(v, urls));
+      const list = [...urls];
+      setProgress({ done: 0, total: list.length });
+      setStatus("Creando miniaturas…");
+      let created = 0, already = 0, failed = 0, done = 0;
+      let cursor = 0;
+      const worker = async () => {
+        while (cursor < list.length) {
+          const url = list[cursor++];
+          try {
+            let exists = false;
+            try { exists = (await fetch(thumbUrl(url), { method: "HEAD", cache: "no-store" })).ok; } catch { exists = false; }
+            if (exists) already++;
+            else {
+              const img = await loadImageEl(url);
+              const fullPath = decodeURIComponent(url.split(`/${STORAGE_BUCKET}/`)[1].split(/[?#]/)[0]);
+              if (await uploadThumbFor(fullPath, img)) created++; else failed++;
+            }
+          } catch { failed++; }
+          done++;
+          setProgress({ done, total: list.length });
+        }
+      };
+      await Promise.all([worker(), worker(), worker(), worker()]);
+      setResult({ ok: true, msg: `Listo: ${created} miniaturas nuevas, ${already} ya existían${failed ? `, ${failed} no se pudieron crear` : ""}. Recargá la web (Ctrl+F5) para ver la diferencia.` });
+    } catch (e) {
+      setResult({ ok: false, msg: "Algo falló: " + (e?.message || "error desconocido") + ". Podés volver a tocar el botón, retoma donde quedó." });
+    } finally {
+      setRunning(false);
+      setStatus("");
+    }
+  };
+
+  return (
+    <div className="rounded-2xl p-4 flex flex-col gap-3" style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}>
+      <div className="flex items-center gap-2">
+        <Zap size={16} style={{ color: "var(--sun)" }} />
+        <p className="text-sm font-semibold" style={{ color: "var(--bone)" }}>Velocidad de la web — optimizar fotos</p>
+      </div>
+      <p className="text-xs" style={{ color: "var(--slate)" }}>
+        Las tarjetas del catálogo pasan a cargar una miniatura liviana (los PNG con fondo transparente conservan su transparencia) y la foto original completa solo se descarga al abrir el producto. Las fotos que subas de ahora en más ya generan su miniatura solas. Este botón hace lo mismo con las fotos que ya tenés cargadas. No borra ni cambia ninguna foto original. Puede tardar unos minutos: dejá esta pantalla abierta hasta que termine. Se puede repetir sin problema.
+      </p>
+      <button
+        type="button"
+        onClick={run}
+        disabled={running}
+        className="kulto-btn self-start text-sm font-semibold px-4 py-2 rounded-full flex items-center gap-2"
+        style={{ background: "var(--sun)", color: "var(--ink)", opacity: running ? 0.6 : 1 }}
+      >
+        {running ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
+        {running ? "Optimizando…" : "Optimizar fotos ahora"}
+      </button>
+      {running && (
+        <p className="text-xs" style={{ color: "var(--bone)" }}>
+          {status}{progress.total > 0 ? ` ${progress.done} de ${progress.total}` : ""}
+        </p>
+      )}
+      {result && <p className="text-xs" style={{ color: result.ok ? "var(--sun)" : "var(--signal)" }}>{result.msg}</p>}
     </div>
   );
 }
@@ -11965,7 +12133,7 @@ function AdminPersonalizeGroupImages({ templateProducts = [], settings, onSave }
             <div key={g} className="flex flex-col items-center gap-1.5">
               <div className="relative w-20 h-24 rounded-xl overflow-hidden flex items-center justify-center" style={{ background: "var(--ink-3)", border: img ? "2px solid var(--sun)" : "1px solid var(--line)" }}>
                 {(img || fallback) ? (
-                  <img loading="lazy" src={img || fallback} className="w-full h-full object-contain p-1" alt={g} />
+                  <FastImg loading="lazy" src={img || fallback} className="w-full h-full object-contain p-1" alt={g} />
                 ) : (
                   <Shirt size={20} color="rgba(243,239,230,0.4)" />
                 )}
@@ -12137,7 +12305,7 @@ function AdminDesignLibrary({ designs, onAdd, onRemove, folders = [], categories
   const renderDesign = (d) => (
     <div key={d.id} className="flex flex-col items-center gap-1">
       <div className="w-16 h-16 rounded-lg overflow-hidden flex items-center justify-center relative" style={{ background: "var(--ink-3)", border: "1px solid var(--line)" }}>
-        <img loading="lazy" src={d.image} className="w-full h-full object-contain" alt={d.name} />
+        <FastImg loading="lazy" src={d.image} className="w-full h-full object-contain" alt={d.name} />
         {openFolder && (
           <button
             onClick={() => onToggleCover(openFolder.id, d.id)}
@@ -13039,7 +13207,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                                 aria-label={`Seleccionar ${p.name}`}
                               />
                               <div className="w-12 h-12 rounded-xl overflow-hidden shrink-0 flex items-center justify-center" style={{ background: p.colors?.[0]?.hex || "var(--ink-3)" }}>
-                                {(p.photoPool?.[0] || getColorImages(p.colors?.[0])[0]) ? <img loading="lazy" src={p.photoPool?.[0] || getColorImages(p.colors?.[0])[0]} className="w-full h-full object-contain p-0.5" alt={p.name} /> : <Shirt size={18} color="rgba(243,239,230,0.4)" />}
+                                {(p.photoPool?.[0] || getColorImages(p.colors?.[0])[0]) ? <FastImg loading="lazy" src={p.photoPool?.[0] || getColorImages(p.colors?.[0])[0]} className="w-full h-full object-contain p-0.5" alt={p.name} /> : <Shirt size={18} color="rgba(243,239,230,0.4)" />}
                               </div>
                               <div className="flex-1 min-w-0">
                                 <p className="text-sm font-semibold truncate" style={{ color: "var(--bone)" }}>{p.name}</p>
@@ -13144,7 +13312,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                   style={{ background: editingTemplate?.id === p.id ? "var(--ink-3)" : "var(--ink-2)", border: editingTemplate?.id === p.id ? "1px solid var(--sun)" : "1px solid var(--line)", opacity: p.hidden ? 0.5 : 1 }}
                 >
                   <div className="w-12 h-12 rounded-xl overflow-hidden shrink-0 flex items-center justify-center" style={{ background: p.colors?.[0]?.hex || "var(--ink-3)" }}>
-                    {(p.colors?.[0]?.frontImage || p.photoPool?.[0]) ? <img loading="lazy" src={p.colors?.[0]?.frontImage || p.photoPool?.[0]} className="w-full h-full object-contain p-0.5" alt={p.name} /> : <Shirt size={18} color="rgba(243,239,230,0.4)" />}
+                    {(p.colors?.[0]?.frontImage || p.photoPool?.[0]) ? <FastImg loading="lazy" src={p.colors?.[0]?.frontImage || p.photoPool?.[0]} className="w-full h-full object-contain p-0.5" alt={p.name} /> : <Shirt size={18} color="rgba(243,239,230,0.4)" />}
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold truncate" style={{ color: "var(--bone)" }}>{p.name}</p>
@@ -13194,6 +13362,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
       {tab === "resenas" && <AdminReviews reviews={reviews} onSave={onSaveReview} onDelete={onDeleteReview} onReorder={onReorderReview} />}
       {tab === "ajustes" && (
         <div className="flex flex-col gap-6">
+          <AdminImageOptimizer />
           <AdminBrandSettings settings={settings} onSave={onSaveSettings} />
           <AdminBannerSettings settings={settings} groups={groups} onSave={onSaveSettings} />
           <AdminProductsMenu items={settings.productsMenuItems || []} categories={categories} groups={groups} onSave={onSaveSettings} />
