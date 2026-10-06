@@ -12906,6 +12906,12 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
               <AdminCategoryManager categories={categories} onRename={onRenameCategory} onDelete={onDeleteCategory} />
             </div>
             <div className="flex flex-col gap-3">
+              {selectedProductIds.length === 0 && sellableProducts.length > 0 && (
+                <div className="rounded-xl p-3 text-xs flex gap-2 items-start" style={{ background: "var(--ink-2)", border: "1px dashed var(--line)", color: "var(--slate)" }}>
+                  <FolderPlus size={14} className="shrink-0 mt-0.5" style={{ color: "var(--sun)" }} />
+                  <span>Para crear carpetas dentro de un grupo (ej: Naruto dentro de "anime"): abrí el grupo, tildá los productos que van juntos y arriba va a aparecer el cuadro "Carpeta" — escribí el nombre y tocá "Meter en carpeta".</span>
+                </div>
+              )}
               <div className="flex items-center justify-between gap-2 flex-wrap">
                 <p className="text-sm font-semibold" style={{ color: "var(--bone)" }}>Productos ({sellableProducts.length})</p>
                 {selectedProductIds.length > 0 && (
@@ -13125,7 +13131,47 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                       <div className="flex flex-col gap-3 p-2 pt-0" style={{ background: "var(--ink-2)" }}>
                         {Object.entries(
                           items.reduce((acc, p) => {
-                            // Dentro de cada grupo/temática, a su vez se separa
+                            // Dentro de cada grupo/temática (ej: "anime") se arman
+                            // carpetas según la subcategoría de cada producto
+                            // (ej: Naruto, Dragon Ball). Lo que no tiene carpeta
+                            // va aparte, en "Sin carpeta".
+                            const f = p.subcategory || "";
+                            (acc[f] = acc[f] || []).push(p);
+                            return acc;
+                          }, {})
+                        ).sort(([x], [y]) => (x || "\uffff").localeCompare(y || "\uffff", "es")).map(([folderName, fItems]) => {
+                        const hasAnyFolder = items.some((p) => p.subcategory);
+                        const folderKey = `${grp}|${folderName}`;
+                        const folderOpen = !hasAnyFolder || expandedFolders.includes(folderKey) || (editingProduct && fItems.some((x) => x.id === editingProduct.id));
+                        const folderAllSelected = fItems.length > 0 && fItems.every((x) => selectedProductIds.includes(x.id));
+                        const toggleSelectFolder = () => {
+                          const ids = fItems.map((x) => x.id);
+                          setSelectedProductIds((prev) => (folderAllSelected ? prev.filter((id) => !ids.includes(id)) : Array.from(new Set([...prev, ...ids]))));
+                        };
+                        return (
+                        <React.Fragment key={folderName || "__sin_carpeta"}>
+                        {hasAnyFolder && (
+                          <div className="flex items-center gap-2 rounded-xl px-3 py-2" style={{ background: "var(--ink-3)", border: "1px solid var(--line)" }}>
+                            <input
+                              type="checkbox"
+                              checked={folderAllSelected}
+                              onChange={toggleSelectFolder}
+                              style={{ accentColor: "var(--signal)" }}
+                              aria-label={`Seleccionar carpeta "${folderName || "Sin carpeta"}"`}
+                            />
+                            <button type="button" onClick={() => toggleFolder(folderKey)} className="kulto-btn flex-1 flex items-center gap-2 text-left">
+                              {folderOpen ? <ChevronDown size={14} color="var(--slate)" /> : <ChevronRight size={14} color="var(--slate)" />}
+                              <FolderPlus size={13} color="var(--sun)" />
+                              <span className="text-sm font-semibold flex-1" style={{ color: "var(--bone)" }}>{folderName || "Sin carpeta"}</span>
+                              <span className="text-[11px]" style={{ color: "var(--slate)" }}>{fItems.length}</span>
+                            </button>
+                          </div>
+                        )}
+                        {folderOpen && (
+                        <div className={`flex flex-col gap-3 ${hasAnyFolder ? "pl-3" : ""}`}>
+                        {Object.entries(
+                          fItems.reduce((acc, p) => {
+                            // Dentro de cada carpeta, a su vez se separa
                             // por categoría (la prenda física) — para que, por
                             // ejemplo, "Sudaderas" quede en su propia carpeta y
                             // no mezclado con "Camisetas" del mismo diseño.
@@ -13134,10 +13180,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                             return acc;
                           }, {})
                         ).map(([cat, catItemsRaw]) => {
-                          // Dentro de cada prenda, los diseños se ordenan en
-                          // carpetas según su subcategoría (ej: Naruto, Dragon Ball).
-                          const catItems = [...catItemsRaw].sort((x, y) => (x.subcategory || "\uffff").localeCompare(y.subcategory || "\uffff", "es"));
-                          const hasFolders = catItems.some((p) => p.subcategory);
+                          const catItems = catItemsRaw;
                           const catAllSelected = catItems.length > 0 && catItems.every((p) => selectedProductIds.includes(p.id));
                           const toggleSelectCat = () => {
                             const ids = catItems.map((p) => p.id);
@@ -13158,40 +13201,11 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                               </p>
                             </label>
                             <div className="flex flex-col gap-2 p-2">
-                        {catItems.map((p, pIdx) => {
+                        {catItems.map((p) => {
                           const modelsOpen = expandedModelsFor === p.id;
                           const variants = linkedVariants(p);
-                          const folderName = p.subcategory || "";
-                          const folderKey = `${grp}|${cat}|${folderName}`;
-                          const folderItems = hasFolders ? catItems.filter((x) => (x.subcategory || "") === folderName) : [];
-                          const isFirstInFolder = hasFolders && (pIdx === 0 || (catItems[pIdx - 1].subcategory || "") !== folderName);
-                          const folderOpen = !hasFolders || expandedFolders.includes(folderKey) || (editingProduct && folderItems.some((x) => x.id === editingProduct.id));
-                          const folderAllSelected = folderItems.length > 0 && folderItems.every((x) => selectedProductIds.includes(x.id));
-                          const toggleSelectFolder = () => {
-                            const ids = folderItems.map((x) => x.id);
-                            setSelectedProductIds((prev) => (folderAllSelected ? prev.filter((id) => !ids.includes(id)) : Array.from(new Set([...prev, ...ids]))));
-                          };
                           return (
-                          <React.Fragment key={p.id}>
-                          {isFirstInFolder && (
-                            <div className="flex items-center gap-2 rounded-xl px-3 py-2" style={{ background: "var(--ink-3)", border: "1px solid var(--line)" }}>
-                              <input
-                                type="checkbox"
-                                checked={folderAllSelected}
-                                onChange={toggleSelectFolder}
-                                style={{ accentColor: "var(--signal)" }}
-                                aria-label={`Seleccionar carpeta "${folderName || "Sin carpeta"}"`}
-                              />
-                              <button type="button" onClick={() => toggleFolder(folderKey)} className="kulto-btn flex-1 flex items-center gap-2 text-left">
-                                {folderOpen ? <ChevronDown size={14} color="var(--slate)" /> : <ChevronRight size={14} color="var(--slate)" />}
-                                <FolderPlus size={13} color="var(--sun)" />
-                                <span className="text-xs font-semibold flex-1" style={{ color: "var(--bone)" }}>{folderName || "Sin carpeta"}</span>
-                                <span className="text-[11px]" style={{ color: "var(--slate)" }}>{folderItems.length}</span>
-                              </button>
-                            </div>
-                          )}
-                          {folderOpen && (
-                          <div className="flex flex-col gap-1.5">
+                          <div key={p.id} className="flex flex-col gap-1.5">
                             <div
                               onClick={() => setEditingProduct(p)}
                               className="kulto-btn flex items-center gap-3 rounded-2xl p-3 text-left"
@@ -13259,13 +13273,16 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                               </div>
                             )}
                           </div>
-                          )}
-                          </React.Fragment>
                           );
                         })}
                             </div>
                           </div>
                           );
+                        })}
+                        </div>
+                        )}
+                        </React.Fragment>
+                        );
                         })}
                       </div>
                     )}
@@ -14493,6 +14510,35 @@ export default function App() {
   // pedidos viejos que los referencian, etc.) y el admin los sigue viendo
   // en su panel para poder mostrarlos de nuevo cuando quiera.
   const sellableProducts = products.filter((p) => !p.tags?.template && !p.hidden);
+
+  // Botón "atrás" del navegador: cada pantalla (inicio, catálogo,
+  // personalizar, ficha de producto, carrito) se anota en el historial del
+  // navegador, así "atrás" vuelve a la pantalla anterior de la web en vez de
+  // salirse de la tienda. La dirección (URL) no cambia, solo el historial.
+  const navProductsRef = useRef([]);
+  navProductsRef.current = sellableProducts;
+  useEffect(() => {
+    const onPop = (e) => {
+      const st = e.state || {};
+      setPage(st.page || "home");
+      setSelectedProduct(st.sp ? (navProductsRef.current.find((p) => p.id === st.sp) || null) : null);
+      setCartOpen(!!st.cart);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+  useEffect(() => {
+    if (loading) return;
+    const cur = { page, sp: selectedProduct?.id || null, cart: !!cartOpen };
+    const prev = window.history.state;
+    try {
+      if (!prev || prev.page === undefined) window.history.replaceState(cur, "");
+      // Cerrar el carrito o la ficha con la X equivale a "atrás": así no
+      // quedan entradas de más en el historial.
+      else if (prev.page === cur.page && ((prev.cart && !cur.cart && prev.sp === cur.sp) || (prev.sp && !cur.sp && prev.cart === cur.cart))) window.history.back();
+      else if (prev.page !== cur.page || prev.sp !== cur.sp || prev.cart !== cur.cart) window.history.pushState(cur, "");
+    } catch { /* si el navegador no deja tocar el historial, la web sigue igual */ }
+  }, [page, selectedProduct, cartOpen, loading]);
 
   const handleAddToCart = useCallback((item) => {
     setCart((prev) => [...prev, item]);
