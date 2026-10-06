@@ -25,14 +25,28 @@ const supabase = createClient(
 // todas viajan al mismo tiempo se pelean por los mismos recursos de la base
 // y terminan canceladas por tardar demasiado ("statement timeout", error
 // 57014) — eso es lo que hacía "desaparecer" productos y diseños enteros.
-// Esta cola hace que todas las lecturas a la tabla compartida pasen de a una
-// (nunca varias pesadas en simultáneo), para que cada una tenga todo el
-// tiempo que necesita.
-let kvQueueTail = Promise.resolve();
+// Esta cola limita cuántas lecturas viajan en simultáneo (nunca todas juntas),
+// para que ninguna pesada se pise con otras.
+// Ahora que las fotos viven como archivos aparte (cada fila es liviana), se
+// permiten varias lecturas a la vez (hasta 6) en vez de una sola: antes cada
+// consulta esperaba a la anterior, y con ~100 consultas en una conexión
+// lejana (ej: desde Argentina) la suma de esperas hacía tardar la carga o
+// llegar al tiempo límite.
+const KV_MAX_PARALLEL = 6;
+let kvActive = 0;
+const kvWaiting = [];
+function kvNext() {
+  while (kvActive < KV_MAX_PARALLEL && kvWaiting.length) {
+    const { fn, resolve, reject } = kvWaiting.shift();
+    kvActive++;
+    Promise.resolve().then(fn).then(resolve, reject).finally(() => { kvActive--; kvNext(); });
+  }
+}
 function queueKvRead(fn) {
-  const result = kvQueueTail.then(fn, fn);
-  kvQueueTail = result.then(() => {}, () => {});
-  return result;
+  return new Promise((resolve, reject) => {
+    kvWaiting.push({ fn, resolve, reject });
+    kvNext();
+  });
 }
 
 /* ------------------------------------------------------------------ */
@@ -931,7 +945,7 @@ async function storageGetMany(keys, shared) {
       const b = await fetchChunk(chunk.slice(mid));
       return [...a, ...b];
     }
-    const CHUNK_SIZE = 8;
+    const CHUNK_SIZE = 25;
     const chunks = [];
     for (let i = 0; i < keys.length; i += CHUNK_SIZE) chunks.push(keys.slice(i, i + CHUNK_SIZE));
     // Las tandas se piden TODAS a la vez (antes se pedían una por una, de a
