@@ -179,6 +179,31 @@ function isLocalOrder(order, settings) {
   return areas.some((a) => city.includes(a) || (city.length >= 5 && a.includes(city)));
 }
 
+// Una carpeta de diseños puede quedar disponible en varias prendas de
+// "Personalizar" a la vez (ej: Beagle, Jamaica y las sudaderas). "garments"
+// guarda claves "s:Beagle" (un estilo/modelo) o "c:Camisetas" (toda una
+// categoría). Si no tiene ninguna marcada, vale la categoría única de siempre
+// (o "todas") — así todo lo anterior sigue funcionando igual.
+function garmentStyleKey(p) {
+  return p?.subcategory || p?.name || "";
+}
+function folderAppliesTo(folder, product) {
+  const g = folder?.garments;
+  if (Array.isArray(g) && g.length) {
+    if (!product) return false;
+    return g.includes(`s:${garmentStyleKey(product)}`) || g.includes(`c:${product.category}`);
+  }
+  return !folder?.category || folder.category === product?.category;
+}
+// Precio de una prenda base de "Personalizar" (misma prioridad que al comprar):
+// precio propio → precio de su estilo → precio general.
+function templatePriceFor(p, settings) {
+  if (!p) return 0;
+  if (p.price != null) return Number(p.price);
+  const sp = settings?.personalizeSubcategoryPrices?.[garmentStyleKey(p)];
+  return sp != null ? Number(sp) : Number(settings?.personalizedBasePrice) || 0;
+}
+
 function formatPrice(n) {
   const num = Number(n) || 0;
   return num.toLocaleString("es-ES", { style: "currency", currency: "EUR" });
@@ -4176,12 +4201,12 @@ function Catalog({ products, categories, groups, onOpen, initialQuery, initialGr
    independent. Tap a layer to select it (shows its handles + a size/rotation
    slider + a remove button); drag the layer to move it, its corner handle to
    resize it, and its top handle to rotate it freely. */
-function DesignPlacer({ garmentImage, designs, setDesigns, sideLabel, mode = "self", designLibrary = [], designFolders = [], productCategory = null }) {
+function DesignPlacer({ garmentImage, designs, setDesigns, sideLabel, mode = "self", designLibrary = [], designFolders = [], productCategory = null, product = null }) {
   // Una carpeta puede quedar atada a una categoría de producto (ej: "Mates")
   // para que sus diseños solo aparezcan al personalizar esa categoría — las
   // carpetas sin categoría asignada ("Todas") se ven siempre, en cualquier
   // producto.
-  const visibleFolders = designFolders.filter((f) => !f.category || f.category === productCategory);
+  const visibleFolders = designFolders.filter((f) => folderAppliesTo(f, product || (productCategory ? { category: productCategory } : null)));
   const containerRef = useRef(null);
   const zoomContainerRef = useRef(null);
   const draggingId = useRef(null);
@@ -4199,9 +4224,9 @@ function DesignPlacer({ garmentImage, designs, setDesigns, sideLabel, mode = "se
   // sin poder acercarse a los detalles.
   const [zoom, setZoom] = useState(1);
 
-  const addLayer = (image) => {
+  const addLayer = (image, folderId = null) => {
     const id = genId("dl");
-    setDesigns((prev) => [...prev, { id, image, x: 50, y: 42, widthPct: 0.38, rotation: 0 }]);
+    setDesigns((prev) => [...prev, { id, image, x: 50, y: 42, widthPct: 0.38, rotation: 0, ...(folderId ? { folderId } : {}) }]);
     setSelectedId(id);
     setShowLibrary(false);
   };
@@ -4563,7 +4588,7 @@ function DesignPlacer({ garmentImage, designs, setDesigns, sideLabel, mode = "se
                           <button
                             key={d.id}
                             type="button"
-                            onClick={() => addLayer(d.image)}
+                            onClick={() => addLayer(d.image, d.folderId)}
                             className="kulto-btn rounded-lg overflow-hidden aspect-square"
                             style={{ background: "#fff", border: "1px solid var(--line)" }}
                             title={d.name}
@@ -4919,6 +4944,28 @@ function Wizard({ products, categories, settings, designLibrary, designFolders, 
   // porque el admin puede haber cargado, por ejemplo, solo la foto de atrás.
   const activeZone = availableZones.includes(side) ? side : availableZones[0];
 
+  // Cambiar de prenda sin perder el diseño: el cliente puede ver su diseño en
+  // otra prenda (ej: de camiseta normal a oversize) y el precio se actualiza.
+  // Solo se ofrecen las prendas donde están disponibles las carpetas de las
+  // que sacó sus diseños de la librería (los que subió él mismo no tienen límite).
+  const switchLayers = [...frontDesigns, ...backDesigns, ...sleeveLeftDesigns, ...sleeveRightDesigns];
+  const switchFolderIds = [...new Set(switchLayers.map((l) => l.folderId).filter(Boolean))];
+  const switchOptions = prod
+    ? productsWithColors.filter((p) => p.id !== prod.id && switchFolderIds.every((fid) => {
+        const f = designFolders.find((x) => x.id === fid);
+        return !f || folderAppliesTo(f, p);
+      }))
+    : [];
+  const switchGarment = (p) => {
+    const sameColor = (p.colors || []).findIndex((c) => c.name === color?.name);
+    const sameSize = (p.sizes || []).findIndex((sz) => JSON.stringify(sz) === JSON.stringify(size));
+    setProd(p);
+    setColorIdx(sameColor >= 0 ? sameColor : 0);
+    setSizeIdx(sameSize >= 0 ? sameSize : 0);
+    setComposed({ front: null, back: null, sleeveLeft: null, sleeveRight: null });
+    setSide("front");
+  };
+
   const steps = [
     { n: 1, label: "Prenda" },
     { n: 2, label: "Color" },
@@ -5222,6 +5269,29 @@ function Wizard({ products, categories, settings, designLibrary, designFolders, 
             <ChevronLeft size={16} /> Volver
           </button>
 
+          {switchOptions.length > 0 && (
+            <div className="rounded-2xl p-3 mb-5" style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}>
+              <p className="text-xs mb-2" style={{ color: "var(--slate)" }}>
+                Tu prenda: <span className="font-semibold" style={{ color: "var(--bone)" }}>{prod.name}</span> · <span className="font-semibold" style={{ color: "var(--sun)" }}>{formatPrice(unitPrice)}</span>. ¿Lo querés en otra prenda? Elegila y el precio se actualiza (tu diseño se mantiene):
+              </p>
+              <div className="flex gap-2 overflow-x-auto kulto-scrollbar pb-1">
+                {switchOptions.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => switchGarment(p)}
+                    className="kulto-btn shrink-0 rounded-xl px-3 py-2 text-left"
+                    style={{ background: "var(--ink-3)", border: "1px solid var(--line)" }}
+                  >
+                    <span className="block text-xs font-semibold" style={{ color: "var(--bone)" }}>{p.name}</span>
+                    <span className="block text-[10px]" style={{ color: "var(--slate)" }}>{p.category}{p.subcategory ? ` · ${p.subcategory}` : ""}</span>
+                    <span className="block text-xs font-semibold" style={{ color: "var(--sun)" }}>{formatPrice(templatePriceFor(p, settings))}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {source === null && (
             <div className="max-w-md mx-auto text-center">
               <p className="text-sm mb-5" style={{ color: "var(--slate)" }}>4. ¿Cómo querés tu diseño?</p>
@@ -5302,7 +5372,7 @@ function Wizard({ products, categories, settings, designLibrary, designFolders, 
               <p className="text-sm mb-1 text-center" style={{ color: "var(--slate)" }}>4. Diseño para {zoneConfig[activeZone].label} (opcional)</p>
               <PrintSizeGuide settings={settings} zone={activeZone} />
               <div className="mt-3">
-                <DesignPlacer garmentImage={zoneConfig[activeZone].image} designs={zoneConfig[activeZone].designs} setDesigns={zoneConfig[activeZone].setDesigns} sideLabel={zoneConfig[activeZone].sideLabel} mode={source} designLibrary={designLibrary} designFolders={designFolders} productCategory={prod?.category || null} />
+                <DesignPlacer garmentImage={zoneConfig[activeZone].image} designs={zoneConfig[activeZone].designs} setDesigns={zoneConfig[activeZone].setDesigns} sideLabel={zoneConfig[activeZone].sideLabel} mode={source} designLibrary={designLibrary} designFolders={designFolders} productCategory={prod?.category || null} product={prod} />
               </div>
               <div className="flex justify-center gap-3 mt-5">
                 <button onClick={() => { zoneConfig[activeZone].setDesigns([]); finishSide(activeZone); }} className="kulto-btn text-sm font-semibold px-4 py-2.5 rounded-full" style={{ border: "1px solid var(--line)", color: "var(--slate)" }}>
@@ -5455,6 +5525,54 @@ function Wizard({ products, categories, settings, designLibrary, designFolders, 
 /*  Cart Drawer                                                        */
 /* ------------------------------------------------------------------ */
 
+// --- Confirmación del mail antes de comprar --------------------------------
+// Antes de registrar un pedido se le manda un código de 6 dígitos al mail que
+// puso el cliente y tiene que escribirlo — así no entran pedidos con mails
+// falsos o mal escritos. El código lo genera y lo comprueba el servidor
+// (api/verify-email.js): nunca viaja al navegador.
+const VERIFIED_EMAIL_KEY = "kulto:checkout-verified-email";
+function getVerifiedCheckoutEmail() {
+  try { return sessionStorage.getItem(VERIFIED_EMAIL_KEY) || ""; } catch { return ""; }
+}
+function setVerifiedCheckoutEmail(email) {
+  try { sessionStorage.setItem(VERIFIED_EMAIL_KEY, normalizeEmail(email)); } catch { /* sin storage: se pedirá de nuevo */ }
+}
+// Un cliente con cuenta ya confirmada que compra con ese mismo mail no tiene
+// que volver a verificarlo.
+function isCheckoutEmailVerified(email, customer) {
+  const e = normalizeEmail(email);
+  if (!e) return false;
+  if (customer && customer.emailVerified !== false && normalizeEmail(customer.email) === e) return true;
+  return getVerifiedCheckoutEmail() === e;
+}
+async function requestCheckoutCode(email, name, storeName) {
+  try {
+    const res = await fetch("/api/verify-email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "send", email, name, storeName }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.token) return { ok: false, error: data.error || "No se pudo enviar el código." };
+    return { ok: true, token: data.token };
+  } catch {
+    return { ok: false, error: "No se pudo conectar con el servidor." };
+  }
+}
+async function checkCheckoutCode(email, code, token) {
+  try {
+    const res = await fetch("/api/verify-email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "check", email, code, token }),
+    });
+    const data = await res.json().catch(() => ({}));
+    return data.ok ? { ok: true } : { ok: false, error: data.error || "El código no es correcto." };
+  } catch {
+    return { ok: false, error: "No se pudo conectar con el servidor." };
+  }
+}
+
 function isValidEmail(v) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
 }
@@ -5467,6 +5585,28 @@ function CartDrawer({ cart, onClose, onUpdateQty, onRemove, onCheckout, customer
   // ítem para todo el carrito.
   const pointsEarned = cart.reduce((s, it) => s + it.qty * (Number(it.points ?? settings.loyaltyPointsPerItem) || 0), 0);
   const [touched, setTouched] = useState(false);
+  // Confirmación del mail antes de comprar (ver requestCheckoutCode).
+  const [verify, setVerify] = useState(null); // null | { token, code, busy, error, sentAt, args }
+  const startVerification = async (args) => {
+    setVerify({ token: null, code: "", busy: true, error: "", sentAt: 0, args });
+    const r = await requestCheckoutCode(normalizeEmail(customerEmail), customerName, settings?.logoText || "Kulto");
+    setVerify((v) => v && (r.ok ? { ...v, token: r.token, busy: false, sentAt: Date.now() } : { ...v, busy: false, error: r.error }));
+  };
+  const resendVerification = async () => {
+    setVerify((v) => v && { ...v, busy: true, error: "" });
+    const r = await requestCheckoutCode(normalizeEmail(customerEmail), customerName, settings?.logoText || "Kulto");
+    setVerify((v) => v && (r.ok ? { ...v, token: r.token, code: "", busy: false, sentAt: Date.now(), error: "" } : { ...v, busy: false, error: r.error }));
+  };
+  const confirmCode = async () => {
+    if (!verify || !verify.token || verify.code.trim().length !== 6) return;
+    setVerify((v) => ({ ...v, busy: true, error: "" }));
+    const r = await checkCheckoutCode(normalizeEmail(customerEmail), verify.code.trim(), verify.token);
+    if (!r.ok) { setVerify((v) => ({ ...v, busy: false, error: r.error })); return; }
+    setVerifiedCheckoutEmail(customerEmail);
+    const args = verify.args;
+    setVerify(null);
+    onCheckout(args);
+  };
   const emailOk = isValidEmail(customerEmail);
   const freeShipping = subtotal >= settings.freeShippingThreshold;
   // El costo de envío depende de a qué provincia/comunidad va el pedido —
@@ -5695,9 +5835,59 @@ function CartDrawer({ cart, onClose, onUpdateQty, onRemove, onCheckout, customer
                   </p>
                 )}
               </div>
+              {verify ? (
+                <div className="rounded-2xl p-4 flex flex-col gap-3" style={{ background: "var(--ink-2)", border: "1px solid var(--sun)" }}>
+                  <p className="text-sm font-semibold" style={{ color: "var(--bone)" }}>Confirme su mail para finalizar la compra</p>
+                  {verify.busy && !verify.token && !verify.error ? (
+                    <p className="text-xs flex items-center gap-2" style={{ color: "var(--slate)" }}><Loader2 size={14} className="animate-spin" /> Enviando el código…</p>
+                  ) : verify.token ? (
+                    <>
+                      <p className="text-xs" style={{ color: "var(--slate)" }}>
+                        Le enviamos un código de 6 dígitos a <span style={{ color: "var(--bone)" }}>{customerEmail}</span>. Escríbalo acá para confirmar su pedido (revise también la carpeta de spam).
+                      </p>
+                      <input
+                        value={verify.code}
+                        onChange={(e) => setVerify((v) => ({ ...v, code: e.target.value.replace(/\D/g, "").slice(0, 6) }))}
+                        onKeyDown={(e) => e.key === "Enter" && confirmCode()}
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
+                        placeholder="000000"
+                        className="rounded-xl p-3 text-center text-xl font-bold tracking-widest"
+                        style={{ background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" }}
+                      />
+                    </>
+                  ) : null}
+                  {verify.error && <p className="text-xs" style={{ color: "var(--signal)" }}>{verify.error}</p>}
+                  <div className="flex flex-wrap gap-2">
+                    {verify.token && (
+                      <button
+                        onClick={confirmCode}
+                        disabled={verify.busy || verify.code.length !== 6}
+                        className="kulto-btn flex-1 rounded-full py-2.5 text-sm font-semibold flex items-center justify-center gap-2"
+                        style={{ background: verify.code.length === 6 ? "var(--signal)" : "var(--ink-3)", color: verify.code.length === 6 ? "var(--bone)" : "var(--slate)" }}
+                      >
+                        {verify.busy ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Confirmar compra
+                      </button>
+                    )}
+                    <button onClick={resendVerification} disabled={verify.busy} className="kulto-btn rounded-full px-4 py-2.5 text-xs font-semibold" style={{ background: "var(--ink-3)", color: "var(--bone)" }}>
+                      {verify.token ? "Reenviar código" : "Reintentar"}
+                    </button>
+                    <button onClick={() => setVerify(null)} className="kulto-btn rounded-full px-4 py-2.5 text-xs" style={{ color: "var(--slate)" }}>
+                      Cambiar mail
+                    </button>
+                  </div>
+                </div>
+              ) : (
+              <>
               <button
                 disabled={sending || !canCheckout}
-                onClick={() => { setTouched(true); if (canCheckout) onCheckout({ subtotal, shippingCost, total, discountAmount, itemCount }); }}
+                onClick={() => {
+                  setTouched(true);
+                  if (!canCheckout) return;
+                  const args = { subtotal, shippingCost, total, discountAmount, itemCount };
+                  if (isCheckoutEmailVerified(customerEmail, customer)) onCheckout(args);
+                  else startVerification(args);
+                }}
                 className="kulto-btn w-full rounded-full py-3 font-semibold flex items-center justify-center gap-2"
                 style={{ background: !canCheckout ? "var(--ink-3)" : "var(--signal)", color: !canCheckout ? "var(--slate)" : "var(--bone)", cursor: !canCheckout ? "not-allowed" : "pointer" }}
               >
@@ -5705,8 +5895,10 @@ function CartDrawer({ cart, onClose, onUpdateQty, onRemove, onCheckout, customer
                 Comprar
               </button>
               <p className="text-xs text-center" style={{ color: "var(--slate)" }}>
-                Tu pedido queda registrado al momento, sin pasar por WhatsApp.
+                Antes de registrar el pedido le pedimos confirmar su mail con un código que le enviamos.
               </p>
+              </>
+              )}
             </div>
           </>
         )}
@@ -12554,7 +12746,7 @@ function FolderCoverThumb({ coverDesignIds = [], allDesigns, size = 64 }) {
 // además quedar atada a una categoría de producto (ej: "Mates"): en ese caso
 // sus diseños solo aparecen al personalizar esa categoría; si se deja en
 // "Todas", se ven siempre sin importar qué prenda se esté personalizando.
-function AdminDesignLibrary({ designs, onAdd, onRemove, folders = [], categories = [], onAddFolder, onRenameFolder, onRemoveFolder, onToggleCover, onAssignFolder, onSetFolderCategory }) {
+function AdminDesignLibrary({ designs, onAdd, onRemove, folders = [], categories = [], onAddFolder, onRenameFolder, onRemoveFolder, onToggleCover, onAssignFolder, onSetFolderCategory, onSetFolderGarments, templateProducts = [] }) {
   const [name, setName] = useState("");
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
@@ -12562,6 +12754,16 @@ function AdminDesignLibrary({ designs, onAdd, onRemove, folders = [], categories
   const [newFolderCategory, setNewFolderCategory] = useState("");
   const [openFolderId, setOpenFolderId] = useState(null);
   const inputStyle = { background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" };
+  // Prendas de "Personalizar" donde se puede marcar que una carpeta está
+  // disponible: por categoría y, adentro, por estilo/modelo.
+  const garmentOptions = Array.from(new Set(templateProducts.map((p) => p.category).filter(Boolean))).map((category) => ({
+    category,
+    styles: Array.from(new Set(templateProducts.filter((p) => p.category === category).map((p) => garmentStyleKey(p)).filter(Boolean))),
+  }));
+  const toggleGarment = (key) => {
+    const current = openFolder?.garments || [];
+    onSetFolderGarments?.(openFolder.id, current.includes(key) ? current.filter((k) => k !== key) : [...current, key]);
+  };
 
   const handleFiles = async (fileList) => {
     // Al subir una carpeta entera del sistema (ver "Subir carpeta" abajo)
@@ -12733,6 +12935,29 @@ function AdminDesignLibrary({ designs, onAdd, onRemove, folders = [], categories
               {categories.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
+          <div className="rounded-xl p-3 flex flex-col gap-2" style={{ background: "var(--ink-3)", border: "1px solid var(--line)" }}>
+            <p className="text-xs font-semibold" style={{ color: "var(--bone)" }}>Disponible en estas prendas (opcional)</p>
+            <p className="text-[11px]" style={{ color: "var(--slate)" }}>
+              Marcá todas las prendas donde el cliente puede usar los diseños de esta carpeta (ej: camisetas Beagle, Jamaica y sudaderas). Si no marcás ninguna, se usa la categoría de arriba (o todas las prendas).
+            </p>
+            {garmentOptions.length === 0 && <p className="text-[11px]" style={{ color: "var(--slate)" }}>Todavía no hay prendas cargadas en Personalizar.</p>}
+            {garmentOptions.map((grp) => (
+              <div key={grp.category} className="flex flex-col gap-1">
+                <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer" style={{ color: "var(--bone)" }}>
+                  <input type="checkbox" checked={(openFolder.garments || []).includes(`c:${grp.category}`)} onChange={() => toggleGarment(`c:${grp.category}`)} style={{ accentColor: "var(--signal)" }} />
+                  Todas las prendas de {grp.category}
+                </label>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 pl-6">
+                  {grp.styles.map((st) => (
+                    <label key={st} className="flex items-center gap-1.5 text-xs cursor-pointer" style={{ color: "var(--slate)" }}>
+                      <input type="checkbox" checked={(openFolder.garments || []).includes(`s:${st}`)} onChange={() => toggleGarment(`s:${st}`)} style={{ accentColor: "var(--signal)" }} />
+                      {st}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
           <p className="text-xs" style={{ color: "var(--slate)" }}>
             {openFolder.category
               ? `Estos diseños solo van a aparecer al personalizar productos de la categoría "${openFolder.category}".`
@@ -12766,8 +12991,8 @@ function AdminDesignLibrary({ designs, onAdd, onRemove, folders = [], categories
                       <FolderCoverThumb coverDesignIds={f.coverDesignIds || []} allDesigns={designs} />
                       <span className="text-xs font-semibold max-w-[80px] truncate" style={{ color: "var(--bone)" }}>{f.name}</span>
                       <span className="text-[10px]" style={{ color: "var(--slate)" }}>{count} diseño{count === 1 ? "" : "s"}</span>
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-full max-w-[80px] truncate" style={{ background: f.category ? "var(--sun)" : "var(--ink)", color: f.category ? "var(--ink)" : "var(--slate)" }}>
-                        {f.category || "Todas"}
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full max-w-[80px] truncate" style={{ background: (f.category || (f.garments || []).length) ? "var(--sun)" : "var(--ink)", color: (f.category || (f.garments || []).length) ? "var(--ink)" : "var(--slate)" }}>
+                        {(f.garments || []).length ? `${f.garments.length} prenda${f.garments.length === 1 ? "" : "s"}` : (f.category || "Todas")}
                       </span>
                     </button>
                   );
@@ -12936,7 +13161,7 @@ function AdminCustomWorkGallery({ items, onAdd, onRemove, speed = 0.5, onSpeedCh
   );
 }
 
-function AdminPanel({ products, categories, groups, orders, customers, onAdjustCustomerPoints, onDeleteCustomer, onCreateCustomer, onUpdateCustomerInfo, onSendPasswordHelp, reviews, settings, hasDraftChanges, publishing, onPublishChanges, onDiscardChanges, photoInbox, onAddToInbox, onCreateProductFromInbox, onAddInboxToExisting, onRemoveFromInbox, savedColors, onSaveColorToLibrary, onRemoveColorFromLibrary, designLibrary, onAddDesignToLibrary, onRemoveDesignFromLibrary, designFolders, onAddDesignFolder, onRenameDesignFolder, onRemoveDesignFolder, onToggleDesignFolderCover, onAssignDesignToFolder, onSetDesignFolderCategory, customWorkGallery, onAddCustomWork, onRemoveCustomWork, onAddCategory, onRenameCategory, onDeleteCategory, onAddGroup, onRenameGroup, onDeleteGroup, onSaveProduct, onSaveProductVerbose, onQuickRestock, onDeleteProduct, onToggleOrderStatus, onSetLocalStatus, onSetLocalTracking, onUpdateTracking, onApplyDiscount, onRequestReview, onBulkComplete, onBulkArchive, onBulkDelete, onSaveReview, onDeleteReview, onReorderReview, onSaveSettings, onLogout, permissions, isOwner, onSetAdminPermissions, jumpTo }) {
+function AdminPanel({ products, categories, groups, orders, customers, onAdjustCustomerPoints, onDeleteCustomer, onCreateCustomer, onUpdateCustomerInfo, onSendPasswordHelp, reviews, settings, hasDraftChanges, publishing, onPublishChanges, onDiscardChanges, photoInbox, onAddToInbox, onCreateProductFromInbox, onAddInboxToExisting, onRemoveFromInbox, savedColors, onSaveColorToLibrary, onRemoveColorFromLibrary, designLibrary, onAddDesignToLibrary, onRemoveDesignFromLibrary, designFolders, onAddDesignFolder, onRenameDesignFolder, onRemoveDesignFolder, onToggleDesignFolderCover, onAssignDesignToFolder, onSetDesignFolderCategory, onSetDesignFolderGarments, customWorkGallery, onAddCustomWork, onRemoveCustomWork, onAddCategory, onRenameCategory, onDeleteCategory, onAddGroup, onRenameGroup, onDeleteGroup, onSaveProduct, onSaveProductVerbose, onQuickRestock, onDeleteProduct, onToggleOrderStatus, onSetLocalStatus, onSetLocalTracking, onUpdateTracking, onApplyDiscount, onRequestReview, onBulkComplete, onBulkArchive, onBulkDelete, onSaveReview, onDeleteReview, onReorderReview, onSaveSettings, onLogout, permissions, isOwner, onSetAdminPermissions, jumpTo }) {
   // El dueño (isOwner) siempre ve todas las pestañas. Una cuenta de admin con
   // permisos limitados solo ve — y solo puede abrir — las que le dieron.
   const allowedTabs = isOwner ? ADMIN_TAB_KEYS : (permissions || []);
@@ -13668,6 +13893,8 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
             onToggleCover={onToggleDesignFolderCover}
             onAssignFolder={onAssignDesignToFolder}
             onSetFolderCategory={onSetDesignFolderCategory}
+            onSetFolderGarments={onSetDesignFolderGarments}
+            templateProducts={templateProducts}
           />
           <AdminCustomWorkGallery items={customWorkGallery} onAdd={onAddCustomWork} onRemove={onRemoveCustomWork} speed={settings.customWorkSpeed} onSpeedChange={(v) => onSaveSettings({ customWorkSpeed: v })} />
         </div>
@@ -14853,6 +15080,8 @@ export default function App() {
 
   const handleCheckout = async ({ subtotal, shippingCost, total, discountAmount = 0, itemCount = 0 }) => {
     if (cart.length === 0) return;
+    // Nunca se registra un pedido con un mail sin confirmar (ver CartDrawer).
+    if (!isCheckoutEmailVerified(customerEmail, customer)) return;
     setSending(true);
     const order = {
       id: `KULTO-${new Date().toISOString().slice(2, 10).replace(/-/g, "")}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
@@ -15419,6 +15648,14 @@ export default function App() {
     await persistDesignFolders(next);
   };
 
+  // En qué prendas de "Personalizar" está disponible cada carpeta (varias a la
+  // vez — ej: camisetas Beagle, Jamaica y sudaderas). Ver folderAppliesTo.
+  const handleSetDesignFolderGarments = async (id, garments) => {
+    const next = designFolders.map((f) => (f.id === id ? { ...f, garments: garments || [] } : f));
+    setDesignFolders(next);
+    await persistDesignFolders(next);
+  };
+
   const handleRemoveDesignFolder = async (id) => {
     const next = designFolders.filter((f) => f.id !== id);
     setDesignFolders(next);
@@ -15777,6 +16014,7 @@ export default function App() {
               onToggleDesignFolderCover={handleToggleDesignFolderCover}
               onAssignDesignToFolder={handleAssignDesignToFolder}
               onSetDesignFolderCategory={handleSetDesignFolderCategory}
+              onSetDesignFolderGarments={handleSetDesignFolderGarments}
               customWorkGallery={customWorkGallery}
               onAddCustomWork={handleAddCustomWork}
               onRemoveCustomWork={handleRemoveCustomWork}
