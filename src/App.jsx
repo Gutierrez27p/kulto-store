@@ -153,6 +153,32 @@ function computeTrendingIds(products, settings) {
   return new Set(ranked.flatMap((e) => e.ids));
 }
 
+// ---------------------------------------------------------------------------
+// Pedidos de entrega personal (los que entrega el dueño en persona): los que
+// eligen "Recoger en persona" y los de envío a Barcelona y alrededores. A esos
+// el cliente los sigue con una barra de etapas (globos) que confirma el dueño
+// a mano; el resto de los envíos sigue con el link de seguimiento de siempre.
+// ---------------------------------------------------------------------------
+const LOCAL_ORDER_STEPS = [
+  { key: "realizado", label: "Pedido realizado" },
+  { key: "procesando", label: "Procesando su pedido" },
+  { key: "terminado", label: "Pedido terminado" },
+  { key: "entregado", label: "Pedido entregado" },
+];
+const DEFAULT_LOCAL_AREAS = ["Barcelona", "Sants", "L'Hospitalet", "Barberà del Vallès", "Montgat", "Badalona"];
+function normalizePlace(s) {
+  return String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
+}
+function isLocalOrder(order, settings) {
+  if (!order) return false;
+  if (typeof order.localTracking === "boolean") return order.localTracking;
+  if (order.deliveryMethod !== "envio") return true;
+  const city = normalizePlace(order.address?.city);
+  if (city.length < 3) return false;
+  const areas = (settings?.localDeliveryAreas?.length ? settings.localDeliveryAreas : DEFAULT_LOCAL_AREAS).map(normalizePlace).filter((a) => a.length >= 3);
+  return areas.some((a) => city.includes(a) || (city.length >= 5 && a.includes(city)));
+}
+
 function formatPrice(n) {
   const num = Number(n) || 0;
   return num.toLocaleString("es-ES", { style: "currency", currency: "EUR" });
@@ -608,7 +634,7 @@ function buildOrderEmailHtml(order, settings) {
     ${deliveryHtml}
     ${order.discountAmount > 0 ? `<p style="margin:0 0 4px;">Descuento: -${formatPrice(order.discountAmount)}</p>` : ""}
     <p style="margin:0 0 4px;font-size:18px;font-weight:bold;">Total: ${formatPrice(order.total)}</p>
-    <p style="margin:20px 0 0;color:#a9a2b0;font-size:13px;">Te vamos a estar escribiendo para coordinar el pago y la entrega. Cualquier duda, respondé este mismo mail o escribinos por WhatsApp.</p>
+    <p style="margin:20px 0 0;color:#a9a2b0;font-size:13px;">Gracias por su compra. Su pedido se está procesando y nos pondremos en contacto con usted para coordinar el pago por Bizum o transferencia.${isLocalOrder(order, settings) ? ` Podrá seguir cada etapa de su pedido en \"Mi pedido\" de nuestra web con su número de orden (${order.id}).` : ""} Cualquier duda, responda este mismo mail o escríbanos por WhatsApp.</p>
   `);
 }
 
@@ -1539,6 +1565,8 @@ const DEFAULT_SETTINGS = {
   productsMenuItems: [],
   personalizeGroupCovers: {},
   personalizeSubcategoryPrices: {},
+  personalizeCardBg: {},
+  localDeliveryAreas: [],
   customWorkSpeed: 0.3,
   banners: [],
   homeSections: [],
@@ -4582,7 +4610,7 @@ function DesignPlacer({ garmentImage, designs, setDesigns, sideLabel, mode = "se
 // que entran, para avisar que hay más opciones sin ocupar toda la tarjeta.
 const TEMPLATE_CARD_MAX_DOTS = 8;
 
-function TemplateProductCard({ product, onSelect }) {
+function TemplateProductCard({ product, onSelect, bg }) {
   const [flipped, setFlipped] = useState(false);
   const thumb = product.colors?.[0]?.frontImage || product.colors?.[0]?.images?.[0] || product.photoPool?.[0];
   const colors = product.colors || [];
@@ -4598,7 +4626,7 @@ function TemplateProductCard({ product, onSelect }) {
           className="kulto-btn kulto-flip-face relative rounded-2xl overflow-hidden flex flex-col items-center text-center"
           style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}
         >
-          <div className="w-full flex-1 overflow-hidden flex items-center justify-center" style={{ background: product.colors?.[0]?.hex || "var(--ink-3)" }}>
+          <div className="w-full flex-1 overflow-hidden flex items-center justify-center" style={{ background: bg || product.colors?.[0]?.hex || "var(--ink-3)" }}>
             {thumb ? <FastImg loading="lazy" src={thumb} className="w-full h-full object-contain" alt={product.name} /> : <Shirt size={32} style={{ color: "rgba(243,239,230,0.4)" }} />}
           </div>
           {product.audience && product.audience !== "unisex" && (
@@ -4667,6 +4695,97 @@ function TemplateProductCard({ product, onSelect }) {
             </span>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// Color de fondo de las tarjetas del paso 1 de "Personalizar": el admin puede
+// elegir uno para todas, o uno por categoría ("g:Camisetas") o por estilo
+// ("s:Beagle") — ver AdminPersonalizeCardColors. Si no eligió ninguno, se usa
+// el color automático de la prenda como siempre.
+function cardBgFor(settings, keys, fallback) {
+  const map = settings?.personalizeCardBg || {};
+  for (const k of keys) if (k && map[k]) return map[k];
+  return map.all || fallback;
+}
+
+// Tarjeta genérica que se da vuelta (categoría o estilo de prenda en
+// "Personalizar"): adelante la foto y el nombre, atrás la información — igual
+// que TemplateProductCard. "colors" es la lista de bolitas de color.
+function PickFlipCard({ title, thumb, bg, description, details = [], colors = [], onSelect, ctaLabel = "Elegir" }) {
+  const [flipped, setFlipped] = useState(false);
+  const unique = [];
+  colors.forEach((c) => { if (c?.hex && !unique.some((u) => u.hex === c.hex)) unique.push(c); });
+  const shown = unique.slice(0, TEMPLATE_CARD_MAX_DOTS);
+  const extra = unique.length - shown.length;
+  return (
+    <div className="kulto-flip-outer" style={{ aspectRatio: "4 / 5.4" }}>
+      <div className={`kulto-flip-inner ${flipped ? "is-flipped" : ""}`}>
+        <button
+          onClick={onSelect}
+          className="kulto-btn kulto-flip-face relative rounded-2xl overflow-hidden flex flex-col items-center text-center"
+          style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}
+        >
+          <div className="w-full flex-1 overflow-hidden flex items-center justify-center" style={{ background: bg || "var(--ink-3)" }}>
+            {thumb ? <FastImg loading="lazy" src={thumb} className="w-full h-full object-contain p-3" alt={title} /> : <Shirt size={32} style={{ color: "rgba(243,239,230,0.4)" }} />}
+          </div>
+          <span
+            className="font-semibold text-sm py-2 px-2"
+            style={{ color: "var(--bone)", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", minHeight: "2.6em" }}
+          >
+            {title}
+          </span>
+          <span
+            role="button"
+            tabIndex={0}
+            aria-label="Ver detalles"
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setFlipped(true); }}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); setFlipped(true); } }}
+            className="kulto-btn absolute top-2 right-2 rounded-full p-1.5 flex items-center justify-center"
+            style={{ background: "rgba(0,0,0,0.55)", color: "#fff" }}
+          >
+            <Info size={14} />
+          </span>
+        </button>
+
+        <div
+          className="kulto-flip-face kulto-flip-back relative rounded-2xl overflow-hidden flex flex-col p-3 gap-2 text-left"
+          style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}
+        >
+          <p className="text-sm font-semibold pr-7" style={{ color: "var(--bone)" }}>{title}</p>
+          <div className="text-xs flex-1 overflow-y-auto kulto-scrollbar flex flex-col gap-1" style={{ color: "var(--slate)" }}>
+            {description ? <p>{description}</p> : null}
+            {details.map((d, i) => <p key={i}>{d}</p>)}
+            {!description && !details.length && <p>Elegí esta opción para personalizarla.</p>}
+          </div>
+          {shown.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {shown.map((c, i) => (
+                <span key={i} className="w-4 h-4 rounded-full shrink-0" style={{ background: c.hex, border: "1px solid rgba(255,255,255,0.4)" }} title={c.name} />
+              ))}
+              {extra > 0 && <span className="text-[11px] font-semibold" style={{ color: "var(--sun)" }}>+{extra}</span>}
+            </div>
+          )}
+          <button
+            onClick={onSelect}
+            className="kulto-btn text-xs font-semibold rounded-full py-2 mt-1"
+            style={{ background: "var(--signal)", color: "var(--bone)" }}
+          >
+            {ctaLabel}
+          </button>
+          <span
+            role="button"
+            tabIndex={0}
+            aria-label="Volver"
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setFlipped(false); }}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); setFlipped(false); } }}
+            className="kulto-btn absolute top-2 right-2 rounded-full p-1.5 flex items-center justify-center"
+            style={{ background: "rgba(0,0,0,0.55)", color: "#fff" }}
+          >
+            <X size={14} />
+          </span>
+        </div>
       </div>
     </div>
   );
@@ -4923,29 +5042,23 @@ function Wizard({ products, categories, settings, designLibrary, designFolders, 
             <div>
               <p className="text-sm mb-4" style={{ color: "var(--slate)" }}>1. Elegí qué querés personalizar</p>
               {templateGroups.length ? (
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   {templateGroups.map((g) => {
-                    const sample = productsWithColors.find((p) => p.category === g);
+                    const gProducts = productsWithColors.filter((p) => p.category === g);
+                    const sample = gProducts[0];
                     const thumb = settings.personalizeGroupCovers?.[g] || sample?.colors?.[0]?.frontImage || sample?.colors?.[0]?.images?.[0];
+                    const styleCount = new Set(gProducts.map((p) => p.subcategory).filter(Boolean)).size;
                     return (
-                      <button
+                      <PickFlipCard
                         key={g}
-                        onClick={() => selectGroup(g)}
-                        className="kulto-btn rounded-2xl overflow-hidden text-center flex flex-col items-center"
-                        style={{ background: "var(--ink-2)", border: "1px solid var(--line)", aspectRatio: "4 / 5" }}
-                      >
-                        <div className="w-full flex-1 overflow-hidden flex items-center justify-center" style={{ background: sample?.colors?.[0]?.hex || "var(--ink-3)" }}>
-                          {thumb ? <FastImg loading="lazy" src={thumb} className="w-full h-full object-contain p-3" alt={g} /> : <Shirt size={32} style={{ color: "rgba(243,239,230,0.4)" }} />}
-                        </div>
-                        <div className="p-3">
-                          <p
-                            className="text-sm font-semibold text-center"
-                            style={{ color: "var(--bone)", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", minHeight: "2.6em" }}
-                          >
-                            {g}
-                          </p>
-                        </div>
-                      </button>
+                        title={g}
+                        thumb={thumb}
+                        bg={cardBgFor(settings, [`g:${g}`], sample?.colors?.[0]?.hex)}
+                        description={gProducts.find((p) => p.description?.trim())?.description?.trim()}
+                        details={[`${gProducts.length} modelo${gProducts.length === 1 ? "" : "s"} disponible${gProducts.length === 1 ? "" : "s"}${styleCount > 1 ? ` en ${styleCount} estilos` : ""}.`]}
+                        colors={gProducts.flatMap((p) => p.colors || [])}
+                        onSelect={() => selectGroup(g)}
+                      />
                     );
                   })}
                 </div>
@@ -4961,49 +5074,36 @@ function Wizard({ products, categories, settings, designLibrary, designFolders, 
                 <ChevronLeft size={16} /> Elegir otro grupo
               </button>
               <p className="text-sm mb-4" style={{ color: "var(--slate)" }}>1. Elegí el estilo de {groupSel}</p>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {subgroupsInGroup.map((sg) => {
-                  const sample = productsInGroup.find((p) => p.subcategory === sg);
+                  const sgProducts = productsInGroup.filter((p) => p.subcategory === sg);
+                  const sample = sgProducts[0];
                   const thumb = sample?.colors?.[0]?.frontImage || sample?.colors?.[0]?.images?.[0];
+                  const sgPrice = settings.personalizeSubcategoryPrices?.[sg] ?? settings.personalizedBasePrice;
                   return (
-                    <button
+                    <PickFlipCard
                       key={sg}
-                      onClick={() => selectSubgroup(sg)}
-                      className="kulto-btn rounded-2xl overflow-hidden text-center flex flex-col items-center"
-                      style={{ background: "var(--ink-2)", border: "1px solid var(--line)", aspectRatio: "4 / 5" }}
-                    >
-                      <div className="w-full flex-1 overflow-hidden flex items-center justify-center" style={{ background: sample?.colors?.[0]?.hex || "var(--ink-3)" }}>
-                        {thumb ? <FastImg loading="lazy" src={thumb} className="w-full h-full object-contain p-3" alt={sg} /> : <Shirt size={32} style={{ color: "rgba(243,239,230,0.4)" }} />}
-                      </div>
-                      <div className="p-3">
-                        <p
-                          className="text-sm font-semibold text-center"
-                          style={{ color: "var(--bone)", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", minHeight: "2.6em" }}
-                        >
-                          {sg}
-                        </p>
-                      </div>
-                    </button>
+                      title={sg}
+                      thumb={thumb}
+                      bg={cardBgFor(settings, [`s:${sg}`, `g:${groupSel}`], sample?.colors?.[0]?.hex)}
+                      description={sgProducts.find((p) => p.description?.trim())?.description?.trim()}
+                      details={[
+                        `${sgProducts.length} modelo${sgProducts.length === 1 ? "" : "s"} para elegir.`,
+                        ...(sgPrice != null && sgPrice !== "" ? [`Desde ${formatPrice(sgPrice)}.`] : []),
+                      ]}
+                      colors={sgProducts.flatMap((p) => p.colors || [])}
+                      onSelect={() => selectSubgroup(sg)}
+                    />
                   );
                 })}
                 {hasUngroupedInGroup && (
-                  <button
-                    onClick={() => selectSubgroup("__sin_subgrupo__")}
-                    className="kulto-btn rounded-2xl overflow-hidden text-center flex flex-col items-center"
-                    style={{ background: "var(--ink-2)", border: "1px solid var(--line)", aspectRatio: "4 / 5" }}
-                  >
-                    <div className="w-full flex-1 overflow-hidden flex items-center justify-center" style={{ background: "var(--ink-3)" }}>
-                      <Shirt size={32} style={{ color: "rgba(243,239,230,0.4)" }} />
-                    </div>
-                    <div className="p-3">
-                      <p
-                        className="text-sm font-semibold text-center"
-                        style={{ color: "var(--bone)", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", minHeight: "2.6em" }}
-                      >
-                        Otros
-                      </p>
-                    </div>
-                  </button>
+                  <PickFlipCard
+                    title="Otros"
+                    bg={cardBgFor(settings, [`g:${groupSel}`], null)}
+                    details={[`${productsInGroup.filter((p) => !p.subcategory).length} modelo(s) sin estilo asignado.`]}
+                    colors={productsInGroup.filter((p) => !p.subcategory).flatMap((p) => p.colors || [])}
+                    onSelect={() => selectSubgroup("__sin_subgrupo__")}
+                  />
                 )}
               </div>
             </div>
@@ -5037,9 +5137,9 @@ function Wizard({ products, categories, settings, designLibrary, designFolders, 
                 </div>
               )}
               {modelsFiltered.length ? (
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   {modelsFiltered.map((p) => (
-                    <TemplateProductCard key={p.id} product={p} onSelect={resetForProduct} />
+                    <TemplateProductCard key={p.id} product={p} onSelect={resetForProduct} bg={cardBgFor(settings, [p.subcategory && `s:${p.subcategory}`, `g:${p.category}`], undefined)} />
                   ))}
                 </div>
               ) : (
@@ -5623,17 +5723,61 @@ function CartDrawer({ cart, onClose, onUpdateQty, onRemove, onCheckout, customer
 // apenas se confirma — eso pasa siempre, sin depender de WhatsApp. El botón
 // de WhatsApp acá es solo una opción extra para el cliente que quiera avisar
 // también por ese medio, nunca un paso obligatorio del pedido.
-function OrderConfirm({ orderId, hasCustom, whatsappText, whatsappNumber, onClose }) {
+// Barra de etapas ("globos") de un pedido de entrega personal. Si se pasa
+// "onSelect", cada globo se puede tocar para marcar esa etapa (lo usa el dueño).
+function LocalOrderProgress({ order, onSelect }) {
+  const current = Math.max(0, LOCAL_ORDER_STEPS.findIndex((s) => s.key === (order?.localStatus || "realizado")));
+  return (
+    <div className="flex items-start w-full py-2">
+      {LOCAL_ORDER_STEPS.map((s, i) => {
+        const done = i <= current;
+        const Tag = onSelect ? "button" : "div";
+        return (
+          <React.Fragment key={s.key}>
+            <Tag
+              {...(onSelect ? { type: "button", onClick: () => onSelect(s.key) } : {})}
+              className={`flex flex-col items-center gap-1.5 shrink-0 ${onSelect ? "kulto-btn" : ""}`}
+              style={{ width: 64 }}
+            >
+              <span
+                className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold"
+                style={{
+                  background: done ? "var(--sun)" : "var(--ink-3)",
+                  color: done ? "var(--ink)" : "var(--slate)",
+                  border: i === current ? "3px solid var(--signal)" : "1px solid var(--line)",
+                }}
+              >
+                {done ? <Check size={15} /> : i + 1}
+              </span>
+              <span className="text-[10px] leading-tight text-center font-semibold" style={{ color: done ? "var(--bone)" : "var(--slate)" }}>{s.label}</span>
+            </Tag>
+            {i < LOCAL_ORDER_STEPS.length - 1 && (
+              <div className="flex-1 h-0.5 mt-4" style={{ background: i < current ? "var(--sun)" : "var(--line)" }} />
+            )}
+          </React.Fragment>
+        );
+      })}
+    </div>
+  );
+}
+
+function OrderConfirm({ orderId, hasCustom, whatsappText, whatsappNumber, onClose, isLocal }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.65)" }} onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} className="rounded-3xl p-8 max-w-sm w-full text-center" style={{ background: "var(--ink)", border: "1px solid var(--line)" }}>
         <div className="w-14 h-14 rounded-full mx-auto flex items-center justify-center mb-4" style={{ background: "var(--sun)" }}>
           <Check size={28} color="var(--ink)" />
         </div>
-        <h3 className="kulto-display text-xl mb-2" style={{ color: "var(--bone)" }}>Pedido enviado</h3>
+        <h3 className="kulto-display text-xl mb-2" style={{ color: "var(--bone)" }}>¡Gracias por su compra!</h3>
         <p className="text-sm mb-1" style={{ color: "var(--slate)" }}>Tu número de orden es:</p>
         <p className="font-bold text-lg mb-5" style={{ color: "var(--sun)" }}>{orderId}</p>
-        <p className="text-sm mb-3" style={{ color: "var(--slate)" }}>Ya registramos tu pedido y te vamos a escribir para coordinar el pago y la entrega. Guarda este número por si necesitas escribirnos.</p>
+        <p className="text-sm mb-3" style={{ color: "var(--slate)" }}>Su pedido se está procesando. Nos pondremos en contacto con usted para coordinar el pago por Bizum o transferencia. Guarde este número por si necesita escribirnos.</p>
+        {isLocal && (
+          <div className="mb-4">
+            <LocalOrderProgress order={{ localStatus: "realizado" }} />
+            <p className="text-xs" style={{ color: "var(--slate)" }}>Puede seguir cada etapa en "Mi pedido" con su número de orden.</p>
+          </div>
+        )}
         {hasCustom && (
           <p className="text-sm mb-6" style={{ color: "var(--sun)" }}>
             Como incluye una prenda personalizada, puede demorar entre 3 y 7 días. Si la necesitás antes, escribinos.
@@ -6027,7 +6171,7 @@ function AccountPage({ customer, onRegister, onLogin, onLogout, onVerifyEmail, o
   );
 }
 
-function OrderLookupPage({ initialOrderId = "" }) {
+function OrderLookupPage({ initialOrderId = "", settings }) {
   const [orderId, setOrderId] = useState(initialOrderId);
   const [result, setResult] = useState(null);
   const [status, setStatus] = useState("idle"); // idle | loading | notfound
@@ -6049,6 +6193,8 @@ function OrderLookupPage({ initialOrderId = "" }) {
   }, [initialOrderId]);
 
   const trackingIsLink = result?.trackingNumber?.trim().startsWith("http");
+  const resultIsLocal = isLocalOrder(result, settings);
+  const localStepLabel = LOCAL_ORDER_STEPS.find((x) => x.key === (result?.localStatus || "realizado"))?.label;
 
   return (
     <div className="max-w-lg mx-auto px-4 md:px-6 py-14">
@@ -6083,14 +6229,20 @@ function OrderLookupPage({ initialOrderId = "" }) {
               className="text-xs font-semibold px-3 py-1 rounded-full"
               style={{ background: result.status === "completado" ? "var(--sun)" : "var(--ink-3)", color: result.status === "completado" ? "var(--ink)" : "var(--bone)" }}
             >
-              {result.status === "completado" ? "Completado" : "Pendiente"}
+              {resultIsLocal ? localStepLabel : (result.status === "completado" ? "Completado" : "Pendiente")}
             </span>
           </div>
           <p className="text-xs" style={{ color: "var(--slate)" }}>{formatDate(result.date)} · {result.items.length} artículo(s) · {formatPrice(result.total)}</p>
           <p className="text-xs" style={{ color: "var(--slate)" }}>
             Entrega: {result.deliveryMethod === "envio" ? "Envío a domicilio" : "Recoge en persona"}
           </p>
-          {(result.deliveryMethod === "envio" || result.trackingNumber) && (
+          {resultIsLocal && (
+            <div className="pt-2" style={{ borderTop: "1px solid var(--line)" }}>
+              <p className="text-sm font-semibold mb-1" style={{ color: "var(--bone)" }}>Estado de su pedido</p>
+              <LocalOrderProgress order={result} />
+            </div>
+          )}
+          {!resultIsLocal && (result.deliveryMethod === "envio" || result.trackingNumber) && (
             <div className="pt-2" style={{ borderTop: "1px solid var(--line)" }}>
               <p className="text-sm font-semibold mb-1" style={{ color: "var(--bone)" }}>Seguimiento</p>
               {result.trackingNumber ? (
@@ -9086,7 +9238,7 @@ function AdminCustomers({ customers, onAdjustPoints, loyaltyThreshold, isOwner, 
   );
 }
 
-function AdminOrders({ orders, onToggleStatus, onUpdateTracking, onApplyDiscount, onRequestReview, onBulkComplete, onBulkArchive, onBulkDelete }) {
+function AdminOrders({ orders, settings, onSetLocalStatus, onSetLocalTracking, onToggleStatus, onUpdateTracking, onApplyDiscount, onRequestReview, onBulkComplete, onBulkArchive, onBulkDelete }) {
   const [openId, setOpenId] = useState(null);
   const [trackingDrafts, setTrackingDrafts] = useState({});
   const [savedId, setSavedId] = useState(null);
@@ -9304,6 +9456,22 @@ function AdminOrders({ orders, onToggleStatus, onUpdateTracking, onApplyDiscount
                 {o.deliveryMethod === "envio" && o.address && <p className="text-xs" style={{ color: "var(--slate)" }}>Dirección: {formatAddress(o.address)}</p>}
                 {o.comment && <p className="text-xs" style={{ color: "var(--slate)" }}>Comentario: {o.comment}</p>}
 
+                {isLocalOrder(o, settings) && (
+                  <div className="mt-1 rounded-xl p-3 flex flex-col gap-1" style={{ background: "var(--ink-3)", border: "1px solid var(--line)" }}>
+                    <p className="text-xs font-semibold" style={{ color: "var(--bone)" }}>Entrega personal — tocá una etapa para confirmarla (el cliente la ve al instante en "Mi pedido")</p>
+                    <LocalOrderProgress order={o} onSelect={(key) => onSetLocalStatus(o, key)} />
+                  </div>
+                )}
+                {o.deliveryMethod === "envio" && (
+                  <button
+                    onClick={() => onSetLocalTracking(o, !isLocalOrder(o, settings))}
+                    className="kulto-btn text-[11px] self-start underline"
+                    style={{ color: "var(--slate)" }}
+                  >
+                    {isLocalOrder(o, settings) ? "Este pedido lleva link de seguimiento (envío normal)" : "Este pedido lo entrego yo en persona (usar etapas)"}
+                  </button>
+                )}
+                {!isLocalOrder(o, settings) && (
                 <div className="mt-1 flex items-center gap-2">
                   <input
                     value={trackingFor(o)}
@@ -9320,6 +9488,7 @@ function AdminOrders({ orders, onToggleStatus, onUpdateTracking, onApplyDiscount
                     {savedId === o.id ? "Guardado" : "Guardar"}
                   </button>
                 </div>
+                )}
 
                 <div className="mt-2 pt-2 flex flex-col gap-2" style={{ borderTop: "1px dashed var(--line)" }}>
                   <p className="text-xs font-semibold" style={{ color: "var(--bone)" }}>Descuento manual (ej: compensar un problema)</p>
@@ -11045,6 +11214,42 @@ function AdminThemeSettings({ settings, onSave }) {
   );
 }
 
+// Zonas donde el dueño entrega en persona (Barcelona y alrededores): los
+// pedidos con envío a una de estas ciudades se siguen con la barra de etapas
+// en vez del link de seguimiento. Una zona por línea.
+function AdminLocalAreasSettings({ settings, onSave }) {
+  const current = (settings.localDeliveryAreas?.length ? settings.localDeliveryAreas : DEFAULT_LOCAL_AREAS).join("\n");
+  const [text, setText] = useState(current);
+  const [saved, setSaved] = useState(false);
+  useEffect(() => { setText(current); }, [current]);
+  const save = async () => {
+    const list = text.split("\n").map((x) => x.trim()).filter(Boolean);
+    await onSave({ localDeliveryAreas: list });
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1500);
+  };
+  return (
+    <div className="rounded-2xl p-5 flex flex-col gap-3" style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}>
+      <div>
+        <h4 className="font-semibold" style={{ color: "var(--bone)" }}>Zonas de entrega personal (Barcelona y alrededores)</h4>
+        <p className="text-xs mt-1" style={{ color: "var(--slate)" }}>
+          Los pedidos que eligen "Recoger en persona", y los de envío a una de estas ciudades, muestran al cliente la barra de etapas (Pedido realizado → Procesando → Terminado → Entregado), que confirmás vos desde Pedidos. Una zona por línea; sirve con parte del nombre (ej: "Hospitalet"). El resto de los envíos sigue con el link de seguimiento.
+        </p>
+      </div>
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        rows={7}
+        className="rounded-xl p-3 text-sm"
+        style={{ background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" }}
+      />
+      <button onClick={save} className="kulto-btn self-start text-sm font-semibold px-4 py-2 rounded-full" style={{ background: saved ? "var(--sun)" : "var(--signal)", color: saved ? "var(--ink)" : "var(--bone)" }}>
+        {saved ? "Guardado ✓" : "Guardar zonas"}
+      </button>
+    </div>
+  );
+}
+
 function AdminShippingSettings({ settings, onSave }) {
   const [flatRate, setFlatRate] = useState(settings.shippingFlatRate);
   const [threshold, setThreshold] = useState(settings.freeShippingThreshold);
@@ -12172,6 +12377,88 @@ function AdminPersonalizeGroupImages({ templateProducts = [], settings, onSave }
   );
 }
 
+// Color de fondo de las tarjetas de "Personalizar" (paso 1): uno para todas,
+// o uno distinto por categoría y por estilo. Se guarda en
+// settings.personalizeCardBg ("all", "g:Camisetas", "s:Beagle").
+const CARD_BG_PRESETS = ["#ffffff", "#f2f2f2", "#e5ded6", "#bfc5cc", "#15131A", "#000000", "#0057a0", "#7a1f2b"];
+function AdminPersonalizeCardColors({ templateProducts = [], settings, onSave }) {
+  const map = settings.personalizeCardBg || {};
+  const groups = Array.from(new Set(templateProducts.map((p) => p.category).filter(Boolean)));
+  const styles = Array.from(new Set(templateProducts.map((p) => p.subcategory).filter(Boolean)));
+  const [saved, setSaved] = useState(null);
+  const timer = useRef(null);
+
+  const setColor = async (key, hex) => {
+    const next = { ...map };
+    if (hex) next[key] = hex; else delete next[key];
+    await onSave({ personalizeCardBg: next });
+    setSaved(key);
+    setTimeout(() => setSaved(null), 1200);
+  };
+  // El selector de color dispara muchos cambios seguidos mientras se arrastra:
+  // se guarda recién cuando se suelta (medio segundo sin cambios).
+  const setColorDebounced = (key, hex) => {
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setColor(key, hex), 600);
+  };
+
+  if (!templateProducts.length) return null;
+
+  const Row = ({ label, k, hint }) => {
+    const current = map[k] || "";
+    return (
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-sm font-semibold min-w-[120px]" style={{ color: "var(--bone)" }}>
+          {label}{hint ? <span className="block text-[10px] font-normal" style={{ color: "var(--slate)" }}>{hint}</span> : null}
+        </span>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {CARD_BG_PRESETS.map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => setColor(k, c)}
+              className="kulto-btn w-6 h-6 rounded-full"
+              style={{ background: c, border: current.toLowerCase() === c.toLowerCase() ? "2px solid var(--sun)" : "1px solid var(--line)" }}
+              aria-label={`Fondo ${c}`}
+            />
+          ))}
+          <label className="kulto-btn text-[10px] px-2 py-1 rounded-full cursor-pointer flex items-center gap-1" style={{ background: "var(--ink-3)", color: "var(--bone)" }}>
+            Otro color
+            <input type="color" value={current || "#ffffff"} onChange={(e) => setColorDebounced(k, e.target.value)} className="w-4 h-4 p-0 border-0 bg-transparent" />
+          </label>
+          <button
+            type="button"
+            onClick={() => setColor(k, "")}
+            className="kulto-btn text-[10px] px-2 py-1 rounded-full"
+            style={{ background: current ? "var(--ink-3)" : "var(--sun)", color: current ? "var(--bone)" : "var(--ink)" }}
+          >
+            Automático
+          </button>
+          {saved === k && <span className="text-[10px]" style={{ color: "var(--sun)" }}>Guardado ✓</span>}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="rounded-2xl p-5 flex flex-col gap-4" style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}>
+      <div>
+        <h4 className="font-semibold" style={{ color: "var(--bone)" }}>Color de fondo de las tarjetas en "Personalizar"</h4>
+        <p className="text-xs mt-1" style={{ color: "var(--slate)" }}>
+          Elegí el color de fondo que se ve detrás de cada prenda en las tarjetas del paso 1. Podés poner uno para todas, o uno distinto para cada categoría y cada estilo (el de la categoría o estilo tiene prioridad sobre el general). "Automático" usa el color de la prenda, como antes.
+        </p>
+      </div>
+      <div className="flex flex-col gap-3">
+        <Row label="Todas las tarjetas" k="all" />
+        {groups.length > 0 && <p className="text-[11px] font-semibold uppercase tracking-wide pt-1" style={{ color: "var(--slate)" }}>Categorías</p>}
+        {groups.map((g) => <Row key={`g:${g}`} label={g} k={`g:${g}`} />)}
+        {styles.length > 0 && <p className="text-[11px] font-semibold uppercase tracking-wide pt-1" style={{ color: "var(--slate)" }}>Estilos</p>}
+        {styles.map((s) => <Row key={`s:${s}`} label={s} k={`s:${s}`} />)}
+      </div>
+    </div>
+  );
+}
+
 // Precio por subcategoría/estilo (Beagle, Oversize, Vendetta, Chow, etc.) para
 // usar en "Personalizar" en vez de tener que ponerle precio a cada prenda base
 // una por una. Las subcategorías aparecen solas a medida que se cargan prendas
@@ -12649,7 +12936,7 @@ function AdminCustomWorkGallery({ items, onAdd, onRemove, speed = 0.5, onSpeedCh
   );
 }
 
-function AdminPanel({ products, categories, groups, orders, customers, onAdjustCustomerPoints, onDeleteCustomer, onCreateCustomer, onUpdateCustomerInfo, onSendPasswordHelp, reviews, settings, hasDraftChanges, publishing, onPublishChanges, onDiscardChanges, photoInbox, onAddToInbox, onCreateProductFromInbox, onAddInboxToExisting, onRemoveFromInbox, savedColors, onSaveColorToLibrary, onRemoveColorFromLibrary, designLibrary, onAddDesignToLibrary, onRemoveDesignFromLibrary, designFolders, onAddDesignFolder, onRenameDesignFolder, onRemoveDesignFolder, onToggleDesignFolderCover, onAssignDesignToFolder, onSetDesignFolderCategory, customWorkGallery, onAddCustomWork, onRemoveCustomWork, onAddCategory, onRenameCategory, onDeleteCategory, onAddGroup, onRenameGroup, onDeleteGroup, onSaveProduct, onSaveProductVerbose, onQuickRestock, onDeleteProduct, onToggleOrderStatus, onUpdateTracking, onApplyDiscount, onRequestReview, onBulkComplete, onBulkArchive, onBulkDelete, onSaveReview, onDeleteReview, onReorderReview, onSaveSettings, onLogout, permissions, isOwner, onSetAdminPermissions, jumpTo }) {
+function AdminPanel({ products, categories, groups, orders, customers, onAdjustCustomerPoints, onDeleteCustomer, onCreateCustomer, onUpdateCustomerInfo, onSendPasswordHelp, reviews, settings, hasDraftChanges, publishing, onPublishChanges, onDiscardChanges, photoInbox, onAddToInbox, onCreateProductFromInbox, onAddInboxToExisting, onRemoveFromInbox, savedColors, onSaveColorToLibrary, onRemoveColorFromLibrary, designLibrary, onAddDesignToLibrary, onRemoveDesignFromLibrary, designFolders, onAddDesignFolder, onRenameDesignFolder, onRemoveDesignFolder, onToggleDesignFolderCover, onAssignDesignToFolder, onSetDesignFolderCategory, customWorkGallery, onAddCustomWork, onRemoveCustomWork, onAddCategory, onRenameCategory, onDeleteCategory, onAddGroup, onRenameGroup, onDeleteGroup, onSaveProduct, onSaveProductVerbose, onQuickRestock, onDeleteProduct, onToggleOrderStatus, onSetLocalStatus, onSetLocalTracking, onUpdateTracking, onApplyDiscount, onRequestReview, onBulkComplete, onBulkArchive, onBulkDelete, onSaveReview, onDeleteReview, onReorderReview, onSaveSettings, onLogout, permissions, isOwner, onSetAdminPermissions, jumpTo }) {
   // El dueño (isOwner) siempre ve todas las pestañas. Una cuenta de admin con
   // permisos limitados solo ve — y solo puede abrir — las que le dieron.
   const allowedTabs = isOwner ? ADMIN_TAB_KEYS : (permissions || []);
@@ -13367,6 +13654,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
           </div>
           <AdminBulkColorsBySubcategory templateProducts={templateProducts} onSaveVerbose={onSaveProductVerbose} />
           <AdminPersonalizeGroupImages templateProducts={templateProducts} settings={settings} onSave={onSaveSettings} />
+          <AdminPersonalizeCardColors templateProducts={templateProducts} settings={settings} onSave={onSaveSettings} />
           <AdminPersonalizeSubcategoryPrices templateProducts={templateProducts} settings={settings} onSave={onSaveSettings} />
           <AdminDesignLibrary
             designs={designLibrary}
@@ -13385,7 +13673,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
         </div>
       )}
 
-      {tab === "pedidos" && <AdminOrders orders={orders} onToggleStatus={onToggleOrderStatus} onUpdateTracking={onUpdateTracking} onApplyDiscount={onApplyDiscount} onRequestReview={onRequestReview} onBulkComplete={onBulkComplete} onBulkArchive={onBulkArchive} onBulkDelete={onBulkDelete} />}
+      {tab === "pedidos" && <AdminOrders orders={orders} settings={settings} onSetLocalStatus={onSetLocalStatus} onSetLocalTracking={onSetLocalTracking} onToggleStatus={onToggleOrderStatus} onUpdateTracking={onUpdateTracking} onApplyDiscount={onApplyDiscount} onRequestReview={onRequestReview} onBulkComplete={onBulkComplete} onBulkArchive={onBulkArchive} onBulkDelete={onBulkDelete} />}
       {tab === "ventas" && <AdminSalesPanel products={sellableProducts} orders={orders} settings={settings} onSaveSettings={onSaveSettings} />}
       {tab === "estadisticas" && <AdminAnalyticsPanel settings={settings} onSaveSettings={onSaveSettings} />}
       {tab === "compras" && <AdminRestockPanel products={sellableProducts} onQuickRestock={onQuickRestock} settings={settings} onSaveSettings={onSaveSettings} />}
@@ -13401,6 +13689,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
           <AdminSectionSettings settings={settings} onSave={onSaveSettings} />
           <AdminThemeSettings settings={settings} onSave={onSaveSettings} />
           <AdminShippingSettings settings={settings} onSave={onSaveSettings} />
+          <AdminLocalAreasSettings settings={settings} onSave={onSaveSettings} />
           <AdminDesignFeedbackSettings settings={settings} onSave={onSaveSettings} />
           <AdminPrintSizeGuideSettings settings={settings} onSave={onSaveSettings} />
           <AdminDepositSettings settings={settings} onSave={onSaveSettings} />
@@ -14271,6 +14560,7 @@ export default function App() {
   const [sending, setSending] = useState(false);
   const [confirmedOrderId, setConfirmedOrderId] = useState(null);
   const [confirmedHasCustom, setConfirmedHasCustom] = useState(false);
+  const [confirmedIsLocal, setConfirmedIsLocal] = useState(false);
   const [confirmedWhatsappText, setConfirmedWhatsappText] = useState(null);
   const [cartSavedAt, setCartSavedAt] = useState(null);
   const [showAbandonedBanner, setShowAbandonedBanner] = useState(false);
@@ -14637,6 +14927,7 @@ export default function App() {
     setSending(false);
     setCartOpen(false);
     setConfirmedWhatsappText(buildOrderMessage(order, settings));
+    setConfirmedIsLocal(isLocalOrder(order, settings));
     setConfirmedOrderId(order.id);
     setConfirmedHasCustom(order.items.some((it) => it.designName?.startsWith("Personalizado")));
   };
@@ -15218,6 +15509,27 @@ export default function App() {
     setOrders((prev) => prev.map((o) => (o.id === order.id ? updated : o)));
   };
 
+  // Entrega personal: el dueño confirma a mano cada etapa del pedido
+  // (realizado → procesando → terminado → entregado). "Entregado" también lo
+  // marca como completado; volver atrás lo deja pendiente otra vez.
+  const handleSetLocalStatus = async (order, localStatus) => {
+    const updated = {
+      ...order,
+      localStatus,
+      status: localStatus === "entregado" ? "completado" : (order.status === "completado" ? "pendiente" : order.status),
+    };
+    await updateOrder(updated);
+    setOrders((prev) => prev.map((o) => (o.id === order.id ? updated : o)));
+  };
+
+  // Cambia un pedido de envío entre "entrego yo en persona" (etapas) y
+  // "envío normal" (link de seguimiento), cuando la zona automática no acierta.
+  const handleSetLocalTracking = async (order, flag) => {
+    const updated = { ...order, localTracking: flag };
+    await updateOrder(updated);
+    setOrders((prev) => prev.map((o) => (o.id === order.id ? updated : o)));
+  };
+
   const handleUpdateTracking = async (order, trackingNumber) => {
     const updated = { ...order, trackingNumber };
     await updateOrder(updated);
@@ -15424,7 +15736,7 @@ export default function App() {
             onGoHome={() => setPage("home")}
           />
         )}
-        {page === "seguimiento" && <OrderLookupPage initialOrderId={reviewDeepLinkOrderId} />}
+        {page === "seguimiento" && <OrderLookupPage initialOrderId={reviewDeepLinkOrderId} settings={settings} />}
         {page === "cuenta" && (
           effectiveAdminView ? (
             <AdminPanel
@@ -15481,6 +15793,8 @@ export default function App() {
               jumpTo={adminTabRequest}
               onToggleOrderStatus={handleToggleOrderStatus}
               onUpdateTracking={handleUpdateTracking}
+              onSetLocalStatus={handleSetLocalStatus}
+              onSetLocalTracking={handleSetLocalTracking}
               onApplyDiscount={handleApplyDiscount}
               onRequestReview={handleRequestReview}
               onBulkComplete={handleBulkComplete}
@@ -15555,7 +15869,7 @@ export default function App() {
         />
       )}
 
-      {confirmedOrderId && <OrderConfirm orderId={confirmedOrderId} hasCustom={confirmedHasCustom} whatsappText={confirmedWhatsappText} whatsappNumber={settings.whatsappNumber} onClose={() => { setConfirmedOrderId(null); setConfirmedWhatsappText(null); }} />}
+      {confirmedOrderId && <OrderConfirm orderId={confirmedOrderId} isLocal={confirmedIsLocal} hasCustom={confirmedHasCustom} whatsappText={confirmedWhatsappText} whatsappNumber={settings.whatsappNumber} onClose={() => { setConfirmedOrderId(null); setConfirmedWhatsappText(null); }} />}
     </div>
   );
 }
