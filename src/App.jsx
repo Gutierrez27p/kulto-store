@@ -13329,6 +13329,19 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
     if (next === oldName || (!oldName && !next)) return;
     await applyBulk(folderItems.map((p) => ({ id: p.id, patch: { subcategory: next } })));
   };
+  // Botón de carpeta en cada producto: no hace falta ir a la barra de arriba.
+  // Si el producto está tildado junto a otros, se mueven todos los tildados.
+  const moveOneToFolder = async (p) => {
+    const ids = selectedProductIds.includes(p.id) ? selectedProductIds : [p.id];
+    const existing = Array.from(new Set(sellableProducts.map((x) => x.subcategory).filter(Boolean))).sort((x, y) => x.localeCompare(y, "es"));
+    const input = window.prompt(
+      `Carpeta para ${ids.length === 1 ? `"${p.name}"` : `${ids.length} productos`}.${existing.length ? `\nYa existen: ${existing.join(", ")}` : ""}\nEscribí el nombre (dejalo vacío para sacarlo de su carpeta):`,
+      p.subcategory || ""
+    );
+    if (input === null) return;
+    await applyBulk(ids.map((id) => ({ id, patch: { subcategory: input.trim() } })));
+    setSelectedProductIds([]);
+  };
   const moveSelectedToGroup = async () => {
     if (!selectedProductIds.length || !bulkGroupTarget) return;
     await applyBulk(selectedProductIds.map((id) => ({ id, patch: { group: bulkGroupTarget } })));
@@ -13424,27 +13437,64 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
   const [bulkSizes, setBulkSizes] = useState([]);
   const [applyingBulkEdit, setApplyingBulkEdit] = useState(false);
   const toggleBulkSize = (s) => setBulkSizes((prev) => (prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]));
-  const bulkEditReady = String(bulkPrice).trim() !== "" || String(bulkStock).trim() !== "" || bulkSizesOn;
+  // Colores para varios productos a la vez (ej: toda una carpeta): se eligen
+  // de la librería de colores guardados o por número de Roly, y se agregan a
+  // cada producto sin foto (la foto de cada color se le pone después).
+  const [bulkColors, setBulkColors] = useState([]);
+  const [bulkColorsReplace, setBulkColorsReplace] = useState(false);
+  const [bulkRolyInput, setBulkRolyInput] = useState("");
+  const [bulkRolyMissing, setBulkRolyMissing] = useState([]);
+  const sameColor = (a, b) => (a.name || "").trim().toLowerCase() === (b.name || "").trim().toLowerCase() || (a.hex || "").toLowerCase() === (b.hex || "").toLowerCase();
+  const toggleBulkColor = (c) => setBulkColors((prev) => (prev.some((x) => sameColor(x, c)) ? prev.filter((x) => !sameColor(x, c)) : [...prev, { name: c.name, hex: c.hex }]));
+  const addBulkRoly = () => {
+    if (!bulkRolyInput.trim()) return;
+    const { found, notFound } = lookupRolyColorsByNumbers(bulkRolyInput);
+    setBulkColors((prev) => [...prev, ...found.filter((c) => !prev.some((x) => sameColor(x, c))).map((c) => ({ name: c.name, hex: c.hex }))]);
+    setBulkRolyMissing(notFound || []);
+    setBulkRolyInput("");
+  };
+  // Atajo: tilda todos los productos de una carpeta/grupo y abre el panel.
+  const openColorsFor = (list) => {
+    setSelectedProductIds(list.map((p) => p.id));
+    setBulkEditOpen(true);
+    setTimeout(() => document.getElementById("kulto-bulk-edit-panel")?.scrollIntoView({ behavior: "smooth", block: "center" }), 150);
+  };
+  const bulkEditReady = String(bulkPrice).trim() !== "" || String(bulkStock).trim() !== "" || bulkSizesOn || bulkColors.length > 0;
   const applyBulkEdit = async () => {
     if (!selectedProductIds.length || !bulkEditReady) return;
     const hasPrice = String(bulkPrice).trim() !== "";
     const hasStock = String(bulkStock).trim() !== "";
     setApplyingBulkEdit(true);
-    for (const id of selectedProductIds) {
-      const p = sellableProducts.find((x) => x.id === id);
-      if (!p) continue;
-      const updates = { ...p };
-      if (hasPrice) updates.price = Number(bulkPrice) || 0;
-      if (hasStock) updates.stock = Number(bulkStock) || 0;
-      if (bulkSizesOn) updates.sizes = bulkSizes;
-      await onSaveProduct(updates);
+    try {
+      const changes = selectedProductIds.map((id) => {
+        const p = sellableProducts.find((x) => x.id === id);
+        if (!p) return null;
+        const patch = {};
+        if (hasPrice) patch.price = Number(bulkPrice) || 0;
+        if (hasStock) patch.stock = Number(bulkStock) || 0;
+        if (bulkSizesOn) patch.sizes = bulkSizes;
+        if (bulkColors.length) {
+          const base = bulkColorsReplace ? [] : (p.colors || []);
+          const extra = bulkColors
+            .filter((c) => !base.some((x) => sameColor(x, c)))
+            .map((c) => ({ name: c.name, hex: c.hex, images: [], frontImage: null, backImage: null, sleeveLeftImage: null, sleeveRightImage: null }));
+          patch.colors = [...base, ...extra];
+        }
+        return { id, patch };
+      }).filter(Boolean);
+      const res = await applyBulk(changes);
+      if (res.failed) return; // se deja todo como está para reintentar
+    } finally {
+      setApplyingBulkEdit(false);
     }
-    setApplyingBulkEdit(false);
     setBulkEditOpen(false);
     setBulkPrice("");
     setBulkStock("");
     setBulkSizesOn(false);
     setBulkSizes([]);
+    setBulkColors([]);
+    setBulkColorsReplace(false);
+    setBulkRolyMissing([]);
     setSelectedProductIds([]);
   };
 
@@ -13550,8 +13600,8 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                   {!bulkProgress && <button onClick={() => setBulkMessage("")} className="kulto-btn ml-auto text-[11px]" style={{ color: "var(--slate)" }}>Cerrar</button>}
                 </div>
               )}
-              <div className="flex items-center justify-between gap-2 flex-wrap">
-                <p className="text-sm font-semibold" style={{ color: "var(--bone)" }}>Productos ({sellableProducts.length})</p>
+              <div className="flex items-center justify-between gap-2 flex-wrap" style={selectedProductIds.length > 0 ? { position: "sticky", top: 8, zIndex: 30, background: "var(--ink)", border: "1px solid var(--sun)", borderRadius: 16, padding: 8 } : undefined}>
+                <p className="text-sm font-semibold" style={{ color: "var(--bone)" }}>Productos ({sellableProducts.length}){selectedProductIds.length > 0 ? ` · ${selectedProductIds.length} tildado${selectedProductIds.length === 1 ? "" : "s"}` : ""}</p>
                 {selectedProductIds.length > 0 && (
                   <div className="flex items-center gap-2 flex-wrap">
                     {groups.length > 0 && (
@@ -13669,9 +13719,9 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                 </div>
               )}
               {selectedProductIds.length > 0 && bulkEditOpen && (
-                <div className="rounded-xl p-3 flex flex-col gap-3 -mt-1" style={{ background: "var(--ink-3)", border: "1px solid var(--line)" }}>
+                <div id="kulto-bulk-edit-panel" className="rounded-xl p-3 flex flex-col gap-3 -mt-1" style={{ background: "var(--ink-3)", border: "1px solid var(--line)" }}>
                   <p className="text-[11px]" style={{ color: "var(--slate)" }}>
-                    Cambiá precio, stock y/o talles para los {selectedProductIds.length} seleccionados de una sola vez. Dejá un campo vacío (o sin tildar) para no tocar ese dato — podés seguir editando cada producto individualmente con el lápiz cuando quieras.
+                    Cambiá precio, stock, talles y/o colores para los {selectedProductIds.length} seleccionados de una sola vez. Dejá un campo vacío (o sin tildar) para no tocar ese dato — podés seguir editando cada producto individualmente con el lápiz cuando quieras.
                   </p>
                   <div className="flex flex-wrap gap-2">
                     <input
@@ -13711,6 +13761,58 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                         ))}
                       </div>
                     )}
+                  </div>
+                  <div className="flex flex-col gap-2 rounded-lg p-2" style={{ background: "var(--ink)", border: "1px dashed var(--line)" }}>
+                    <p className="text-[11px] font-semibold" style={{ color: "var(--bone)" }}>Colores para los {selectedProductIds.length} seleccionados</p>
+                    {savedColors && savedColors.length > 0 ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        {savedColors.map((c, i) => {
+                          const on = bulkColors.some((x) => sameColor(x, c));
+                          return (
+                            <button
+                              key={i}
+                              type="button"
+                              onClick={() => toggleBulkColor(c)}
+                              className="kulto-btn flex items-center gap-1.5 rounded-full pl-1 pr-2 py-1 text-[11px]"
+                              style={{ background: "var(--ink-3)", color: "var(--bone)", border: on ? "2px solid var(--sun)" : "1px solid var(--line)" }}
+                            >
+                              <span className="w-4 h-4 rounded-full" style={{ background: c.hex, border: "1px solid var(--line)" }} />
+                              {c.name}{on && <Check size={11} />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="text-[11px]" style={{ color: "var(--slate)" }}>Todavía no hay colores guardados — usá los números de Roly de abajo.</p>
+                    )}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input
+                        placeholder="Números de Roly: 01, 47, 56…"
+                        value={bulkRolyInput}
+                        onChange={(e) => setBulkRolyInput(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addBulkRoly(); } }}
+                        className="rounded-lg p-2 text-xs flex-1 min-w-[150px]"
+                        style={{ background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" }}
+                      />
+                      <button type="button" onClick={addBulkRoly} className="kulto-btn text-[11px] font-semibold px-3 py-2 rounded-full" style={{ background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" }}>Agregar</button>
+                    </div>
+                    {bulkRolyMissing.length > 0 && <p className="text-[11px]" style={{ color: "var(--signal)" }}>No encontré estos números: {bulkRolyMissing.join(", ")}</p>}
+                    {bulkColors.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 items-center">
+                        <span className="text-[11px]" style={{ color: "var(--slate)" }}>Elegidos:</span>
+                        {bulkColors.map((c, i) => (
+                          <span key={i} className="flex items-center gap-1 text-[11px] rounded-full pl-1 pr-2 py-0.5" style={{ background: "var(--ink-3)", color: "var(--bone)" }}>
+                            <span className="w-3.5 h-3.5 rounded-full" style={{ background: c.hex }} /> {c.name}
+                            <button type="button" onClick={() => setBulkColors((prev) => prev.filter((_, idx) => idx !== i))} aria-label="Quitar"><X size={10} /></button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <label className="flex items-center gap-2 text-[11px]" style={{ color: "var(--slate)" }}>
+                      <input type="checkbox" checked={bulkColorsReplace} onChange={(e) => setBulkColorsReplace(e.target.checked)} style={{ accentColor: "var(--signal)" }} />
+                      Reemplazar los colores que ya tienen (si no, se agregan a los que ya tienen)
+                    </label>
+                    <p className="text-[10px]" style={{ color: "var(--slate)" }}>Los colores nuevos quedan "Sin foto": después le subís la foto a cada uno desde el lápiz del producto.</p>
                   </div>
                   <button
                     type="button"
@@ -13763,6 +13865,15 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                         {isOpen ? <ChevronDown size={16} color="var(--slate)" /> : <ChevronRight size={16} color="var(--slate)" />}
                         <span className="text-sm font-semibold flex-1" style={{ color: "var(--bone)" }}>{grp}</span>
                         <span className="text-xs" style={{ color: "var(--slate)" }}>{items.length} producto{items.length === 1 ? "" : "s"}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openColorsFor(items)}
+                        className="kulto-btn text-[11px] font-semibold px-2.5 py-1 rounded-full shrink-0"
+                        style={{ background: "var(--ink)", color: "var(--bone)", border: "1px solid var(--line)" }}
+                        title="Elegir colores para todos los productos de este grupo"
+                      >
+                        Colores
                       </button>
                       {grp !== "Sin grupo / temática" && onRenameGroup && (
                         <button
@@ -13817,6 +13928,15 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                               <FolderPlus size={13} color="var(--sun)" />
                               <span className="text-sm font-semibold flex-1" style={{ color: "var(--bone)" }}>{folderName || "Sin carpeta"}</span>
                               <span className="text-[11px]" style={{ color: "var(--slate)" }}>{fItems.length}</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => openColorsFor(fItems)}
+                              className="kulto-btn text-[11px] font-semibold px-2.5 py-1 rounded-full shrink-0"
+                              style={{ background: "var(--ink)", color: "var(--bone)", border: "1px solid var(--line)" }}
+                              title="Elegir colores para todos los productos de esta carpeta"
+                            >
+                              Colores
                             </button>
                             <button
                               type="button"
@@ -13898,6 +14018,16 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                                 aria-label={p.hidden ? "Mostrar producto" : "Ocultar producto"}
                               >
                                 {p.hidden ? <><Eye size={13} /> Mostrar</> : <><EyeOff size={13} /> Ocultar</>}
+                              </button>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); moveOneToFolder(p); }}
+                                disabled={movingSelected}
+                                className="kulto-btn p-2 rounded-full"
+                                style={{ color: p.subcategory ? "var(--sun)" : "var(--bone)" }}
+                                aria-label="Mover a carpeta"
+                                title="Mover a carpeta"
+                              >
+                                <FolderPlus size={16} />
                               </button>
                               <button
                                 onClick={(e) => { e.stopPropagation(); setExpandedModelsFor(modelsOpen ? null : p.id); }}
@@ -15329,9 +15459,21 @@ export default function App() {
     await Promise.all(Array.from({ length: 5 }, worker));
     const okList = list.filter((p) => !failedIds.includes(p.id));
     if (okList.length) {
+      // Las filas se guardaron sin tocar el índice (para no pisarse en
+      // paralelo): se completa una sola vez acá, así ningún producto queda
+      // "guardado pero invisible" al recargar.
+      try {
+        const idxRaw = await storageGet(`${DRAFT_PREFIX}product-index`, true);
+        const ids = idxRaw ? JSON.parse(idxRaw) : [];
+        const missing = okList.map((p) => p.id).filter((id) => !ids.includes(id));
+        if (missing.length) await storageSet(`${DRAFT_PREFIX}product-index`, JSON.stringify([...ids, ...missing]), true);
+      } catch { /* se reintenta en el próximo guardado */ }
       try { await markDraftChanged(); } catch { /* el aviso se reintenta en el próximo cambio */ }
       setHasDraftChanges(true);
-      setDraftProducts((prev) => prev.map((p) => okList.find((u) => u.id === p.id) || p));
+      setDraftProducts((prev) => {
+        const known = new Set(prev.map((p) => p.id));
+        return [...prev.map((p) => okList.find((u) => u.id === p.id) || p), ...okList.filter((u) => !known.has(u.id))];
+      });
     }
     return { ok: okList.length, failed: failedIds.length };
   };
