@@ -4,7 +4,7 @@ import {
   MessageCircle, Lock, Check, Shirt, Upload, Package, Star, Sparkles, ArrowRight,
   LogOut, Loader2, ZoomIn, ZoomOut, ArrowUp, ArrowDown, Quote, Instagram, Search, Heart, GripVertical, Info,
   Sun, Moon, RotateCw, Facebook, Music2, Mail, Phone, MapPin, HelpCircle, SlidersHorizontal, RotateCcw,
-  LayoutGrid, Eye, EyeOff, TrendingUp, UserPlus, KeyRound, Boxes, FolderPlus, ArrowLeft, Move, WifiOff, Download, BarChart3, Zap
+  LayoutGrid, Eye, EyeOff, TrendingUp, UserPlus, KeyRound, Boxes, FolderPlus, ArrowLeft, Move, WifiOff, Download, BarChart3, Gift, Copy, Zap
 } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
 
@@ -84,6 +84,7 @@ const ADMIN_TABS = [
   ["clientes", "Clientes"],
   ["resenas", "Reseñas"],
   ["contacto", "Contacto"],
+  ["beneficios", "Beneficios"],
   ["ajustes", "Ajustes"],
 ];
 const ADMIN_TAB_KEYS = ADMIN_TABS.map(([key]) => key);
@@ -513,6 +514,9 @@ function buildOrderMessage(order, settings) {
   if (order.discountAmount > 0) {
     lines.push(`Descuento de bienvenida: -${formatPrice(order.discountAmount)}`);
   }
+  if (order.promoCode) {
+    lines.push(promoOrderSummary(order));
+  }
   if (order.deliveryMethod === "envio") {
     lines.push(`Envío a domicilio: ${order.shippingCost > 0 ? formatPrice(order.shippingCost) : "Gratis"}`);
     lines.push(`Dirección: ${formatAddress(order.address)}`);
@@ -682,6 +686,7 @@ function buildOrderEmailHtml(order, settings) {
     <table style="width:100%;border-collapse:collapse;margin-bottom:16px;">${itemsHtml}</table>
     ${deliveryHtml}
     ${order.discountAmount > 0 ? `<p style="margin:0 0 4px;">Descuento: -${formatPrice(order.discountAmount)}</p>` : ""}
+    ${order.promoCode ? `<p style="margin:0 0 4px;">${promoOrderSummary(order)}</p>` : ""}
     <p style="margin:0 0 4px;font-size:18px;font-weight:bold;">Total: ${formatPrice(order.total)}</p>
     <p style="margin:20px 0 0;color:#a9a2b0;font-size:13px;">Gracias por su compra. Su pedido se está procesando y nos pondremos en contacto con usted para coordinar el pago por Bizum o transferencia.${isLocalOrder(order, settings) ? ` Podrá seguir cada etapa de su pedido en \"Mi pedido\" de nuestra web con su número de orden (${order.id}).` : ""} Cualquier duda, responda este mismo mail o escríbanos por WhatsApp.</p>
   `);
@@ -736,6 +741,7 @@ function buildAdminOrderEmailHtml(order, settings) {
     <table style="width:100%;border-collapse:collapse;margin-bottom:16px;">${itemsHtml}</table>
     ${deliveryHtml}
     ${order.discountAmount > 0 ? `<p style="margin:0 0 4px;">Descuento: -${formatPrice(order.discountAmount)}</p>` : ""}
+    ${order.promoCode ? `<p style="margin:0 0 4px;">${promoOrderSummary(order)}</p>` : ""}
     <p style="margin:0 0 4px;font-size:18px;font-weight:bold;">Total: ${formatPrice(order.total)}</p>
     ${order.comment ? `<p style="margin:16px 0 4px;"><strong>Comentario del cliente:</strong></p><p style="margin:0 0 12px;white-space:pre-line;background:#15131a;border-radius:12px;padding:12px;">${order.comment}</p>` : ""}
     ${depositHtml}
@@ -1648,6 +1654,19 @@ const DEFAULT_SETTINGS = {
   loyaltyPointsPerItem: 1,
   loyaltyRewardThreshold: 5,
   loyaltyRewardDescription: "Cada 5 prendas compradas, la 6ta es gratis.",
+  // Recompensas: botón flotante, premios canjeables con puntos y códigos del
+  // carrito (se editan en el panel → Beneficios).
+  rewardsEnabled: true,
+  rewardsButtonLabel: "Recompensas",
+  rewardsColor: "#E63946",
+  rewardsEarnText: "",
+  rewardsRedeemText: "",
+  loyaltyRewards: [
+    { id: "rw1", name: "10% de descuento", pointsCost: 5, type: "percent", value: 10, giftText: "", color: "#E63946", active: true },
+  ],
+  promoCodes: [
+    { id: "pc1", code: "KULTO10", label: "Ejemplo: 10% de descuento", type: "percent", value: 10, giftText: "", minSubtotal: 0, maxUses: 0, startsAt: "", endsAt: "", perCustomerOnce: false, color: "#2A9D8F", active: false },
+  ],
   returnsPolicyEnabled: true,
   returnsPolicyText: "Tenés 10 días desde que recibís tu pedido para pedir un cambio o la devolución, siempre que la prenda esté sin usar, sin lavar y con sus etiquetas. Las prendas personalizadas o hechas a medida no tienen cambio salvo falla de fabricación. Escribinos por WhatsApp contándonos qué pasó y coordinamos los pasos a seguir.",
   // El bloque de preguntas frecuentes solo se muestra en el inicio (ver
@@ -1910,6 +1929,103 @@ function genDiscountCode(percent) {
   return `KULTO${percent}-${rand}`;
 }
 
+/* ------------------------------------------------------------------ */
+/*  Recompensas y códigos promocionales                                */
+/* ------------------------------------------------------------------ */
+const PROMO_TYPES = [
+  ["percent", "% de descuento"],
+  ["fixed", "Monto fijo de descuento"],
+  ["freeShipping", "Envío gratis"],
+  ["gift", "Premio / regalo"],
+];
+const PROMO_COLORS = ["#E63946", "#F4A261", "#2A9D8F", "#4C6EF5", "#9B5DE5", "#F15BB5", "#00BBF9", "#8AC926"];
+
+function describeBenefit(b) {
+  if (!b) return "";
+  const v = Number(b.value) || 0;
+  if (b.type === "percent") return `${v}% de descuento`;
+  if (b.type === "fixed") return `${formatPrice(v)} de descuento`;
+  if (b.type === "freeShipping") return "Envío gratis";
+  if (b.type === "gift") return b.giftText || "Premio sorpresa";
+  return "";
+}
+function normalizePromoCode(s) {
+  return String(s || "").trim().toUpperCase().replace(/\s+/g, "");
+}
+function genRewardCode() {
+  const rand = Math.random().toString(36).slice(2, 8).toUpperCase();
+  return `PREMIO-${rand}`;
+}
+function getActiveRewards(settings) {
+  return (settings?.loyaltyRewards || [])
+    .filter((r) => r && r.active !== false && Number(r.pointsCost) > 0)
+    .sort((a, b) => Number(a.pointsCost) - Number(b.pointsCost));
+}
+// Cuántas veces se usó cada código compartido (para el tope de usos).
+async function loadPromoUsage() {
+  try {
+    const raw = await storageGet("kulto:promo-usage", true);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+async function bumpPromoUsage(code) {
+  try {
+    const u = await loadPromoUsage();
+    u[code] = (u[code] || 0) + 1;
+    await storageSet("kulto:promo-usage", JSON.stringify(u), true);
+  } catch { /* nunca bloquear el pedido por esto */ }
+}
+// Busca un código: primero entre los personales del cliente (canjeados con
+// puntos) y después entre los códigos generales del admin.
+function findPromo(code, settings, customer, usage) {
+  const c = normalizePromoCode(code);
+  const mine = (customer?.rewardCodes || []).find((r) => normalizePromoCode(r.code) === c);
+  if (mine) {
+    if (mine.usedAt) return { ok: false, error: "Este código ya lo usaste." };
+    return { ok: true, promo: { ...mine, label: mine.name || "", code: c, personal: true } };
+  }
+  const p = (settings?.promoCodes || []).find((x) => x && normalizePromoCode(x.code) === c);
+  if (!p || p.active === false) return { ok: false, error: "Ese código no existe o ya no está vigente." };
+  const now = new Date();
+  if (p.startsAt && new Date(`${p.startsAt}T00:00:00`) > now) return { ok: false, error: "Este código todavía no empezó." };
+  if (p.endsAt && new Date(`${p.endsAt}T23:59:59`) < now) return { ok: false, error: "Este código ya venció." };
+  if (Number(p.maxUses) > 0 && (usage?.[c] || 0) >= Number(p.maxUses)) return { ok: false, error: "Este código ya se agotó." };
+  if (p.perCustomerOnce) {
+    if (!customer) return { ok: false, error: "Iniciá sesión para usar este código." };
+    if ((customer.usedPromoCodes || []).includes(c)) return { ok: false, error: "Ya usaste este código." };
+  }
+  return { ok: true, promo: { ...p, code: c, personal: false } };
+}
+// Calcula lo que da un código para el subtotal actual del carrito.
+function evalPromo(promo, subtotal, customer) {
+  if (!promo) return { ok: false, error: "" };
+  if (promo.personal && !(customer?.rewardCodes || []).some((r) => normalizePromoCode(r.code) === promo.code && !r.usedAt)) {
+    return { ok: false, error: "Iniciá sesión con la cuenta que canjeó este código." };
+  }
+  const min = Number(promo.minSubtotal) || 0;
+  if (min > 0 && subtotal < min) return { ok: false, error: `Este código pide una compra mínima de ${formatPrice(min)}.` };
+  const v = Number(promo.value) || 0;
+  let discount = 0;
+  let freeShipping = false;
+  let gift = "";
+  if (promo.type === "percent") discount = Math.round((subtotal * Math.min(100, v)) / 100 * 100) / 100;
+  else if (promo.type === "fixed") discount = Math.min(v, subtotal);
+  else if (promo.type === "freeShipping") freeShipping = true;
+  else if (promo.type === "gift") gift = promo.giftText || promo.label || "Premio sorpresa";
+  return { ok: true, discount, freeShipping, gift };
+}
+// Texto corto con el beneficio que usó un pedido (mensaje y mails).
+function promoOrderSummary(order) {
+  if (!order || !order.promoCode) return "";
+  const parts = [];
+  if (order.promoDiscount > 0) parts.push(`-${formatPrice(order.promoDiscount)}`);
+  if (order.promoFreeShipping) parts.push("envío gratis");
+  if (order.promoGift) parts.push(`premio: ${order.promoGift}`);
+  return `Código ${order.promoCode}${parts.length ? ": " + parts.join(", ") : ""}`;
+}
+
 async function loadCartState() {
   const raw = await storageGet("kulto:cart-state", false);
   if (raw) {
@@ -1967,6 +2083,10 @@ function GlobalStyle({ colors }) {
       .kulto-btn{ cursor:pointer; transition:transform .15s ease, opacity .15s ease; }
       .kulto-btn:hover{ opacity:.88; }
       .kulto-btn:active{ transform:scale(0.97); }
+      .kulto-nav{ position:relative; transition:color .2s ease, transform .2s ease; }
+      .kulto-nav::after{ content:""; position:absolute; left:0; right:0; bottom:-2px; height:2px; border-radius:2px; background:var(--sun); transform:scaleX(0); transform-origin:left center; transition:transform .28s ease; }
+      .kulto-nav:hover{ color:var(--sun) !important; opacity:1; transform:translateY(-1px); }
+      .kulto-nav:hover::after, .kulto-nav:focus-visible::after{ transform:scaleX(1); }
       .kulto-card:hover .kulto-card-img{ transform:scale(1.12); }
       .kulto-card-img{ transition:transform .3s ease; }
       .kulto-card{ transition:box-shadow .25s ease, transform .25s ease; box-shadow:${CARD_SHADOWS[c.cardShadow] || CARD_SHADOWS.media}; }
@@ -1999,7 +2119,7 @@ function GlobalStyle({ colors }) {
       @keyframes kulto-shimmer{ 0%{ background-position:100% 50%; } 100%{ background-position:0 50%; } }
       .kulto-skel{ background:linear-gradient(90deg, var(--ink-2) 25%, var(--ink-3) 37%, var(--ink-2) 63%); background-size:400% 100%; animation:kulto-shimmer 1.4s ease infinite; }
       @media (prefers-reduced-motion: reduce){
-        .kulto-btn, .kulto-card-img, .kulto-card, .kulto-banner-tile-img, .kulto-banner-tile{ transition:none !important; }
+        .kulto-btn, .kulto-nav, .kulto-nav::after, .kulto-card-img, .kulto-card, .kulto-banner-tile-img, .kulto-banner-tile{ transition:none !important; }
         .kulto-marquee-track{ animation:none !important; }
       }
     `}</style>
@@ -3809,6 +3929,27 @@ function Home({ products, settings, reviews, customWorkGallery, onOpen, onGoCata
 
   const sectionOrder = getEffectiveHomeSections(settings);
 
+  // Cada fila del inicio muestra solo 4 tarjetas; si hay más, un botón "Ver
+  // todo" lleva al catálogo con todos los de esa colección.
+  const FeaturedGrid = ({ list, collection }) => (
+    <>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {list.slice(0, 4).map((p) => <ProductCard key={p.id} product={p} onOpen={onOpen} isFavorite={favorites?.includes(p.id)} onToggleFavorite={onToggleFavorite} onAddToCart={onAddToCart} />)}
+      </div>
+      {list.length > 4 && (
+        <div className="flex justify-center mt-6">
+          <button
+            onClick={() => onGoCatalog({ collection })}
+            className="kulto-btn rounded-full px-6 py-3 font-semibold flex items-center gap-2"
+            style={{ background: "var(--ink-2)", color: "var(--bone)", border: "1px solid var(--line)" }}
+          >
+            Ver todo ({list.length}) <ArrowRight size={16} />
+          </button>
+        </div>
+      )}
+    </>
+  );
+
   const renderSection = (key) => {
     if (key.startsWith("banner:")) {
       const bannerId = key.slice(7);
@@ -3822,7 +3963,7 @@ function Home({ products, settings, reviews, customWorkGallery, onOpen, onGoCata
           <section key="bestsellers">
             <SectionTitle eyebrow="Los favoritos" title="Lo más vendido" />
             {bestsellers.length ? (
-              <HorizontalRow products={bestsellers} onOpen={onOpen} favorites={favorites} onToggleFavorite={onToggleFavorite} onAddToCart={onAddToCart} />
+              <FeaturedGrid list={bestsellers} collection="bestsellers" />
             ) : (
               <EmptyState text="Aún no hay productos marcados como más vendidos. Márcalos desde el panel de administrador." />
             )}
@@ -3833,9 +3974,7 @@ function Home({ products, settings, reviews, customWorkGallery, onOpen, onGoCata
           <section key="ofertas">
             <SectionTitle eyebrow="Por tiempo limitado" title="En oferta" />
             {ofertas.length ? (
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {ofertas.map((p) => <ProductCard key={p.id} product={p} onOpen={onOpen} isFavorite={favorites?.includes(p.id)} onToggleFavorite={onToggleFavorite} onAddToCart={onAddToCart} />)}
-              </div>
+              <FeaturedGrid list={ofertas} collection="ofertas" />
             ) : (
               <EmptyState text="Todavía no hay ofertas activas." />
             )}
@@ -3846,7 +3985,7 @@ function Home({ products, settings, reviews, customWorkGallery, onOpen, onGoCata
           <section key="tendencia">
             <SectionTitle eyebrow="Lo que se lleva" title="Tendencia" />
             {tendencia.length ? (
-              <HorizontalRow products={tendencia} onOpen={onOpen} favorites={favorites} onToggleFavorite={onToggleFavorite} onAddToCart={onAddToCart} />
+              <FeaturedGrid list={tendencia} collection="tendencia" />
             ) : (
               <EmptyState text="Todavía no hay productos en tendencia." />
             )}
@@ -4037,10 +4176,173 @@ function FilterOption({ active, onClick, label, count = null }) {
   );
 }
 
-function Catalog({ products, categories, groups, onOpen, initialQuery, initialGroup, initialCategory, initialSubcategory, favorites, onToggleFavorite, onlyFavorites = false, onGoHome, onAddToCart }) {
+// ---------------------------------------------------------------------------
+// Catálogo: paginador (1 2 3 … con flechas) y comparador de productos.
+// ---------------------------------------------------------------------------
+const CATALOG_PAGE_SIZE = 12;
+function pageWindow(page, total) {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const out = [1];
+  const from = Math.max(2, page - 1);
+  const to = Math.min(total - 1, page + 1);
+  if (from > 2) out.push("…");
+  for (let i = from; i <= to; i++) out.push(i);
+  if (to < total - 1) out.push("…");
+  out.push(total);
+  return out;
+}
+function Paginator({ page, total, onChange }) {
+  if (total <= 1) return null;
+  const arrow = { color: "var(--bone)" };
+  return (
+    <nav className="flex justify-center mt-8" aria-label="Páginas del catálogo">
+      <div className="inline-flex items-center gap-1 rounded-xl px-3 py-2" style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}>
+        <button type="button" disabled={page <= 1} onClick={() => onChange(page - 1)} className="kulto-btn p-1.5" style={{ ...arrow, opacity: page <= 1 ? 0.3 : 1 }} aria-label="Página anterior">
+          <ChevronLeft size={18} />
+        </button>
+        {pageWindow(page, total).map((n, i) =>
+          n === "…" ? (
+            <span key={`d${i}`} className="px-2 text-sm" style={{ color: "var(--slate)" }}>…</span>
+          ) : (
+            <button
+              key={n}
+              type="button"
+              onClick={() => onChange(n)}
+              aria-current={n === page ? "page" : undefined}
+              className="kulto-btn relative px-3 py-1.5 text-sm"
+              style={{ color: n === page ? "var(--bone)" : "var(--slate)", fontWeight: n === page ? 600 : 400 }}
+            >
+              {n}
+              {n === page && <span className="absolute left-0 right-0 -bottom-2 h-0.5 rounded" style={{ background: "var(--signal)" }} />}
+            </button>
+          )
+        )}
+        <button type="button" disabled={page >= total} onClick={() => onChange(page + 1)} className="kulto-btn p-1.5" style={{ ...arrow, opacity: page >= total ? 0.3 : 1 }} aria-label="Página siguiente">
+          <ChevronRight size={18} />
+        </button>
+      </div>
+    </nav>
+  );
+}
+
+const productThumbSrc = (p) => p?.photoPool?.[0] || getColorImages(p?.colors?.[0])[0] || null;
+const effectivePrice = (p) => (p.tags?.oferta && p.salePrice ? p.salePrice : p.price);
+const fabricOf = (p) => (p.material || "").trim();
+
+// Arma, en palabras simples, qué cambia entre los productos elegidos.
+function buildComparison(list) {
+  const names = list.map((p) => p.name);
+  const lines = [];
+  const rows = [];
+  const money = (v) => formatPrice(v);
+
+  // Precio
+  const prices = list.map(effectivePrice);
+  const priceDiffers = new Set(prices).size > 1;
+  rows.push({ label: "Precio", values: list.map((p) => (p.tags?.oferta && p.salePrice ? `${money(p.salePrice)} (antes ${money(p.price)})` : money(p.price))), differs: priceDiffers });
+  if (priceDiffers) {
+    const min = Math.min(...prices), max = Math.max(...prices);
+    const cheapest = list.filter((p) => effectivePrice(p) === min).map((p) => p.name).join(" y ");
+    lines.push(`Precio: ${cheapest} ${list.filter((p) => effectivePrice(p) === min).length > 1 ? "son las más baratas" : "es la más barata"} (${money(min)}). La diferencia con la más cara (${money(max)}) es de ${money(max - min)}.`);
+  } else {
+    lines.push(`Precio: todas cuestan lo mismo (${money(prices[0])}).`);
+  }
+
+  // Tela / composición
+  const fabrics = list.map(fabricOf);
+  const anyFabric = fabrics.some(Boolean);
+  const norm = (s) => s.toLowerCase().replace(/\s+/g, " ").trim();
+  const fabricDiffers = anyFabric && new Set(fabrics.map(norm)).size > 1;
+  rows.push({ label: "Tela / composición", values: fabrics.map((f) => f || "No indicada"), differs: fabricDiffers });
+  if (!anyFabric) lines.push("Tela: ninguna de las dos tiene la tela cargada todavía.");
+  else if (fabricDiffers) lines.push("Tela: " + list.map((p, i) => `${p.name} → ${fabrics[i] || "no indicada"}`).join(" · "));
+  else lines.push(`Tela: es la misma (${fabrics.find(Boolean)}).`);
+
+  // Modelo / categoría
+  const models = list.map((p) => [p.category, p.subcategory].filter(Boolean).join(" · ") || "—");
+  const modelDiffers = new Set(models).size > 1;
+  rows.push({ label: "Modelo / categoría", values: models, differs: modelDiffers });
+  if (modelDiffers) lines.push("Modelo: " + list.map((p, i) => `${p.name} → ${models[i]}`).join(" · "));
+
+  // Listas (colores y talles): qué tiene cada uno que los otros no
+  const listCompare = (label, getItems, emptyText) => {
+    const sets = list.map((p) => getItems(p));
+    const all = [...new Set(sets.flat())];
+    const inAll = all.filter((x) => sets.every((s) => s.includes(x)));
+    const differs = sets.some((s) => s.length !== all.length);
+    rows.push({ label, values: sets.map((s) => (s.length ? s.join(", ") : emptyText)), differs });
+    if (!all.length) return;
+    if (!differs) { lines.push(`${label}: son los mismos en todos (${all.join(", ")}).`); return; }
+    const parts = list.map((p, i) => {
+      const only = sets[i].filter((x) => !sets.some((s, j) => j !== i && s.includes(x)));
+      return only.length ? `solo ${p.name} tiene ${only.join(", ")}` : null;
+    }).filter(Boolean);
+    const missing = list.map((p, i) => {
+      const lack = all.filter((x) => !sets[i].includes(x));
+      return lack.length && !parts.length ? `${p.name} no tiene ${lack.join(", ")}` : null;
+    }).filter(Boolean);
+    lines.push(`${label}: ${[...parts, ...missing].join("; ")}${inAll.length ? `. En común: ${inAll.join(", ")}` : ""}.`);
+  };
+  listCompare("Colores", (p) => [...new Set((p.colors || []).map((c) => c.name).filter(Boolean))], "Sin colores");
+  listCompare("Talles", (p) => p.sizes || [], "Sin talles");
+
+  return { names, lines, rows };
+}
+
+function CompareModal({ products, onClose, onRemove, onOpen }) {
+  const { lines, rows } = buildComparison(products);
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  const cols = { display: "grid", gridTemplateColumns: `110px repeat(${products.length}, minmax(0, 1fr))`, gap: 12 };
+  return (
+    <div className="fixed inset-0 flex items-center justify-center p-3" style={{ zIndex: 95, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }} onClick={onClose} role="dialog" aria-modal="true" aria-label="Comparar productos">
+      <div className="w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-2xl p-5 flex flex-col gap-4" style={{ background: "var(--ink-2)", border: "1px solid var(--line)", boxShadow: "0 20px 60px rgba(0,0,0,0.5)" }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="kulto-display text-xl" style={{ color: "var(--bone)" }}>Comparar productos</h3>
+          <button onClick={onClose} className="kulto-btn p-1.5 rounded-full" style={{ color: "var(--slate)" }} aria-label="Cerrar"><X size={18} /></button>
+        </div>
+
+        <div className="rounded-xl p-3 flex flex-col gap-1.5" style={{ background: "var(--ink-3)", border: "1px solid var(--sun)" }}>
+          <p className="text-sm font-semibold" style={{ color: "var(--sun)" }}>Diferencias, en resumen</p>
+          {lines.map((l, i) => <p key={i} className="text-sm" style={{ color: "var(--bone)" }}>• {l}</p>)}
+        </div>
+
+        <div style={cols}>
+          <div />
+          {products.map((p) => (
+            <div key={p.id} className="flex flex-col items-center gap-1.5 text-center">
+              <button onClick={() => onOpen?.(p)} className="kulto-btn w-full aspect-square rounded-xl overflow-hidden flex items-center justify-center" style={{ background: "var(--ink-3)", border: "1px solid var(--line)" }}>
+                {productThumbSrc(p) ? <FastImg src={productThumbSrc(p)} alt={p.name} className="w-full h-full object-contain p-1" /> : <Shirt size={26} color="rgba(243,239,230,0.35)" />}
+              </button>
+              <p className="text-xs font-semibold" style={{ color: "var(--bone)" }}>{p.name}</p>
+              <button onClick={() => onRemove(p.id)} className="kulto-btn text-[11px] underline" style={{ color: "var(--slate)" }}>Quitar</button>
+            </div>
+          ))}
+        </div>
+
+        <div className="flex flex-col gap-2">
+          {rows.map((r) => (
+            <div key={r.label} className="rounded-xl p-2.5" style={{ ...cols, background: r.differs ? "var(--ink-3)" : "transparent", border: `1px solid ${r.differs ? "var(--sun)" : "var(--line)"}` }}>
+              <p className="text-xs font-semibold" style={{ color: r.differs ? "var(--sun)" : "var(--slate)" }}>{r.label}{r.differs ? " ≠" : ""}</p>
+              {r.values.map((v, i) => <p key={i} className="text-xs break-words" style={{ color: "var(--bone)" }}>{v}</p>)}
+            </div>
+          ))}
+        </div>
+        <p className="text-[11px]" style={{ color: "var(--slate)" }}>Las filas resaltadas son donde los productos se diferencian.</p>
+      </div>
+    </div>
+  );
+}
+
+function Catalog({ settings, initialCollection, products, categories, groups, onOpen, initialQuery, initialGroup, initialCategory, initialSubcategory, favorites, onToggleFavorite, onlyFavorites = false, onGoHome, onAddToCart }) {
   const [activeGroup, setActiveGroup] = useState(initialGroup || "Todas");
   const [activeCat, setActiveCat] = useState(initialCategory || "Todas");
   const [activeSubcat, setActiveSubcat] = useState(initialSubcategory || "Todas");
+  // Destacados: lo mismo que se ve en el inicio (tendencia, ofertas, más vendidos).
+  const [activeCollection, setActiveCollection] = useState(initialCollection || "Todas");
   const [query, setQuery] = useState(initialQuery || "");
   const [sortBy, setSortBy] = useState("relevancia");
   const [showFilters, setShowFilters] = useState(false);
@@ -4049,8 +4351,36 @@ function Catalog({ products, categories, groups, onOpen, initialQuery, initialGr
   const [selectedSizes, setSelectedSizes] = useState([]);
   const [selectedColors, setSelectedColors] = useState([]);
 
+  const allCatalogProducts = products;
+  // Paginado y comparador
+  const [page, setPage] = useState(1);
+  const [compareMode, setCompareMode] = useState(false);
+  const [compareIds, setCompareIds] = useState([]);
+  const [showCompare, setShowCompare] = useState(false);
+  const [compareNotice, setCompareNotice] = useState("");
+  const gridTopRef = useRef(null);
+  const toggleCompare = (id) => {
+    setCompareNotice("");
+    setCompareIds((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id);
+      if (prev.length >= 3) { setCompareNotice("Podés comparar hasta 3 productos a la vez."); return prev; }
+      return [...prev, id];
+    });
+  };
+  const comparedProducts = compareIds.map((id) => allCatalogProducts.find((p) => p.id === id)).filter(Boolean);
+
   const priceOf = (p) => (p.tags?.oferta && p.salePrice ? p.salePrice : p.price);
   if (onlyFavorites) products = products.filter((p) => favorites?.includes(p.id));
+  if (activeCollection === "tendencia") {
+    const ids = computeTrendingIds(products, settings);
+    products = products.filter((p) => p.tags?.tendencia || ids.has(p.id));
+  } else if (activeCollection === "ofertas") {
+    products = products.filter((p) => p.tags?.oferta);
+  } else if (activeCollection === "bestsellers") {
+    const ids = computeBestsellerIds(products, settings);
+    products = products.filter((p) => p.tags?.bestseller || ids.has(p.id));
+  }
+  const COLLECTION_LABELS = { tendencia: "Tendencia", ofertas: "En oferta", bestsellers: "Lo más vendido" };
 
   let filtered = activeGroup === "Todas" ? products : products.filter((p) => (p.group || "") === activeGroup);
   // Un producto puede listarse en varias categorías a la vez sin duplicarse
@@ -4071,6 +4401,7 @@ function Catalog({ products, categories, groups, onOpen, initialQuery, initialGr
   // donde también está se eligen adentro de la ficha del producto.
   const seenDesignGroups = new Set();
   filtered = filtered.filter((p) => {
+    if (compareMode) return true; // al comparar se ven todas las versiones (oversize, beagle…) del mismo diseño
     if (!p.designGroup) return true;
     if (seenDesignGroups.has(p.designGroup)) return false;
     seenDesignGroups.add(p.designGroup);
@@ -4121,8 +4452,17 @@ function Catalog({ products, categories, groups, onOpen, initialQuery, initialGr
   const clearFilters = () => { setPriceMin(""); setPriceMax(""); setSelectedSizes([]); setSelectedColors([]); };
   const filterInputStyle = { background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" };
 
-  const clearAll = () => { clearFilters(); setActiveGroup("Todas"); setActiveCat("Todas"); setActiveSubcat("Todas"); };
-  const anyActive = activeFilterCount > 0 || activeGroup !== "Todas" || activeCat !== "Todas" || activeSubcat !== "Todas";
+  const totalPages = Math.max(1, Math.ceil(filtered.length / CATALOG_PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pagedItems = filtered.slice((safePage - 1) * CATALOG_PAGE_SIZE, safePage * CATALOG_PAGE_SIZE);
+  const filterSignature = [activeGroup, activeCat, activeSubcat, activeCollection, query, sortBy, priceMin, priceMax, selectedSizes.join(","), selectedColors.join(",")].join("|");
+  useEffect(() => { setPage(1); }, [filterSignature]);
+  const goToPage = (n) => {
+    setPage(n);
+    setTimeout(() => gridTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 30);
+  };
+  const clearAll = () => { clearFilters(); setActiveCollection("Todas"); setActiveGroup("Todas"); setActiveCat("Todas"); setActiveSubcat("Todas"); };
+  const anyActive = activeCollection !== "Todas" || activeFilterCount > 0 || activeGroup !== "Todas" || activeCat !== "Todas" || activeSubcat !== "Todas";
 
   return (
     <div className="max-w-6xl mx-auto px-4 md:px-6 py-10">
@@ -4130,17 +4470,26 @@ function Catalog({ products, categories, groups, onOpen, initialQuery, initialGr
         steps={[
           { label: "Inicio", onClick: onGoHome },
           { label: onlyFavorites ? "Favoritos" : "Catálogo" },
+          ...(activeCollection !== "Todas" ? [{ label: COLLECTION_LABELS[activeCollection] }] : []),
           ...(activeGroup !== "Todas" ? [{ label: activeGroup }] : []),
           ...(activeCat !== "Todas" ? [{ label: activeCat }] : []),
           ...(activeSubcat !== "Todas" ? [{ label: activeSubcat }] : []),
         ]}
       />
-      <SectionTitle eyebrow={onlyFavorites ? "Guardado por vos" : "Todo Kulto"} title={onlyFavorites ? "Tus favoritos" : "Catálogo"} />
+      <SectionTitle eyebrow={onlyFavorites ? "Guardado por vos" : "Todo Kulto"} title={onlyFavorites ? "Tus favoritos" : (activeCollection !== "Todas" ? COLLECTION_LABELS[activeCollection] : "Catálogo")} />
 
       <div className="flex flex-col lg:flex-row gap-8 mt-4">
         {/* Filtros a la izquierda (en el celular se abren con el botón "Filtros") */}
         <aside className={`${showFilters ? "block" : "hidden"} lg:block lg:w-60 shrink-0`}>
           <div className="lg:sticky lg:top-24">
+            {!onlyFavorites && (
+              <FilterAccordion title="Destacados" defaultOpen={activeCollection !== "Todas"} badge={activeCollection !== "Todas" ? "1" : null}>
+                <FilterOption label="Todos los productos" active={activeCollection === "Todas"} onClick={() => setActiveCollection("Todas")} />
+                {Object.entries(COLLECTION_LABELS).map(([k, label]) => (
+                  <FilterOption key={k} label={label} active={activeCollection === k} onClick={() => setActiveCollection(k)} />
+                ))}
+              </FilterAccordion>
+            )}
             {groups.length > 0 && (
               <FilterAccordion title="Temática" defaultOpen badge={activeGroup !== "Todas" ? "1" : null}>
                 {["Todas", ...groups].map((g) => (
@@ -4235,6 +4584,18 @@ function Catalog({ products, categories, groups, onOpen, initialQuery, initialGr
               <option value="nombre">Nombre A-Z</option>
             </select>
             <button
+              type="button"
+              onClick={() => { setCompareMode((v) => !v); setCompareIds([]); setCompareNotice(""); }}
+              className="kulto-btn flex items-center gap-2 text-sm shrink-0 rounded-xl px-3 py-2.5"
+              style={{ background: "var(--ink-2)", color: "var(--bone)", border: `1px solid ${compareMode ? "var(--signal)" : "var(--line)"}` }}
+              aria-pressed={compareMode}
+            >
+              Comparar
+              <span className="relative inline-block rounded-full" style={{ width: 34, height: 18, background: compareMode ? "var(--signal)" : "var(--ink-3)", border: "1px solid var(--line)" }}>
+                <span className="absolute rounded-full" style={{ top: 1, left: compareMode ? 17 : 1, width: 14, height: 14, background: "var(--bone)", transition: "left .15s" }} />
+              </span>
+            </button>
+            <button
               onClick={() => setShowFilters((v) => !v)}
               className="kulto-btn lg:hidden rounded-xl px-4 py-2.5 text-sm font-semibold flex items-center justify-center gap-2 shrink-0"
               style={{ background: anyActive ? "var(--signal)" : "var(--ink-2)", color: "var(--bone)", border: "1px solid var(--line)" }}
@@ -4243,15 +4604,79 @@ function Catalog({ products, categories, groups, onOpen, initialQuery, initialGr
             </button>
             <span className="hidden lg:block text-xs shrink-0" style={{ color: "var(--slate)" }}>{filtered.length} producto{filtered.length === 1 ? "" : "s"}</span>
           </div>
+          <div ref={gridTopRef} style={{ scrollMarginTop: 96 }} />
+          {compareMode && (
+            <p className="text-xs mb-3" style={{ color: "var(--slate)" }}>
+              Modo comparar: tocá las tarjetas de los productos que quieras comparar (hasta 3) y después "Ver diferencias".
+            </p>
+          )}
           {filtered.length ? (
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-              {filtered.map((p) => <ProductCard key={p.id} product={p} onOpen={onOpen} isFavorite={favorites?.includes(p.id)} onToggleFavorite={onToggleFavorite} onAddToCart={onAddToCart} />)}
-            </div>
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                {pagedItems.map((p) => {
+                  const picked = compareIds.includes(p.id);
+                  return (
+                    <div key={p.id} className="relative" style={compareMode ? { borderRadius: 16, outline: picked ? "3px solid var(--signal)" : "none", outlineOffset: 2 } : undefined}>
+                      <ProductCard product={p} onOpen={onOpen} isFavorite={favorites?.includes(p.id)} onToggleFavorite={onToggleFavorite} onAddToCart={onAddToCart} />
+                      {compareMode && (
+                        <button
+                          type="button"
+                          onClick={() => toggleCompare(p.id)}
+                          className="absolute inset-0 rounded-2xl flex items-start justify-end p-2"
+                          style={{ zIndex: 10, background: picked ? "rgba(0,0,0,0.12)" : "rgba(0,0,0,0.02)", cursor: "pointer" }}
+                          aria-label={picked ? `Quitar ${p.name} de la comparación` : `Comparar ${p.name}`}
+                          aria-pressed={picked}
+                        >
+                          <span className="w-7 h-7 rounded-full flex items-center justify-center" style={{ background: picked ? "var(--signal)" : "var(--ink)", color: "var(--bone)", border: "2px solid var(--bone)" }}>
+                            {picked ? <Check size={15} /> : <Plus size={15} />}
+                          </span>
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <Paginator page={safePage} total={totalPages} onChange={goToPage} />
+            </>
           ) : (
             <EmptyState text={onlyFavorites ? "Todavía no guardaste ningún producto — tocá el corazón en cualquier producto para guardarlo acá." : "No hay productos con estos filtros todavía."} />
           )}
         </div>
       </div>
+
+      {compareMode && comparedProducts.length > 0 && (
+        <div className="fixed left-1/2 -translate-x-1/2 flex items-center gap-3 rounded-2xl px-3 py-2.5 max-w-[95vw]" style={{ bottom: 16, zIndex: 80, background: "var(--ink-2)", border: "1px solid var(--signal)", boxShadow: "0 12px 40px rgba(0,0,0,0.45)" }}>
+          <div className="flex items-center gap-1.5">
+            {comparedProducts.map((p) => (
+              <button key={p.id} onClick={() => toggleCompare(p.id)} title={`Quitar ${p.name}`} className="kulto-btn w-10 h-10 rounded-lg overflow-hidden flex items-center justify-center" style={{ background: "var(--ink-3)", border: "1px solid var(--line)" }}>
+                {productThumbSrc(p) ? <FastImg src={productThumbSrc(p)} alt={p.name} className="w-full h-full object-contain" /> : <Shirt size={16} color="rgba(243,239,230,0.35)" />}
+              </button>
+            ))}
+          </div>
+          <div className="text-xs" style={{ color: "var(--bone)" }}>
+            {comparedProducts.length < 2 ? "Elegí al menos 2" : `${comparedProducts.length} elegidos`}
+            {compareNotice && <span className="block" style={{ color: "var(--signal)" }}>{compareNotice}</span>}
+          </div>
+          <button
+            type="button"
+            disabled={comparedProducts.length < 2}
+            onClick={() => setShowCompare(true)}
+            className="kulto-btn rounded-full px-4 py-2 text-sm font-semibold"
+            style={{ background: "var(--signal)", color: "var(--bone)", opacity: comparedProducts.length < 2 ? 0.45 : 1 }}
+          >
+            Ver diferencias
+          </button>
+          <button type="button" onClick={() => { setCompareIds([]); setCompareNotice(""); }} className="kulto-btn text-xs underline" style={{ color: "var(--slate)" }}>Limpiar</button>
+        </div>
+      )}
+      {showCompare && comparedProducts.length >= 2 && (
+        <CompareModal
+          products={comparedProducts}
+          onClose={() => setShowCompare(false)}
+          onRemove={(id) => { toggleCompare(id); if (comparedProducts.length <= 2) setShowCompare(false); }}
+          onOpen={(p) => { setShowCompare(false); onOpen?.(p); }}
+        />
+      )}
     </div>
   );
 }
@@ -5653,6 +6078,24 @@ function CartDrawer({ cart, onClose, onUpdateQty, onRemove, onCheckout, customer
   // ítem para todo el carrito.
   const pointsEarned = cart.reduce((s, it) => s + it.qty * (Number(it.points ?? settings.loyaltyPointsPerItem) || 0), 0);
   const [touched, setTouched] = useState(false);
+  const [promoInput, setPromoInput] = useState("");
+  const [appliedPromo, setAppliedPromo] = useState(null);
+  const [promoError, setPromoError] = useState("");
+  const [promoBusy, setPromoBusy] = useState(false);
+  const applyPromo = async () => {
+    setPromoError("");
+    const code = normalizePromoCode(promoInput);
+    if (!code) return;
+    setPromoBusy(true);
+    const usage = await loadPromoUsage();
+    const found = findPromo(code, settings, customer, usage);
+    setPromoBusy(false);
+    if (!found.ok) { setPromoError(found.error); return; }
+    const chk = evalPromo(found.promo, subtotal, customer);
+    if (!chk.ok) { setPromoError(chk.error); return; }
+    setAppliedPromo(found.promo);
+    setPromoInput("");
+  };
   // Confirmación del mail antes de comprar (ver requestCheckoutCode).
   const [verify, setVerify] = useState(null); // null | { token, code, busy, error, sentAt, args }
   const startVerification = async (args) => {
@@ -5686,10 +6129,16 @@ function CartDrawer({ cart, onClose, onUpdateQty, onRemove, onCheckout, customer
     const byRegion = settings.shippingRegionPrices?.[region];
     return byRegion != null ? byRegion : settings.shippingFlatRate;
   };
-  const shippingCost = deliveryMethod === "envio" ? (freeShipping ? 0 : shippingCostForRegion(address.state)) : 0;
+  const shippingCostBase = deliveryMethod === "envio" ? (freeShipping ? 0 : shippingCostForRegion(address.state)) : 0;
+  const promoEval = appliedPromo ? evalPromo(appliedPromo, subtotal, customer) : null;
+  const promoActive = !!promoEval && promoEval.ok;
+  const promoDiscount = promoActive ? promoEval.discount : 0;
+  const shippingCost = promoActive && promoEval.freeShipping ? 0 : shippingCostBase;
   const eligibleForSignupDiscount = !!customer && !!settings?.signupDiscountEnabled && !customer.firstDiscountUsed;
-  const discountAmount = eligibleForSignupDiscount ? subtotal * ((settings.signupDiscountPercent || 0) / 100) : 0;
-  const total = subtotal - discountAmount + shippingCost;
+  // El código de descuento reemplaza al de bienvenida (no se suman): así el
+  // descuento de bienvenida no se "gasta" si el cliente usa un código mejor.
+  const discountAmount = eligibleForSignupDiscount && !(promoActive && promoDiscount > 0) ? subtotal * ((settings.signupDiscountPercent || 0) / 100) : 0;
+  const total = Math.max(0, subtotal - discountAmount - promoDiscount) + shippingCost;
   const addressOk = deliveryMethod !== "envio" || (address.street.trim() && address.city.trim() && address.state.trim() && address.postalCode.trim());
   const canCheckout = emailOk && addressOk;
 
@@ -5878,6 +6327,51 @@ function CartDrawer({ cart, onClose, onUpdateQty, onRemove, onCheckout, customer
                 </div>
               )}
 
+              <div className="flex flex-col gap-2">
+                {appliedPromo && promoEval?.ok ? (
+                  <div className="rounded-xl p-3 flex items-center justify-between gap-2" style={{ background: "var(--ink-3)", border: `1px solid ${appliedPromo.color || "var(--sun)"}` }}>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold flex items-center gap-1.5" style={{ color: appliedPromo.color || "var(--sun)" }}><Gift size={14} /> {appliedPromo.code}</p>
+                      <p className="text-xs" style={{ color: "var(--slate)" }}>{appliedPromo.label ? `${appliedPromo.label} · ` : ""}{describeBenefit(appliedPromo)}</p>
+                    </div>
+                    <button onClick={() => { setAppliedPromo(null); setPromoError(""); }} className="kulto-btn text-xs underline" style={{ color: "var(--slate)" }}>Quitar</button>
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <input
+                      value={promoInput}
+                      onChange={(e) => setPromoInput(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") applyPromo(); }}
+                      placeholder="Código promocional"
+                      autoComplete="off"
+                      className="flex-1 min-w-0 rounded-lg p-2.5 text-sm uppercase"
+                      style={{ background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" }}
+                    />
+                    <button
+                      onClick={applyPromo}
+                      disabled={promoBusy || !promoInput.trim()}
+                      className="kulto-btn rounded-lg px-4 text-sm font-semibold"
+                      style={{ background: promoInput.trim() ? "var(--signal)" : "var(--ink-3)", color: promoInput.trim() ? "var(--bone)" : "var(--slate)" }}
+                    >
+                      {promoBusy ? <Loader2 size={14} className="animate-spin" /> : "Aplicar"}
+                    </button>
+                  </div>
+                )}
+                {customer && !appliedPromo && (customer.rewardCodes || []).some((r) => !r.usedAt) && (
+                  <div className="flex flex-wrap gap-1.5 items-center">
+                    <span className="text-xs" style={{ color: "var(--slate)" }}>Tus códigos:</span>
+                    {(customer.rewardCodes || []).filter((r) => !r.usedAt).map((r) => (
+                      <button key={r.code} onClick={() => setPromoInput(r.code)} className="kulto-btn text-xs font-semibold rounded-full px-2.5 py-1" style={{ background: "var(--ink-3)", color: r.color || "var(--sun)", border: `1px solid ${r.color || "var(--sun)"}` }}>
+                        {r.code}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {(promoError || (appliedPromo && promoEval && !promoEval.ok)) && (
+                  <p className="text-xs" style={{ color: "var(--signal)" }}>{promoError || promoEval.error}</p>
+                )}
+              </div>
+
               <div className="flex flex-col gap-1 text-sm" style={{ color: "var(--slate)" }}>
                 <div className="flex items-center justify-between">
                   <span>Subtotal</span>
@@ -5887,6 +6381,24 @@ function CartDrawer({ cart, onClose, onUpdateQty, onRemove, onCheckout, customer
                   <div className="flex items-center justify-between" style={{ color: "var(--sun)" }}>
                     <span>Descuento de bienvenida ({settings.signupDiscountPercent}%)</span>
                     <span>-{formatPrice(discountAmount)}</span>
+                  </div>
+                )}
+                {promoActive && promoDiscount > 0 && (
+                  <div className="flex items-center justify-between" style={{ color: appliedPromo.color || "var(--sun)" }}>
+                    <span>Código {appliedPromo.code}</span>
+                    <span>-{formatPrice(promoDiscount)}</span>
+                  </div>
+                )}
+                {promoActive && promoEval.freeShipping && (
+                  <div className="flex items-center justify-between" style={{ color: appliedPromo.color || "var(--sun)" }}>
+                    <span>Código {appliedPromo.code}</span>
+                    <span>Envío gratis</span>
+                  </div>
+                )}
+                {promoActive && promoEval.gift && (
+                  <div className="flex items-center justify-between" style={{ color: appliedPromo.color || "var(--sun)" }}>
+                    <span>Premio</span>
+                    <span>{promoEval.gift}</span>
                   </div>
                 )}
                 <div className="flex items-center justify-between">
@@ -5952,7 +6464,10 @@ function CartDrawer({ cart, onClose, onUpdateQty, onRemove, onCheckout, customer
                 onClick={() => {
                   setTouched(true);
                   if (!canCheckout) return;
-                  const args = { subtotal, shippingCost, total, discountAmount, itemCount };
+                  const args = {
+                    subtotal, shippingCost, total, discountAmount, itemCount,
+                    promo: promoActive ? { code: appliedPromo.code, label: appliedPromo.label || "", type: appliedPromo.type, personal: !!appliedPromo.personal, perCustomerOnce: !!appliedPromo.perCustomerOnce, discount: promoDiscount, freeShipping: promoEval.freeShipping, gift: promoEval.gift } : null,
+                  };
                   if (isCheckoutEmailVerified(customerEmail, customer)) onCheckout(args);
                   else startVerification(args);
                 }}
@@ -6333,8 +6848,10 @@ function AccountPage({ registerIntent, customer, onRegister, onLogin, onLogout, 
   const inputStyle = { background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" };
 
   if (customer) {
-    const threshold = Number(settings?.loyaltyRewardThreshold) || 5;
-    const progressInCycle = (customer.points || 0) % threshold;
+    const _rewards = getActiveRewards(settings);
+    const _next = _rewards.find((r) => Number(r.pointsCost) > (customer.points || 0)) || _rewards[_rewards.length - 1];
+    const threshold = _rewards.length ? Number(_next.pointsCost) : (Number(settings?.loyaltyRewardThreshold) || 5);
+    const progressInCycle = _rewards.length ? Math.min(customer.points || 0, threshold) : (customer.points || 0) % threshold;
     return (
       <div className="max-w-md mx-auto px-4 md:px-6 py-10">
         <SectionTitle eyebrow="Tu cuenta" title={`Hola, ${customer.name || customer.email}`} />
@@ -6353,7 +6870,9 @@ function AccountPage({ registerIntent, customer, onRegister, onLogin, onLogout, 
               <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: "var(--ink-3)" }}>
                 <div className="h-full" style={{ width: `${Math.min(100, (progressInCycle / threshold) * 100)}%`, background: "var(--sun)" }} />
               </div>
-              {settings.loyaltyRewardDescription && <p className="text-xs mt-1" style={{ color: "var(--slate)" }}>{settings.loyaltyRewardDescription}</p>}
+              {_rewards.length > 0
+                ? <p className="text-xs mt-1" style={{ color: "var(--slate)" }}>Próximo premio: {_next.name} ({_next.pointsCost} puntos). Canjealo con el botón «{settings.rewardsButtonLabel || "Recompensas"}».</p>
+                : settings.loyaltyRewardDescription && <p className="text-xs mt-1" style={{ color: "var(--slate)" }}>{settings.loyaltyRewardDescription}</p>}
             </div>
           )}
           <button onClick={onLogout} className="kulto-btn text-sm font-semibold px-4 py-2.5 rounded-full mt-2" style={{ background: "var(--ink-3)", color: "var(--bone)" }}>
@@ -6834,7 +7353,7 @@ function CropModal({ source, onConfirm, onCancel, frameW = CROP_FRAME_W, frameH 
 }
 
 const emptyDraft = {
-  id: null, name: "", description: "", category: "", subcategory: "", group: "", price: "", salePrice: "", stock: "", points: "", sku: "",
+  id: null, name: "", description: "", material: "", category: "", subcategory: "", group: "", price: "", salePrice: "", stock: "", points: "", sku: "",
   tags: { bestseller: false, oferta: false, tendencia: false, template: false, customDesign: false },
   colors: [], designs: [], sizes: [], photoPool: [],
   imageFit: "contain", imageBackground: null,
@@ -7393,6 +7912,17 @@ function AdminProductForm({ categories, groups, onAddCategory, onAddGroup, saved
         className="rounded-xl p-3 text-sm"
         style={inputStyle}
       />
+
+      <div>
+        <input
+          placeholder="Tela / composición (ej: 100% algodón peinado, 220 g/m²)"
+          value={draft.material || ""}
+          onChange={(e) => setDraft({ ...draft, material: e.target.value })}
+          className="w-full rounded-xl p-3 text-sm"
+          style={inputStyle}
+        />
+        <p className="text-[11px] mt-1" style={{ color: "var(--slate)" }}>Opcional. Se usa para que los clientes puedan comparar productos en el catálogo.</p>
+      </div>
 
       <div>
         <label className="text-xs mb-1 block" style={{ color: "var(--slate)" }}>Grupo / temática (opcional — ej: Anime, Diseños Kulto, Música)</label>
@@ -12544,6 +13074,187 @@ function AdminFaqSettings({ settings, onSave }) {
   );
 }
 
+function BenefitTypeFields({ item, onChange, inputStyle }) {
+  return (
+    <>
+      <select value={item.type} onChange={(e) => onChange({ type: e.target.value })} className="rounded-xl p-2 text-sm" style={inputStyle}>
+        {PROMO_TYPES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+      </select>
+      {(item.type === "percent" || item.type === "fixed") && (
+        <div className="flex items-center gap-1">
+          <input type="number" min="0" value={item.value ?? ""} onChange={(e) => onChange({ value: e.target.value })} className="w-24 rounded-xl p-2 text-sm" style={inputStyle} />
+          <span className="text-sm" style={{ color: "var(--slate)" }}>{item.type === "percent" ? "%" : "de descuento"}</span>
+        </div>
+      )}
+      {item.type === "gift" && (
+        <input value={item.giftText || ""} onChange={(e) => onChange({ giftText: e.target.value })} placeholder="Qué premio es (ej: Llavero gratis)" className="flex-1 min-w-[180px] rounded-xl p-2 text-sm" style={inputStyle} />
+      )}
+    </>
+  );
+}
+
+function AdminBenefitsPanel({ settings, onSave }) {
+  const [enabled, setEnabled] = useState(settings.rewardsEnabled ?? true);
+  const [btnLabel, setBtnLabel] = useState(settings.rewardsButtonLabel || "Recompensas");
+  const [color, setColor] = useState(settings.rewardsColor || "#E63946");
+  const [earnText, setEarnText] = useState(settings.rewardsEarnText || "");
+  const [redeemText, setRedeemText] = useState(settings.rewardsRedeemText || "");
+  const [rewards, setRewards] = useState(settings.loyaltyRewards || []);
+  const [codes, setCodes] = useState(settings.promoCodes || []);
+  const [usage, setUsage] = useState({});
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => { loadPromoUsage().then(setUsage); }, []);
+  useEffect(() => {
+    setEnabled(settings.rewardsEnabled ?? true);
+    setBtnLabel(settings.rewardsButtonLabel || "Recompensas");
+    setColor(settings.rewardsColor || "#E63946");
+    setEarnText(settings.rewardsEarnText || "");
+    setRedeemText(settings.rewardsRedeemText || "");
+    setRewards(settings.loyaltyRewards || []);
+    setCodes(settings.promoCodes || []);
+  }, [settings]);
+
+  const updR = (id, patch) => setRewards((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  const updC = (id, patch) => setCodes((cs) => cs.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+  const addR = () => setRewards((rs) => [...rs, { id: genId("rw"), name: "Nuevo premio", pointsCost: 10, type: "percent", value: 10, giftText: "", color: PROMO_COLORS[rs.length % PROMO_COLORS.length], active: true }]);
+  const addC = () => setCodes((cs) => [...cs, { id: genId("pc"), code: "NUEVO10", label: "", type: "percent", value: 10, giftText: "", minSubtotal: 0, maxUses: 0, startsAt: "", endsAt: "", perCustomerOnce: false, color: PROMO_COLORS[cs.length % PROMO_COLORS.length], active: true }]);
+
+  const save = async () => {
+    setError("");
+    const cleanCodes = codes
+      .map((c) => ({ ...c, code: normalizePromoCode(c.code), value: Number(c.value) || 0, minSubtotal: Number(c.minSubtotal) || 0, maxUses: Number(c.maxUses) || 0 }))
+      .filter((c) => c.code);
+    const seen = new Set();
+    for (const c of cleanCodes) {
+      if (seen.has(c.code)) { setError(`El código ${c.code} está repetido. Cada código tiene que ser distinto.`); return; }
+      seen.add(c.code);
+    }
+    const cleanRewards = rewards.map((r) => ({ ...r, pointsCost: Number(r.pointsCost) || 0, value: Number(r.value) || 0 }));
+    await onSave({
+      rewardsEnabled: enabled,
+      rewardsButtonLabel: btnLabel.trim() || "Recompensas",
+      rewardsColor: color,
+      rewardsEarnText: earnText,
+      rewardsRedeemText: redeemText,
+      loyaltyRewards: cleanRewards,
+      promoCodes: cleanCodes,
+    });
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+
+  const inputStyle = { background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" };
+  const cardStyle = { background: "var(--ink-2)", border: "1px solid var(--line)" };
+
+  return (
+    <div className="flex flex-col gap-5 max-w-3xl">
+      <div>
+        <h3 className="text-lg font-bold" style={{ color: "var(--bone)" }}>Beneficios y recompensas</h3>
+        <p className="text-sm" style={{ color: "var(--slate)" }}>
+          Acá manejás el botón «Recompensas», los premios que se canjean con puntos y los códigos promocionales del carrito. Cada uno tiene su color. Recordá apretar «Guardar todo» al terminar.
+        </p>
+      </div>
+
+      <div className="rounded-2xl p-5 flex flex-col gap-3" style={cardStyle}>
+        <h4 className="font-semibold" style={{ color: "var(--bone)" }}>Botón y cartel de Recompensas</h4>
+        <label className="flex items-center gap-2 text-sm" style={{ color: "var(--bone)" }}>
+          <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
+          Mostrar el botón flotante abajo a la derecha (también se apaga si desactivás la tarjeta de puntos en Ajustes)
+        </label>
+        <div className="flex flex-wrap items-center gap-3">
+          <input value={btnLabel} onChange={(e) => setBtnLabel(e.target.value)} placeholder="Texto del botón" className="rounded-xl p-2 text-sm" style={inputStyle} />
+          <label className="flex items-center gap-2 text-sm" style={{ color: "var(--slate)" }}>
+            Color <input type="color" value={color} onChange={(e) => setColor(e.target.value)} />
+          </label>
+          <span className="rounded-full px-4 py-2 text-sm font-semibold" style={{ background: color, color: "#fff" }}>{btnLabel || "Recompensas"}</span>
+        </div>
+        <label className="text-xs" style={{ color: "var(--slate)" }}>Texto extra en «Formas de ganar» (opcional)</label>
+        <textarea rows={2} value={earnText} onChange={(e) => setEarnText(e.target.value)} className="rounded-xl p-2 text-sm" style={inputStyle} />
+        <label className="text-xs" style={{ color: "var(--slate)" }}>Texto en «Formas de canjear» (si lo dejás vacío se usa uno por defecto)</label>
+        <textarea rows={2} value={redeemText} onChange={(e) => setRedeemText(e.target.value)} className="rounded-xl p-2 text-sm" style={inputStyle} />
+        <p className="text-xs" style={{ color: "var(--slate)" }}>
+          Los puntos por prenda se cambian en Ajustes → «Cuentas, descuento y fidelidad», y los puntos de cada producto en su ficha.
+        </p>
+      </div>
+
+      <div className="rounded-2xl p-5 flex flex-col gap-3" style={cardStyle}>
+        <h4 className="font-semibold" style={{ color: "var(--bone)" }}>Premios por puntos</h4>
+        <p className="text-xs" style={{ color: "var(--slate)" }}>
+          Cuando el cliente llega a los puntos de un premio, lo canjea y recibe un código personal para usar una sola vez en el carrito.
+        </p>
+        {rewards.map((r) => (
+          <div key={r.id} className="rounded-xl p-3 flex flex-wrap items-center gap-2" style={{ background: "var(--ink-3)", borderLeft: `5px solid ${r.color || "#888"}`, opacity: r.active === false ? 0.6 : 1 }}>
+            <input value={r.name} onChange={(e) => updR(r.id, { name: e.target.value })} placeholder="Nombre del premio" className="flex-1 min-w-[160px] rounded-xl p-2 text-sm" style={{ ...inputStyle, background: "var(--ink-2)" }} />
+            <div className="flex items-center gap-1">
+              <input type="number" min="1" value={r.pointsCost} onChange={(e) => updR(r.id, { pointsCost: e.target.value })} className="w-20 rounded-xl p-2 text-sm" style={{ ...inputStyle, background: "var(--ink-2)" }} />
+              <span className="text-sm" style={{ color: "var(--slate)" }}>puntos</span>
+            </div>
+            <BenefitTypeFields item={r} onChange={(p) => updR(r.id, p)} inputStyle={{ ...inputStyle, background: "var(--ink-2)" }} />
+            <input type="color" value={r.color || "#E63946"} onChange={(e) => updR(r.id, { color: e.target.value })} title="Color del premio" />
+            <label className="flex items-center gap-1 text-xs" style={{ color: "var(--bone)" }}>
+              <input type="checkbox" checked={r.active !== false} onChange={(e) => updR(r.id, { active: e.target.checked })} /> Activo
+            </label>
+            <button onClick={() => setRewards((rs) => rs.filter((x) => x.id !== r.id))} className="kulto-btn" style={{ color: "var(--signal)" }} aria-label="Eliminar"><Trash2 size={16} /></button>
+          </div>
+        ))}
+        <button onClick={addR} className="kulto-btn self-start text-sm font-semibold px-4 py-2 rounded-full flex items-center gap-1" style={{ background: "var(--ink-3)", color: "var(--bone)" }}><Plus size={14} /> Agregar premio</button>
+      </div>
+
+      <div className="rounded-2xl p-5 flex flex-col gap-3" style={cardStyle}>
+        <h4 className="font-semibold" style={{ color: "var(--bone)" }}>Códigos promocionales del carrito</h4>
+        <p className="text-xs" style={{ color: "var(--slate)" }}>
+          Códigos que escribe el cliente en el carrito. Los de descuento reemplazan al descuento de bienvenida (no se suman); el envío gratis y los premios sí se pueden combinar con él.
+        </p>
+        {codes.map((c) => {
+          const used = usage[normalizePromoCode(c.code)] || 0;
+          return (
+            <div key={c.id} className="rounded-xl p-3 flex flex-col gap-2" style={{ background: "var(--ink-3)", borderLeft: `5px solid ${c.color || "#888"}`, opacity: c.active === false ? 0.6 : 1 }}>
+              <div className="flex flex-wrap items-center gap-2">
+                <input value={c.code} onChange={(e) => updC(c.id, { code: e.target.value.toUpperCase() })} placeholder="CÓDIGO" className="w-36 rounded-xl p-2 text-sm font-bold" style={{ ...inputStyle, background: "var(--ink-2)" }} />
+                <input value={c.label || ""} onChange={(e) => updC(c.id, { label: e.target.value })} placeholder="Nombre (ej: Black Friday)" className="flex-1 min-w-[140px] rounded-xl p-2 text-sm" style={{ ...inputStyle, background: "var(--ink-2)" }} />
+                <input type="color" value={c.color || "#E63946"} onChange={(e) => updC(c.id, { color: e.target.value })} title="Color del código" />
+                <label className="flex items-center gap-1 text-xs" style={{ color: "var(--bone)" }}>
+                  <input type="checkbox" checked={c.active !== false} onChange={(e) => updC(c.id, { active: e.target.checked })} /> Activo
+                </label>
+                <button onClick={() => setCodes((cs) => cs.filter((x) => x.id !== c.id))} className="kulto-btn" style={{ color: "var(--signal)" }} aria-label="Eliminar"><Trash2 size={16} /></button>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <BenefitTypeFields item={c} onChange={(p) => updC(c.id, p)} inputStyle={{ ...inputStyle, background: "var(--ink-2)" }} />
+              </div>
+              <div className="flex flex-wrap items-center gap-3 text-xs" style={{ color: "var(--slate)" }}>
+                <label className="flex items-center gap-1">Compra mínima
+                  <input type="number" min="0" value={c.minSubtotal ?? 0} onChange={(e) => updC(c.id, { minSubtotal: e.target.value })} className="w-24 rounded-lg p-1.5" style={{ ...inputStyle, background: "var(--ink-2)" }} />
+                </label>
+                <label className="flex items-center gap-1">Usos máx. (0 = sin tope)
+                  <input type="number" min="0" value={c.maxUses ?? 0} onChange={(e) => updC(c.id, { maxUses: e.target.value })} className="w-20 rounded-lg p-1.5" style={{ ...inputStyle, background: "var(--ink-2)" }} />
+                </label>
+                <label className="flex items-center gap-1">Desde
+                  <input type="date" value={c.startsAt || ""} onChange={(e) => updC(c.id, { startsAt: e.target.value })} className="rounded-lg p-1.5" style={{ ...inputStyle, background: "var(--ink-2)" }} />
+                </label>
+                <label className="flex items-center gap-1">Vence
+                  <input type="date" value={c.endsAt || ""} onChange={(e) => updC(c.id, { endsAt: e.target.value })} className="rounded-lg p-1.5" style={{ ...inputStyle, background: "var(--ink-2)" }} />
+                </label>
+                <label className="flex items-center gap-1" style={{ color: "var(--bone)" }}>
+                  <input type="checkbox" checked={!!c.perCustomerOnce} onChange={(e) => updC(c.id, { perCustomerOnce: e.target.checked })} /> Una vez por cliente (pide iniciar sesión)
+                </label>
+                <span>Usado {used} vez/veces</span>
+              </div>
+            </div>
+          );
+        })}
+        <button onClick={addC} className="kulto-btn self-start text-sm font-semibold px-4 py-2 rounded-full flex items-center gap-1" style={{ background: "var(--ink-3)", color: "var(--bone)" }}><Plus size={14} /> Agregar código</button>
+      </div>
+
+      {error && <p className="text-sm" style={{ color: "var(--signal)" }}>{error}</p>}
+      <button onClick={save} className="kulto-btn self-start rounded-full px-6 py-3 font-semibold" style={{ background: "var(--signal)", color: "var(--bone)" }}>
+        {saved ? "¡Guardado!" : "Guardar todo"}
+      </button>
+    </div>
+  );
+}
+
 function AdminLoyaltySettings({ settings, onSave }) {
   const [signupEnabled, setSignupEnabled] = useState(settings.signupDiscountEnabled ?? true);
   const [signupPercent, setSignupPercent] = useState(settings.signupDiscountPercent ?? 10);
@@ -13809,6 +14520,30 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
   const pfFolderNames = Array.from(new Set(sellableProducts.filter(pfMatchGroup).map((p) => p.subcategory).filter(Boolean))).sort((x, y) => x.localeCompare(y, "es"));
   const pfHasNoFolder = sellableProducts.filter(pfMatchGroup).some((p) => !p.subcategory);
   const pfCatNames = Array.from(new Set(sellableProducts.filter((p) => pfMatchGroup(p) && pfMatchFolder(p)).map((p) => p.category).filter(Boolean))).sort((x, y) => x.localeCompare(y, "es"));
+  // Al filtrar, o al empezar a editar un producto, se abren solos los grupos y
+  // carpetas donde está — pero después se pueden cerrar tocándolos (antes
+  // quedaban forzados abiertos y no se podían volver a cerrar).
+  useEffect(() => {
+    if (!pfActive) return;
+    const groupsOpen = new Set();
+    const foldersOpen = new Set();
+    filteredSellable.forEach((p) => {
+      const g = p.group || "Sin grupo / temática";
+      groupsOpen.add(g);
+      foldersOpen.add(`${g}|${p.subcategory || ""}`);
+    });
+    setExpandedProductCats((prev) => Array.from(new Set([...prev, ...groupsOpen])));
+    setExpandedFolders((prev) => Array.from(new Set([...prev, ...foldersOpen])));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pfGroup, pfFolder, pfCat, pfVis, pfQuery]);
+  useEffect(() => {
+    if (!editingProduct) return;
+    const g = editingProduct.group || "Sin grupo / temática";
+    const k = `${g}|${editingProduct.subcategory || ""}`;
+    setExpandedProductCats((prev) => (prev.includes(g) ? prev : [...prev, g]));
+    setExpandedFolders((prev) => (prev.includes(k) ? prev : [...prev, k]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingProduct?.id]);
   const [bulkProgress, setBulkProgress] = useState(null); // { done, total } mientras guarda
   const [bulkMessage, setBulkMessage] = useState("");
   // Aplica un cambio a muchos productos a la vez, siempre con aviso de
@@ -14143,6 +14878,8 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                 value={pfQuery}
                 onChange={(e) => setPfQuery(e.target.value)}
                 placeholder="Buscar por nombre o SKU…"
+                autoComplete="off"
+                name="kulto-admin-product-filter"
                 className="w-full rounded-xl p-2 text-sm mb-1"
                 style={{ background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" }}
               />
@@ -14437,7 +15174,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                   return acc;
                 }, {})
               ).map(([grp, items]) => {
-                const isOpen = expandedProductCats.includes(grp) || pfActive || items.some((p) => editingProduct?.id === p.id);
+                const isOpen = expandedProductCats.includes(grp);
                 const allSelected = items.length > 0 && items.every((p) => selectedProductIds.includes(p.id));
                 const toggleSelectGroup = (e) => {
                   e.stopPropagation();
@@ -14506,7 +15243,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                         ).sort(([x], [y]) => (x || "\uffff").localeCompare(y || "\uffff", "es")).map(([folderName, fItems]) => {
                         const hasAnyFolder = items.some((p) => p.subcategory);
                         const folderKey = `${grp}|${folderName}`;
-                        const folderOpen = !hasAnyFolder || expandedFolders.includes(folderKey) || pfActive || (editingProduct && fItems.some((x) => x.id === editingProduct.id));
+                        const folderOpen = !hasAnyFolder || expandedFolders.includes(folderKey);
                         const folderAllSelected = fItems.length > 0 && fItems.every((x) => selectedProductIds.includes(x.id));
                         const toggleSelectFolder = () => {
                           const ids = fItems.map((x) => x.id);
@@ -14776,6 +15513,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
       {tab === "compras" && <AdminRestockPanel products={sellableProducts} onQuickRestock={onQuickRestock} settings={settings} onSaveSettings={onSaveSettings} />}
       {tab === "clientes" && <AdminCustomers customers={customers} onAdjustPoints={onAdjustCustomerPoints} loyaltyThreshold={settings?.loyaltyRewardThreshold} isOwner={isOwner} onSetAdminPermissions={onSetAdminPermissions} onDeleteCustomer={onDeleteCustomer} onCreateCustomer={onCreateCustomer} onUpdateCustomerInfo={onUpdateCustomerInfo} onSendPasswordHelp={onSendPasswordHelp} />}
       {tab === "resenas" && <AdminReviews reviews={reviews} onSave={onSaveReview} onDelete={onDeleteReview} onReorder={onReorderReview} />}
+      {tab === "beneficios" && <AdminBenefitsPanel settings={settings} onSave={onSaveSettings} />}
       {tab === "ajustes" && (
         <div className="flex flex-col gap-6">
           <AdminBackupPanel />
@@ -14809,7 +15547,7 @@ function NavLink({ label, active, onClick }) {
   return (
     <button
       onClick={onClick}
-      className="kulto-btn text-sm font-semibold pb-1"
+      className="kulto-btn kulto-nav text-sm font-semibold pb-1"
       style={{ color: "var(--bone)", borderBottom: active ? "2px solid var(--signal)" : "2px solid transparent" }}
     >
       {label}
@@ -14933,7 +15671,7 @@ function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, cus
           <div ref={catalogMenuRef}>
             <button
               onClick={() => setCatalogMenuOpen((o) => !o)}
-              className="kulto-btn text-sm font-semibold pb-1 flex items-center gap-1"
+              className="kulto-btn kulto-nav text-sm font-semibold pb-1 flex items-center gap-1"
               style={{ color: "var(--bone)", borderBottom: page === "catalog" ? "2px solid var(--signal)" : "2px solid transparent" }}
             >
               Productos <ChevronDown size={14} />
@@ -15557,6 +16295,200 @@ function Footer({ settings }) {
   );
 }
 
+function RewardsWidget({ settings, customer, onLogin, onRedeem, liftForMobileBar, whatsappVisible }) {
+  const [open, setOpen] = useState(false);
+  const [view, setView] = useState("home");
+  const [busyId, setBusyId] = useState(null);
+  const [msg, setMsg] = useState(null);
+  const [copied, setCopied] = useState("");
+  if (settings?.rewardsEnabled === false || settings?.loyaltyEnabled === false) return null;
+  const accent = settings?.rewardsColor || "#E63946";
+  const label = settings?.rewardsButtonLabel || "Recompensas";
+  const rewards = getActiveRewards(settings);
+  const points = customer?.points || 0;
+  const next = rewards.find((r) => Number(r.pointsCost) > points);
+  const perItem = settings?.loyaltyPointsPerItem ?? 1;
+  const myCodes = (customer?.rewardCodes || []).filter((r) => !r.usedAt);
+  const bottomClass = liftForMobileBar
+    ? (whatsappVisible ? "bottom-44 md:bottom-24" : "bottom-24 md:bottom-5")
+    : (whatsappVisible ? "bottom-24" : "bottom-5");
+  const copy = async (code) => {
+    try { await navigator.clipboard.writeText(code); } catch { /* sin portapapeles */ }
+    setCopied(code);
+    setTimeout(() => setCopied(""), 1800);
+  };
+  const close = () => { setOpen(false); setView("home"); setMsg(null); };
+  const redeem = async (r) => {
+    setBusyId(r.id);
+    setMsg(null);
+    const res = await onRedeem(r.id);
+    setBusyId(null);
+    setMsg(res.ok ? { ok: true, code: res.code, name: r.name } : { ok: false, text: res.error });
+  };
+  const rowStyle = { background: "var(--ink-3)", border: "1px solid var(--line)" };
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className={`kulto-btn fixed right-5 z-30 rounded-full px-4 h-12 flex items-center gap-2 font-semibold text-sm ${bottomClass}`}
+        style={{ background: accent, color: "#fff", boxShadow: "0 8px 20px rgba(0,0,0,0.4)" }}
+      >
+        <Gift size={18} /> {label}
+      </button>
+    );
+  }
+
+  return (
+    <div
+      className="fixed z-40 right-3 bottom-3 left-3 sm:left-auto sm:right-5 sm:bottom-5 sm:w-[360px] rounded-2xl overflow-hidden flex flex-col"
+      style={{ background: "var(--ink-2)", border: "1px solid var(--line)", boxShadow: "0 20px 50px rgba(0,0,0,0.55)", maxHeight: "calc(100vh - 24px)" }}
+    >
+      <div className="px-5 py-4 flex items-center justify-between" style={{ background: accent, color: "#fff" }}>
+        <div className="flex items-center gap-2">
+          {view !== "home" && (
+            <button onClick={() => { setView("home"); setMsg(null); }} className="kulto-btn" aria-label="Volver"><ArrowLeft size={18} /></button>
+          )}
+          <span className="font-bold">
+            {view === "home" ? label : view === "earn" ? "Formas de ganar" : "Formas de canjear"}
+          </span>
+        </div>
+        <button onClick={close} className="kulto-btn" aria-label="Cerrar"><X size={20} /></button>
+      </div>
+
+      <div className="p-5 flex flex-col gap-3 overflow-y-auto kulto-scrollbar">
+        {view === "home" && (
+          <>
+            {!customer ? (
+              <div className="rounded-xl p-4 flex flex-col gap-2" style={rowStyle}>
+                <p className="font-semibold" style={{ color: "var(--bone)" }}>Sumá puntos con cada compra</p>
+                <p className="text-sm" style={{ color: "var(--slate)" }}>
+                  Iniciá sesión para ver tus puntos y canjearlos por descuentos y premios.
+                </p>
+                <button onClick={() => { close(); onLogin(); }} className="kulto-btn rounded-full py-2.5 font-semibold text-sm" style={{ background: accent, color: "#fff" }}>
+                  Iniciar sesión
+                </button>
+              </div>
+            ) : (
+              <div className="rounded-xl p-4" style={rowStyle}>
+                <p className="text-xs" style={{ color: "var(--slate)" }}>Tus puntos</p>
+                <p className="text-3xl font-extrabold" style={{ color: accent }}>{points}</p>
+                {next ? (
+                  <>
+                    <div className="w-full h-2 rounded-full overflow-hidden mt-2" style={{ background: "var(--ink-2)" }}>
+                      <div className="h-full" style={{ width: `${Math.min(100, (points / Number(next.pointsCost)) * 100)}%`, background: next.color || accent }} />
+                    </div>
+                    <p className="text-xs mt-1" style={{ color: "var(--slate)" }}>
+                      Te faltan {Number(next.pointsCost) - points} punto(s) para «{next.name}».
+                    </p>
+                  </>
+                ) : rewards.length > 0 ? (
+                  <p className="text-xs mt-1" style={{ color: "var(--slate)" }}>¡Ya podés canjear cualquier premio!</p>
+                ) : null}
+              </div>
+            )}
+
+            {customer && myCodes.length > 0 && (
+              <div className="flex flex-col gap-2">
+                <p className="text-xs font-semibold" style={{ color: "var(--slate)" }}>TUS CÓDIGOS PARA USAR EN EL CARRITO</p>
+                {myCodes.map((c) => (
+                  <div key={c.code} className="rounded-xl p-3 flex items-center justify-between gap-2" style={{ ...rowStyle, borderLeft: `4px solid ${c.color || accent}` }}>
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold" style={{ color: "var(--bone)" }}>{c.code}</p>
+                      <p className="text-xs" style={{ color: "var(--slate)" }}>{c.name} · {describeBenefit(c)}</p>
+                    </div>
+                    <button onClick={() => copy(c.code)} className="kulto-btn text-xs font-semibold flex items-center gap-1" style={{ color: c.color || accent }}>
+                      {copied === c.code ? <Check size={14} /> : <Copy size={14} />} {copied === c.code ? "Copiado" : "Copiar"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <button onClick={() => setView("earn")} className="kulto-btn rounded-xl p-4 flex items-center justify-between text-left" style={rowStyle}>
+              <span>
+                <span className="block font-semibold" style={{ color: "var(--bone)" }}>Formas de ganar</span>
+                <span className="block text-xs" style={{ color: "var(--slate)" }}>Cómo sumar puntos</span>
+              </span>
+              <ChevronRight size={18} color="var(--slate)" />
+            </button>
+            <button onClick={() => setView("redeem")} className="kulto-btn rounded-xl p-4 flex items-center justify-between text-left" style={rowStyle}>
+              <span>
+                <span className="block font-semibold" style={{ color: "var(--bone)" }}>Formas de canjear</span>
+                <span className="block text-xs" style={{ color: "var(--slate)" }}>Qué podés pedir con tus puntos</span>
+              </span>
+              <ChevronRight size={18} color="var(--slate)" />
+            </button>
+          </>
+        )}
+
+        {view === "earn" && (
+          <>
+            <div className="rounded-xl p-4" style={rowStyle}>
+              <p className="font-semibold" style={{ color: "var(--bone)" }}>Comprando en la web</p>
+              <p className="text-sm mt-1" style={{ color: "var(--slate)" }}>
+                Sumás {perItem} punto(s) por cada prenda. Según el modelo que compres, algunas prendas dan más puntos y otras menos. Solo cuentan las compras hechas desde la web con tu cuenta iniciada.
+              </p>
+            </div>
+            {settings?.signupDiscountEnabled && (
+              <div className="rounded-xl p-4" style={rowStyle}>
+                <p className="font-semibold" style={{ color: "var(--bone)" }}>Registrándote</p>
+                <p className="text-sm mt-1" style={{ color: "var(--slate)" }}>
+                  Al crear tu cuenta tenés {settings.signupDiscountPercent}% de descuento en tu primera compra.
+                </p>
+              </div>
+            )}
+            {settings?.rewardsEarnText && (
+              <p className="text-sm" style={{ color: "var(--slate)", whiteSpace: "pre-line" }}>{settings.rewardsEarnText}</p>
+            )}
+          </>
+        )}
+
+        {view === "redeem" && (
+          <>
+            <p className="text-sm" style={{ color: "var(--slate)", whiteSpace: "pre-line" }}>
+              {settings?.rewardsRedeemText || "Cuando llegás a la cantidad de puntos de un premio, se libera un código. Pegalo en el carrito de compras para usarlo."}
+            </p>
+            {msg && msg.ok && (
+              <div className="rounded-xl p-3" style={{ background: "var(--ink-3)", border: `1px solid ${accent}` }}>
+                <p className="text-sm font-semibold" style={{ color: "var(--bone)" }}>¡Listo! Canjeaste «{msg.name}»</p>
+                <div className="flex items-center justify-between mt-1">
+                  <span className="font-bold" style={{ color: accent }}>{msg.code}</span>
+                  <button onClick={() => copy(msg.code)} className="kulto-btn text-xs font-semibold flex items-center gap-1" style={{ color: accent }}>
+                    {copied === msg.code ? <Check size={14} /> : <Copy size={14} />} {copied === msg.code ? "Copiado" : "Copiar"}
+                  </button>
+                </div>
+                <p className="text-xs mt-1" style={{ color: "var(--slate)" }}>Pegalo en el carrito, en «Código promocional».</p>
+              </div>
+            )}
+            {msg && !msg.ok && <p className="text-xs" style={{ color: "var(--signal)" }}>{msg.text}</p>}
+            {rewards.length === 0 && <p className="text-sm" style={{ color: "var(--slate)" }}>Por ahora no hay premios para canjear.</p>}
+            {rewards.map((r) => {
+              const enough = customer && points >= Number(r.pointsCost);
+              return (
+                <div key={r.id} className="rounded-xl p-4 flex items-center justify-between gap-3" style={{ ...rowStyle, borderLeft: `4px solid ${r.color || accent}` }}>
+                  <div className="min-w-0">
+                    <p className="font-semibold" style={{ color: "var(--bone)" }}>{r.name}</p>
+                    <p className="text-xs" style={{ color: "var(--slate)" }}>{describeBenefit(r)} · {r.pointsCost} puntos</p>
+                  </div>
+                  <button
+                    disabled={busyId === r.id || (!!customer && !enough)}
+                    onClick={() => (customer ? redeem(r) : (close(), onLogin()))}
+                    className="kulto-btn rounded-full px-4 py-2 text-xs font-semibold shrink-0"
+                    style={{ background: !customer || enough ? (r.color || accent) : "var(--ink-2)", color: !customer || enough ? "#fff" : "var(--slate)", cursor: customer && !enough ? "not-allowed" : "pointer" }}
+                  >
+                    {busyId === r.id ? <Loader2 size={14} className="animate-spin" /> : !customer ? "Iniciar sesión" : enough ? "Canjear" : "Faltan puntos"}
+                  </button>
+                </div>
+              );
+            })}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function WhatsAppFloat({ liftForMobileBar, whatsappNumber, enabled }) {
   // No se muestra si está apagado o si todavía no hay número cargado
   // (Ajustes → Marca) — las dos cosas se controlan por separado.
@@ -15673,6 +16605,7 @@ export default function App() {
   const [catalogInitialGroup, setCatalogInitialGroup] = useState("");
   const [catalogInitialCategory, setCatalogInitialCategory] = useState("");
   const [catalogInitialSubcategory, setCatalogInitialSubcategory] = useState("");
+  const [catalogInitialCollection, setCatalogInitialCollection] = useState("");
   // Compartida entre el header (menú "Productos", ahora puede filtrar por
   // categoría/subcategoría además de por grupo), el inicio y los banners —
   // lleva al catálogo ya filtrado, o sin filtro si no se pasa nada. Acepta
@@ -15684,6 +16617,7 @@ export default function App() {
     setCatalogInitialGroup(f.group || "");
     setCatalogInitialCategory(f.category || "");
     setCatalogInitialSubcategory(f.subcategory || "");
+    setCatalogInitialCollection(f.collection || "");
     setCatalogSearchQuery("");
     setPage("catalog");
   };
@@ -15990,7 +16924,7 @@ export default function App() {
   const handleUpdateQty = (cartId, qty) => setCart((prev) => prev.map((it) => (it.cartId === cartId ? { ...it, qty } : it)));
   const handleRemove = (cartId) => setCart((prev) => prev.filter((it) => it.cartId !== cartId));
 
-  const handleCheckout = async ({ subtotal, shippingCost, total, discountAmount = 0, itemCount = 0 }) => {
+  const handleCheckout = async ({ subtotal, shippingCost, total, discountAmount = 0, itemCount = 0, promo = null }) => {
     if (cart.length === 0) return;
     // Nunca se registra un pedido con un mail sin confirmar (ver CartDrawer).
     if (!isCheckoutEmailVerified(customerEmail, customer)) return;
@@ -16002,6 +16936,11 @@ export default function App() {
       customerName, customerPhone, customerEmail, comment,
       deliveryMethod, address: deliveryMethod === "envio" ? address : null,
       subtotal, shippingCost, total, discountAmount,
+      promoCode: promo?.code || null,
+      promoLabel: promo?.label || "",
+      promoDiscount: promo?.discount || 0,
+      promoFreeShipping: !!promo?.freeShipping,
+      promoGift: promo?.gift || "",
       customerAccountEmail: customer?.email || null,
       status: "pendiente",
       trackingNumber: "",
@@ -16032,6 +16971,7 @@ export default function App() {
         html: buildOrderEmailHtml(order, settings),
       }).catch(() => { /* nunca bloquear el checkout por esto */ });
     }
+    if (promo && !promo.personal) bumpPromoUsage(promo.code);
     if (customer) {
       try {
         const pointsEarned = settings?.loyaltyEnabled
@@ -16041,6 +16981,10 @@ export default function App() {
           ...customer,
           points: (customer.points || 0) + pointsEarned,
           firstDiscountUsed: discountAmount > 0 ? true : customer.firstDiscountUsed,
+          ...(promo ? {
+            rewardCodes: (customer.rewardCodes || []).map((r) => (promo.personal && normalizePromoCode(r.code) === promo.code ? { ...r, usedAt: new Date().toISOString() } : r)),
+            usedPromoCodes: !promo.personal && promo.perCustomerOnce ? [...(customer.usedPromoCodes || []), promo.code] : (customer.usedPromoCodes || []),
+          } : {}),
         };
         await persistCustomer(updatedCustomer);
         setCustomer(updatedCustomer);
@@ -16747,7 +17691,7 @@ export default function App() {
   // nunca en el componente, para que quede consistente pase lo que pase.
   const handleApplyDiscount = async (order, { mode, amount, percent, reason }) => {
     const manualDiscountAmount = Math.max(0, Number(amount) || 0);
-    const newTotal = Math.max(0, order.subtotal - (order.discountAmount || 0) - manualDiscountAmount) + (order.shippingCost || 0);
+    const newTotal = Math.max(0, order.subtotal - (order.discountAmount || 0) - (order.promoDiscount || 0) - manualDiscountAmount) + (order.shippingCost || 0);
     const updated = {
       ...order,
       manualDiscountMode: mode,
@@ -16808,6 +17752,26 @@ export default function App() {
       persistReviewOrder(next.map((r) => r.id));
       return next;
     });
+  };
+
+  // Canjea puntos por un premio: descuenta los puntos y le da al cliente un
+  // código personal de un solo uso (queda guardado en su cuenta).
+  const handleRedeemReward = async (rewardId) => {
+    if (!customer) return { ok: false, error: "Iniciá sesión para canjear." };
+    const reward = (settings.loyaltyRewards || []).find((r) => r.id === rewardId && r.active !== false);
+    if (!reward) return { ok: false, error: "Este premio ya no está disponible." };
+    const cost = Number(reward.pointsCost) || 0;
+    if (cost <= 0 || (customer.points || 0) < cost) return { ok: false, error: "Todavía no te alcanzan los puntos." };
+    const code = genRewardCode();
+    const entry = { code, rewardId: reward.id, name: reward.name, type: reward.type, value: reward.value, giftText: reward.giftText || "", color: reward.color || "", createdAt: new Date().toISOString(), usedAt: null, pointsSpent: cost };
+    const updated = { ...customer, points: (customer.points || 0) - cost, rewardCodes: [...(customer.rewardCodes || []), entry] };
+    try {
+      await persistCustomer(updated);
+      setCustomer(updated);
+    } catch {
+      return { ok: false, error: "No pudimos guardar el canje. Probá de nuevo." };
+    }
+    return { ok: true, code };
   };
 
   const handleSaveSettings = async (partial) => {
@@ -16908,7 +17872,7 @@ export default function App() {
             onAddToCart={handleAddToCart}
           />
         )}
-        {page === "catalog" && <Catalog products={sellableProducts} categories={categories} groups={groups} onOpen={setSelectedProduct} initialQuery={catalogSearchQuery} initialGroup={catalogInitialGroup} initialCategory={catalogInitialCategory} initialSubcategory={catalogInitialSubcategory} favorites={customer?.favorites} onToggleFavorite={handleToggleFavorite} onGoHome={() => setPage("home")} onAddToCart={handleAddToCart} />}
+        {page === "catalog" && <Catalog key={`${catalogInitialGroup}|${catalogInitialCategory}|${catalogInitialSubcategory}|${catalogInitialCollection}|${catalogSearchQuery}`} settings={settings} initialCollection={catalogInitialCollection} products={sellableProducts} categories={categories} groups={groups} onOpen={setSelectedProduct} initialQuery={catalogSearchQuery} initialGroup={catalogInitialGroup} initialCategory={catalogInitialCategory} initialSubcategory={catalogInitialSubcategory} favorites={customer?.favorites} onToggleFavorite={handleToggleFavorite} onGoHome={() => setPage("home")} onAddToCart={handleAddToCart} />}
         {page === "favoritos" && <Catalog products={sellableProducts} categories={categories} groups={groups} onOpen={setSelectedProduct} favorites={customer?.favorites} onToggleFavorite={handleToggleFavorite} onlyFavorites onGoHome={() => setPage("home")} onAddToCart={handleAddToCart} />}
         {page === "wizard" && (
           <Wizard
@@ -17020,6 +17984,16 @@ export default function App() {
 
       <Footer settings={settings} />
       <SignupPromoPopup settings={settings} customer={customer} page={page} onSignup={openSignup} />
+      {!(page === "cuenta" && effectiveAdminView) && (
+        <RewardsWidget
+          settings={settings}
+          customer={customer}
+          onLogin={() => openSignup("", "login")}
+          onRedeem={handleRedeemReward}
+          liftForMobileBar={cart.length > 0 && !cartOpen}
+          whatsappVisible={!!(settings.whatsappFloatEnabled && settings.whatsappNumber)}
+        />
+      )}
       <WhatsAppFloat liftForMobileBar={cart.length > 0 && !cartOpen} whatsappNumber={settings.whatsappNumber} enabled={settings.whatsappFloatEnabled} />
       {cart.length > 0 && !cartOpen && (
         <MobileCartBar count={cartCount} total={cart.reduce((s, it) => s + it.qty * it.unitPrice, 0)} onOpen={() => setCartOpen(true)} />
