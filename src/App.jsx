@@ -1632,6 +1632,7 @@ const DEFAULT_SETTINGS = {
   howItWorksImageShape: "auto",
   productsMenuItems: [],
   personalizeGroupCovers: {},
+  personalizeSubcategoryCovers: {},
   personalizeSubcategoryPrices: {},
   personalizeCardBg: {},
   localDeliveryAreas: [],
@@ -5143,7 +5144,7 @@ const TEMPLATE_CARD_MAX_DOTS = 8;
 
 function TemplateProductCard({ product, onSelect, bg }) {
   const [flipped, setFlipped] = useState(false);
-  const thumb = product.colors?.[0]?.frontImage || product.colors?.[0]?.images?.[0] || product.photoPool?.[0];
+  const thumb = product.cardImage || product.colors?.[0]?.frontImage || product.colors?.[0]?.images?.[0] || product.photoPool?.[0];
   const colors = product.colors || [];
   const shownColors = colors.slice(0, TEMPLATE_CARD_MAX_DOTS);
   const extraColors = colors.length - shownColors.length;
@@ -5631,7 +5632,7 @@ function Wizard({ products, categories, settings, designLibrary, designFolders, 
                 {subgroupsInGroup.map((sg) => {
                   const sgProducts = productsInGroup.filter((p) => p.subcategory === sg);
                   const sample = sgProducts[0];
-                  const thumb = sample?.colors?.[0]?.frontImage || sample?.colors?.[0]?.images?.[0];
+                  const thumb = settings.personalizeSubcategoryCovers?.[sg] || sample?.colors?.[0]?.frontImage || sample?.colors?.[0]?.images?.[0];
                   const sgPrice = settings.personalizeSubcategoryPrices?.[sg] ?? settings.personalizedBasePrice;
                   return (
                     <PickFlipCard
@@ -8656,6 +8657,7 @@ const AUDIENCE_OPTIONS = ["unisex", "hombre", "mujer", "kids"];
 
 const emptyTemplateDraft = {
   id: null,
+  cardImage: null,
   name: "",
   description: "",
   category: "",
@@ -8811,6 +8813,7 @@ function AdminTemplateForm({ categories, templateProducts = [], onAddCategory, o
         })),
         imageFit: editing.imageFit || "contain",
         imageBackground: editing.imageBackground ?? null,
+        cardImage: editing.cardImage || null,
       });
       // La foto base queda guardada junto con la prenda, así no hay que
       // volver a subirla cada vez que se edita (y la carga masiva por
@@ -8959,6 +8962,7 @@ function AdminTemplateForm({ categories, templateProducts = [], onAddCategory, o
       photoPool: [],
       imageFit: draft.imageFit || "contain",
       imageBackground: draft.imageBackground ?? null,
+      cardImage: draft.cardImage || null,
       sizeGuide: draft.sizeGuide || [],
       sizeGuideImage: draft.sizeGuideImage || null,
       // Guardamos la foto base junto con la prenda (si se cargó una) para no
@@ -9127,6 +9131,40 @@ function AdminTemplateForm({ categories, templateProducts = [], onAddCategory, o
         </p>
       </div>
 
+      <div>
+        <label className="text-xs mb-1 block" style={{ color: "var(--bone)" }}>Foto de la tarjeta (al elegir el modelo)</label>
+        <div className="flex items-center gap-3">
+          <div className="w-16 h-20 rounded-xl overflow-hidden flex items-center justify-center shrink-0" style={{ background: "var(--ink-3)", border: draft.cardImage ? "2px solid var(--sun)" : "1px solid var(--line)" }}>
+            {(draft.cardImage || draft.colors?.[0]?.frontImage || draft.colors?.[0]?.images?.[0]) ? (
+              <FastImg loading="lazy" src={draft.cardImage || draft.colors?.[0]?.frontImage || draft.colors?.[0]?.images?.[0]} className="w-full h-full object-contain p-1" alt="Foto de la tarjeta" />
+            ) : (
+              <Shirt size={18} color="rgba(243,239,230,0.4)" />
+            )}
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center gap-2">
+              <label className="kulto-btn text-xs px-3 py-1.5 rounded-full cursor-pointer" style={{ background: "var(--ink-3)", color: "var(--bone)" }}>
+                {draft.cardImage ? "Cambiar foto" : "Elegir foto"}
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files[0];
+                    e.target.value = "";
+                    if (!file) return;
+                    fileToBase64(file, (b64) => setDraft((d) => ({ ...d, cardImage: b64 })), 1200, 0.88, file.type === "image/png" ? "image/png" : "image/jpeg");
+                  }}
+                />
+              </label>
+              {draft.cardImage && <button onClick={() => setDraft({ ...draft, cardImage: null })} className="kulto-btn text-xs" style={{ color: "var(--signal)" }}>Quitar</button>}
+            </div>
+            <p className="text-xs" style={{ color: "var(--slate)" }}>
+              {draft.cardImage ? "Esta foto se ve en la tarjeta de este modelo." : "Automática: se usa la foto del color de portada. Subí una acá si querés otra distinta."} No cambia las fotos de los colores. Recordá guardar la prenda.
+            </p>
+          </div>
+        </div>
+      </div>
       <div>
         <p className="text-sm font-semibold mb-2" style={{ color: "var(--bone)" }}>Colores ({draft.colors.length})</p>
         <p className="text-xs mb-2" style={{ color: "var(--slate)" }}>
@@ -13812,64 +13850,82 @@ function AdminBulkColorsBySubcategory({ templateProducts = [], onSaveVerbose }) 
 // cargó ninguna).
 function AdminPersonalizeGroupImages({ templateProducts = [], settings, onSave }) {
   const groupNames = Array.from(new Set(templateProducts.map((p) => p.category).filter(Boolean)));
-  const covers = settings.personalizeGroupCovers || {};
-  const [savedGroup, setSavedGroup] = useState(null);
+  const styleNames = Array.from(new Set(templateProducts.map((p) => p.subcategory).filter(Boolean)));
+  const [savedKey, setSavedKey] = useState(null);
 
-  const upload = (group, file) => {
+  const upload = (settingKey, name, file) => {
     if (!file) return;
     const isPng = file.type === "image/png";
+    const current = settings[settingKey] || {};
     fileToBase64(file, async (b64) => {
-      await onSave({ personalizeGroupCovers: { ...covers, [group]: b64 } });
-      setSavedGroup(group);
-      setTimeout(() => setSavedGroup(null), 1500);
+      await onSave({ [settingKey]: { ...current, [name]: b64 } });
+      setSavedKey(`${settingKey}:${name}`);
+      setTimeout(() => setSavedKey(null), 1500);
     }, 1200, 0.88, isPng ? "image/png" : "image/jpeg");
   };
-  const remove = async (group) => {
-    const next = { ...covers };
-    delete next[group];
-    await onSave({ personalizeGroupCovers: next });
+  const remove = async (settingKey, name) => {
+    const next = { ...(settings[settingKey] || {}) };
+    delete next[name];
+    await onSave({ [settingKey]: next });
   };
 
   if (!groupNames.length) return null;
 
+  const renderGrid = (names, settingKey, sampleOf) => (
+    <div className="flex flex-wrap gap-4">
+      {names.map((g) => {
+        const covers = settings[settingKey] || {};
+        const sample = sampleOf(g);
+        const fallback = sample?.colors?.[0]?.frontImage || sample?.colors?.[0]?.images?.[0];
+        const img = covers[g] || null;
+        return (
+          <div key={g} className="flex flex-col items-center gap-1.5">
+            <div className="relative w-20 h-24 rounded-xl overflow-hidden flex items-center justify-center" style={{ background: "var(--ink-3)", border: img ? "2px solid var(--sun)" : "1px solid var(--line)" }}>
+              {(img || fallback) ? (
+                <FastImg loading="lazy" src={img || fallback} className="w-full h-full object-contain p-1" alt={g} />
+              ) : (
+                <Shirt size={20} color="rgba(243,239,230,0.4)" />
+              )}
+              {!img && fallback && (
+                <span className="absolute bottom-0 left-0 right-0 text-[8px] text-center py-0.5" style={{ background: "rgba(21,19,26,0.8)", color: "var(--slate)" }}>Automática</span>
+              )}
+            </div>
+            <span className="text-xs font-semibold text-center max-w-[80px] truncate" style={{ color: "var(--bone)" }}>{g}</span>
+            <div className="flex items-center gap-2">
+              <label className="kulto-btn text-[10px] px-2 py-1 rounded-full cursor-pointer" style={{ background: "var(--ink-3)", color: "var(--bone)" }}>
+                {img ? "Cambiar" : "Elegir"}
+                <input type="file" accept="image/png,image/jpeg" className="hidden" onChange={(e) => { upload(settingKey, g, e.target.files[0]); e.target.value = ""; }} />
+              </label>
+              {img && <button onClick={() => remove(settingKey, g)} className="kulto-btn text-[10px]" style={{ color: "var(--signal)" }}>Quitar</button>}
+            </div>
+            {savedKey === `${settingKey}:${g}` && <span className="text-[10px]" style={{ color: "var(--sun)" }}>Guardado ✓</span>}
+          </div>
+        );
+      })}
+    </div>
+  );
+
   return (
-    <div className="rounded-2xl p-5 flex flex-col gap-4" style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}>
+    <div className="rounded-2xl p-5 flex flex-col gap-5" style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}>
       <div>
-        <h4 className="font-semibold" style={{ color: "var(--bone)" }}>Foto de cada categoría en "Personalizar"</h4>
+        <h4 className="font-semibold" style={{ color: "var(--bone)" }}>Fotos de portada en "Personalizar"</h4>
         <p className="text-xs mt-1" style={{ color: "var(--slate)" }}>
-          Es la foto que ve el cliente en el paso 1, al elegir qué quiere personalizar (ej: "Camisetas") — independiente de las fotos de los modelos que hay adentro (Oversize, Beagle, etc.). Si no subís una acá, se usa automáticamente una foto de alguno de esos modelos.
+          El cliente elige en 3 pasos: primero la <b>categoría</b>, después el <b>estilo</b> y por último el <b>modelo</b>. Cada nivel tiene su propia foto, independiente de las demás. Si no subís una, se usa automáticamente la foto de uno de los modelos de adentro.
         </p>
       </div>
-      <div className="flex flex-wrap gap-4">
-        {groupNames.map((g) => {
-          const sample = templateProducts.find((p) => p.category === g);
-          const fallback = sample?.colors?.[0]?.frontImage || sample?.colors?.[0]?.images?.[0];
-          const img = covers[g] || null;
-          return (
-            <div key={g} className="flex flex-col items-center gap-1.5">
-              <div className="relative w-20 h-24 rounded-xl overflow-hidden flex items-center justify-center" style={{ background: "var(--ink-3)", border: img ? "2px solid var(--sun)" : "1px solid var(--line)" }}>
-                {(img || fallback) ? (
-                  <FastImg loading="lazy" src={img || fallback} className="w-full h-full object-contain p-1" alt={g} />
-                ) : (
-                  <Shirt size={20} color="rgba(243,239,230,0.4)" />
-                )}
-                {!img && fallback && (
-                  <span className="absolute bottom-0 left-0 right-0 text-[8px] text-center py-0.5" style={{ background: "rgba(21,19,26,0.8)", color: "var(--slate)" }}>Automática</span>
-                )}
-              </div>
-              <span className="text-xs font-semibold text-center max-w-[80px] truncate" style={{ color: "var(--bone)" }}>{g}</span>
-              <div className="flex items-center gap-2">
-                <label className="kulto-btn text-[10px] px-2 py-1 rounded-full cursor-pointer" style={{ background: "var(--ink-3)", color: "var(--bone)" }}>
-                  {img ? "Cambiar" : "Elegir"}
-                  <input type="file" accept="image/png,image/jpeg" className="hidden" onChange={(e) => { upload(g, e.target.files[0]); e.target.value = ""; }} />
-                </label>
-                {img && <button onClick={() => remove(g)} className="kulto-btn text-[10px]" style={{ color: "var(--signal)" }}>Quitar</button>}
-              </div>
-              {savedGroup === g && <span className="text-[10px]" style={{ color: "var(--sun)" }}>Guardado ✓</span>}
-            </div>
-          );
-        })}
+      <div className="flex flex-col gap-2">
+        <p className="text-sm font-semibold" style={{ color: "var(--bone)" }}>1. Portada de cada categoría <span className="text-xs font-normal" style={{ color: "var(--slate)" }}>(ej: Camisetas)</span></p>
+        {renderGrid(groupNames, "personalizeGroupCovers", (g) => templateProducts.find((p) => p.category === g))}
       </div>
+      {styleNames.length > 0 && (
+        <div className="flex flex-col gap-2 pt-4" style={{ borderTop: "1px solid var(--line)" }}>
+          <p className="text-sm font-semibold" style={{ color: "var(--bone)" }}>2. Portada de cada estilo / subcategoría <span className="text-xs font-normal" style={{ color: "var(--slate)" }}>(ej: Oversize, Beagle)</span></p>
+          {renderGrid(styleNames, "personalizeSubcategoryCovers", (g) => templateProducts.find((p) => p.subcategory === g))}
+        </div>
+      )}
+      <p className="text-xs pt-3" style={{ borderTop: "1px solid var(--line)", color: "var(--slate)" }}>
+        3. La foto de cada <b>modelo</b> (la última tarjeta) se elige dentro de cada prenda, tocando en la lista de abajo el lápiz de editar → «Foto de la tarjeta».
+      </p>
     </div>
   );
 }
