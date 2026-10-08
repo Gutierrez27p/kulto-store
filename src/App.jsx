@@ -504,6 +504,52 @@ function composeDesignImage(garmentImage, garmentBg, designs) {
   });
 }
 
+// Seña al hacer el pedido: se calcula una vez al comprar y queda guardada en
+// el pedido (así, si después se cambia el porcentaje, los pedidos viejos no
+// se alteran). Fuera de la zona local (Barcelona y alrededores) el pago es
+// obligatorio al momento, por Bizum o transferencia, con el código del pedido.
+function buildOrderPayment(order, settings) {
+  if (!settings?.checkoutDepositEnabled) return null;
+  const percent = Math.min(100, Math.max(0, Number(settings.checkoutDepositPercent) || 0));
+  if (!percent) return null;
+  const total = Number(order.total) || 0;
+  const amount = Math.round(total * percent) / 100;
+  return {
+    percent,
+    amount,
+    balance: Math.round((total - amount) * 100) / 100,
+    immediate: !isLocalOrder(order, settings),
+    bizum: settings.payBizum || "",
+    iban: settings.payIban || "",
+    holder: settings.payHolder || "",
+    note: settings.payNote || "",
+  };
+}
+function paymentTextLines(order) {
+  const p = order?.payment;
+  if (!p) return [];
+  const lines = [];
+  lines.push(p.immediate
+    ? `Para preparar el pedido hay que pagar ahora el ${p.percent}%: ${formatPrice(p.amount)}.`
+    : `Para empezar a prepararlo pedimos el ${p.percent}%: ${formatPrice(p.amount)}.`);
+  if (p.bizum) lines.push(`Bizum al ${p.bizum}`);
+  if (p.iban) lines.push(`Transferencia a ${p.iban}${p.holder ? ` (titular: ${p.holder})` : ""}`);
+  if (!p.bizum && !p.iban) lines.push("Te enviamos los datos para pagar por mail o WhatsApp.");
+  lines.push(`IMPORTANTE: poné como concepto el código ${order.id} para saber de quién es el pago.`);
+  if (p.balance > 0) lines.push(`El resto (${formatPrice(p.balance)}) lo coordinamos antes de entregar el pedido.`);
+  if (!p.immediate) lines.push("Si preferís, también podemos coordinar la seña en persona.");
+  if (p.note) lines.push(p.note);
+  return lines;
+}
+function paymentEmailHtml(order) {
+  const lines = paymentTextLines(order);
+  if (!lines.length) return "";
+  return `<div style="margin:16px 0;padding:14px;border:1px solid ${order.payment.immediate ? "#E8452C" : "#2c2833"};border-radius:12px;background:#15131a;">
+    <p style="margin:0 0 8px;font-weight:bold;">${order.payment.immediate ? "Pagá ahora para que lo preparemos" : "Seña para empezar a prepararlo"}</p>
+    ${lines.map((l) => `<p style="margin:0 0 4px;font-size:13px;">${l}</p>`).join("")}
+  </div>`;
+}
+
 function buildOrderMessage(order, settings) {
   const lines = [];
   lines.push(`Pedido nuevo KULTO`);
@@ -541,11 +587,15 @@ function buildOrderMessage(order, settings) {
   if (order.customerPhone) lines.push(`Teléfono: ${order.customerPhone}`);
   if (order.customerEmail) lines.push(`Email: ${order.customerEmail}`);
   if (order.comment) lines.push(`Comentario: ${order.comment}`);
+  if (order.payment) {
+    lines.push("");
+    lines.push(...paymentTextLines(order));
+  }
   const hasCustom = order.items.some((it) => it.designName?.startsWith("Personalizado"));
   if (hasCustom) {
     lines.push("");
     lines.push("(Sé que los pedidos personalizados pueden demorar entre 3 y 7 días. Si llegara a necesitarlo antes, se los aviso por acá.)");
-    if (settings?.depositEnabled) {
+    if (settings?.depositEnabled && !order.payment) {
       const depositAmount = order.subtotal * ((settings.depositPercent || 0) / 100);
       lines.push("");
       lines.push(`Entiendo que para confirmar y empezar a producirlo mando una seña del ${settings.depositPercent}% (${formatPrice(depositAmount)}) por ${settings.depositInfo || "el medio que me indiquen"}, y el resto al recibirlo.`);
@@ -701,7 +751,8 @@ function buildOrderEmailHtml(order, settings) {
     ${order.discountAmount > 0 ? `<p style="margin:0 0 4px;">Descuento: -${formatPrice(order.discountAmount)}</p>` : ""}
     ${order.promoCode ? `<p style="margin:0 0 4px;">${promoOrderSummary(order)}</p>` : ""}
     <p style="margin:0 0 4px;font-size:18px;font-weight:bold;">Total: ${formatPrice(order.total)}</p>
-    <p style="margin:20px 0 0;color:#a9a2b0;font-size:13px;">Gracias por su compra. Su pedido se está procesando y nos pondremos en contacto con usted para coordinar el pago por Bizum o transferencia.${isLocalOrder(order, settings) ? ` Podrá seguir cada etapa de su pedido en \"Mi pedido\" de nuestra web con su número de orden (${order.id}).` : ""} Cualquier duda, responda este mismo mail o escríbanos por WhatsApp.</p>
+    ${paymentEmailHtml(order)}
+    <p style="margin:20px 0 0;color:#a9a2b0;font-size:13px;">Gracias por su compra. Su pedido se está procesando.${order.payment ? "" : " Nos pondremos en contacto con usted para coordinar el pago por Bizum o transferencia."}${isLocalOrder(order, settings) ? ` Podrá seguir cada etapa de su pedido en \"Mi pedido\" de nuestra web con su número de orden (${order.id}).` : ""} Cualquier duda, responda este mismo mail o escríbanos por WhatsApp.</p>
   `);
 }
 
@@ -741,7 +792,7 @@ function buildAdminOrderEmailHtml(order, settings) {
     : `<p style="margin:0 0 16px;">Retiro en persona (sin costo de envío)</p>`;
 
   const hasCustom = order.items.some((it) => it.designName?.startsWith("Personalizado"));
-  const depositHtml = hasCustom && settings?.depositEnabled
+  const depositHtml = hasCustom && settings?.depositEnabled && !order.payment
     ? `<p style="margin:0 0 12px;color:#a9a2b0;font-size:13px;">Lleva seña del ${settings.depositPercent}% (${formatPrice(order.subtotal * ((settings.depositPercent || 0) / 100))}) por ${settings.depositInfo || "el medio que corresponda"}.</p>`
     : "";
 
@@ -757,6 +808,7 @@ function buildAdminOrderEmailHtml(order, settings) {
     ${order.promoCode ? `<p style="margin:0 0 4px;">${promoOrderSummary(order)}</p>` : ""}
     <p style="margin:0 0 4px;font-size:18px;font-weight:bold;">Total: ${formatPrice(order.total)}</p>
     ${order.comment ? `<p style="margin:16px 0 4px;"><strong>Comentario del cliente:</strong></p><p style="margin:0 0 12px;white-space:pre-line;background:#15131a;border-radius:12px;padding:12px;">${order.comment}</p>` : ""}
+    ${order.payment ? paymentEmailHtml(order) + `<p style="margin:0 0 12px;font-size:13px;">Estado del pago: pendiente — cuando llegue, buscá el código ${order.id} en el concepto y marcalo en el panel.</p>` : ""}
     ${depositHtml}
     <p style="margin:20px 0 0;color:#a9a2b0;font-size:13px;">También lo vas a ver en el panel, pestaña "Pedidos".</p>
   `);
@@ -1650,6 +1702,13 @@ const DEFAULT_SETTINGS = {
   depositEnabled: true,
   depositPercent: 50,
   depositInfo: "Bizum al +34662317094",
+  // Seña al hacer cualquier pedido (ver buildOrderPayment).
+  checkoutDepositEnabled: true,
+  checkoutDepositPercent: 50,
+  payBizum: "+34662317094",
+  payIban: "",
+  payHolder: "",
+  payNote: "",
   designServiceEnabled: true,
   designServiceFee: 2,
   personalizedBasePrice: 20,
@@ -6491,8 +6550,16 @@ function CartDrawer({ cart, onClose, onUpdateQty, onRemove, onCheckout, customer
                 {sending ? <Loader2 size={18} className="animate-spin" /> : <ShoppingBag size={18} />}
                 Comprar
               </button>
+              {settings?.checkoutDepositEnabled && Number(settings.checkoutDepositPercent) > 0 && (
+                <p className="text-xs text-center" style={{ color: "var(--sun)" }}>
+                  Para prepararlo pedimos el {settings.checkoutDepositPercent}% ({formatPrice((total * settings.checkoutDepositPercent) / 100)}).{" "}
+                  {isLocalOrder({ deliveryMethod, address }, settings)
+                    ? "Lo pagás por Bizum o transferencia con el código del pedido, o coordinamos en persona."
+                    : "Como enviamos fuera de Barcelona, se paga al terminar la compra por Bizum o transferencia, con el código del pedido."}
+                </p>
+              )}
               <p className="text-xs text-center" style={{ color: "var(--slate)" }}>
-                Antes de registrar el pedido le pedimos confirmar su mail con un código que le enviamos.
+                No hace falta tener cuenta. Antes de registrar el pedido le pedimos confirmar su mail con un código que le enviamos.
               </p>
               </>
               )}
@@ -6550,17 +6617,49 @@ function LocalOrderProgress({ order, onSelect }) {
   );
 }
 
-function OrderConfirm({ orderId, hasCustom, whatsappText, whatsappNumber, onClose, isLocal }) {
+function OrderConfirm({ orderId, hasCustom, whatsappText, whatsappNumber, onClose, isLocal, payment }) {
+  const [codeCopied, setCodeCopied] = useState(false);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.65)" }} onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} className="rounded-3xl p-8 max-w-sm w-full text-center" style={{ background: "var(--ink)", border: "1px solid var(--line)" }}>
+      <div onClick={(e) => e.stopPropagation()} className="rounded-3xl p-6 sm:p-8 max-w-md w-full text-center overflow-y-auto kulto-scrollbar" style={{ background: "var(--ink)", border: "1px solid var(--line)", maxHeight: "92vh" }}>
         <div className="w-14 h-14 rounded-full mx-auto flex items-center justify-center mb-4" style={{ background: "var(--sun)" }}>
           <Check size={28} color="var(--ink)" />
         </div>
         <h3 className="kulto-display text-xl mb-2" style={{ color: "var(--bone)" }}>¡Gracias por su compra!</h3>
         <p className="text-sm mb-1" style={{ color: "var(--slate)" }}>Tu número de orden es:</p>
         <p className="font-bold text-lg mb-5" style={{ color: "var(--sun)" }}>{orderId}</p>
-        <p className="text-sm mb-3" style={{ color: "var(--slate)" }}>Su pedido se está procesando. Nos pondremos en contacto con usted para coordinar el pago por Bizum o transferencia. Guarde este número por si necesita escribirnos.</p>
+        {payment ? (
+          <div className="text-left rounded-2xl p-4 mb-4 flex flex-col gap-2" style={{ background: "var(--ink-2)", border: `1px solid ${payment.immediate ? "var(--signal)" : "var(--line)"}` }}>
+            <p className="text-sm font-bold" style={{ color: "var(--bone)" }}>{payment.immediate ? "Pagá ahora para que lo preparemos" : "Seña para empezar a prepararlo"}</p>
+            <p className="text-2xl font-extrabold" style={{ color: "var(--sun)" }}>
+              {formatPrice(payment.amount)} <span className="text-xs font-normal" style={{ color: "var(--slate)" }}>({payment.percent}% del pedido)</span>
+            </p>
+            {payment.bizum && <p className="text-sm" style={{ color: "var(--bone)" }}>Bizum: <b>{payment.bizum}</b></p>}
+            {payment.iban && <p className="text-sm" style={{ color: "var(--bone)" }}>Transferencia: <b className="break-all">{payment.iban}</b>{payment.holder ? ` · ${payment.holder}` : ""}</p>}
+            {!payment.bizum && !payment.iban && <p className="text-xs" style={{ color: "var(--slate)" }}>Te enviamos los datos para pagar por mail o WhatsApp.</p>}
+            <div className="rounded-xl p-3 flex items-center justify-between gap-2" style={{ background: "var(--ink-3)" }}>
+              <div className="min-w-0">
+                <p className="text-xs" style={{ color: "var(--slate)" }}>Concepto o mensaje del pago (obligatorio)</p>
+                <p className="font-bold break-all" style={{ color: "var(--sun)" }}>{orderId}</p>
+              </div>
+              <button
+                onClick={async () => { try { await navigator.clipboard.writeText(orderId); } catch { /* sin portapapeles */ } setCodeCopied(true); setTimeout(() => setCodeCopied(false), 1800); }}
+                className="kulto-btn text-xs font-semibold flex items-center gap-1 shrink-0"
+                style={{ color: "var(--sun)" }}
+              >
+                {codeCopied ? <Check size={14} /> : <Copy size={14} />} {codeCopied ? "Copiado" : "Copiar"}
+              </button>
+            </div>
+            <p className="text-xs" style={{ color: "var(--slate)" }}>
+              Sin este código no sabemos de quién es el pago.
+              {payment.balance > 0 ? ` El resto (${formatPrice(payment.balance)}) lo coordinamos antes de entregarlo.` : ""}
+              {!payment.immediate ? " También podés coordinar la seña en persona." : ""}
+            </p>
+            {payment.note && <p className="text-xs" style={{ color: "var(--slate)" }}>{payment.note}</p>}
+          </div>
+        ) : (
+          <p className="text-sm mb-3" style={{ color: "var(--slate)" }}>Su pedido se está procesando. Nos pondremos en contacto con usted para coordinar el pago por Bizum o transferencia. Guarde este número por si necesita escribirnos.</p>
+        )}
         {isLocal && (
           <div className="mb-4">
             <LocalOrderProgress order={{ localStatus: "realizado" }} />
@@ -10199,7 +10298,7 @@ function AdminCustomers({ customers, onAdjustPoints, loyaltyThreshold, isOwner, 
   );
 }
 
-function AdminOrders({ orders, settings, onSetLocalStatus, onSetLocalTracking, onToggleStatus, onUpdateTracking, onApplyDiscount, onRequestReview, onBulkComplete, onBulkArchive, onBulkDelete }) {
+function AdminOrders({ orders, settings, onSetPaymentStatus, onSetLocalStatus, onSetLocalTracking, onToggleStatus, onUpdateTracking, onApplyDiscount, onRequestReview, onBulkComplete, onBulkArchive, onBulkDelete }) {
   const [openId, setOpenId] = useState(null);
   const [trackingDrafts, setTrackingDrafts] = useState({});
   const [savedId, setSavedId] = useState(null);
@@ -10417,6 +10516,24 @@ function AdminOrders({ orders, settings, onSetLocalStatus, onSetLocalTracking, o
                 {o.deliveryMethod === "envio" && o.address && <p className="text-xs" style={{ color: "var(--slate)" }}>Dirección: {formatAddress(o.address)}</p>}
                 {o.comment && <p className="text-xs" style={{ color: "var(--slate)" }}>Comentario: {o.comment}</p>}
 
+                {o.payment && (
+                  <div className="mt-1 rounded-xl p-3 flex flex-wrap items-center gap-2" style={{ background: "var(--ink-3)", border: `1px solid ${o.paymentStatus === "pagado" || o.paymentStatus === "sena" ? "var(--sun)" : "var(--line)"}` }}>
+                    <p className="text-xs flex-1 min-w-[200px]" style={{ color: "var(--slate)" }}>
+                      <b style={{ color: "var(--bone)" }}>Pago:</b> seña {o.payment.percent}% = {formatPrice(o.payment.amount)} · concepto <b style={{ color: "var(--sun)" }}>{o.id}</b>
+                      {o.payment.immediate ? " · fuera de la zona local: tiene que pagar ya por Bizum o transferencia" : ""}
+                    </p>
+                    {[["pendiente", "Sin pagar"], ["sena", "Seña recibida"], ["pagado", "Pagado completo"]].map(([k, l]) => (
+                      <button
+                        key={k}
+                        onClick={() => onSetPaymentStatus && onSetPaymentStatus(o, k)}
+                        className="kulto-btn text-[11px] font-semibold rounded-full px-3 py-1.5"
+                        style={{ background: (o.paymentStatus || "pendiente") === k ? (k === "pendiente" ? "var(--signal)" : "var(--sun)") : "var(--ink-2)", color: (o.paymentStatus || "pendiente") === k ? (k === "pendiente" ? "var(--bone)" : "var(--ink)") : "var(--slate)" }}
+                      >
+                        {l}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 {isLocalOrder(o, settings) && (
                   <div className="mt-1 rounded-xl p-3 flex flex-col gap-1" style={{ background: "var(--ink-3)", border: "1px solid var(--line)" }}>
                     <p className="text-xs font-semibold" style={{ color: "var(--bone)" }}>Entrega personal — tocá una etapa para confirmarla (el cliente la ve al instante en "Mi pedido")</p>
@@ -12664,6 +12781,57 @@ function AdminShippingSettings({ settings, onSave }) {
   );
 }
 
+function AdminCheckoutPaymentSettings({ settings, onSave }) {
+  const [enabled, setEnabled] = useState(settings.checkoutDepositEnabled ?? true);
+  const [percent, setPercent] = useState(settings.checkoutDepositPercent ?? 50);
+  const [bizum, setBizum] = useState(settings.payBizum || "");
+  const [iban, setIban] = useState(settings.payIban || "");
+  const [holder, setHolder] = useState(settings.payHolder || "");
+  const [note, setNote] = useState(settings.payNote || "");
+  const [saved, setSaved] = useState(false);
+  useEffect(() => {
+    setEnabled(settings.checkoutDepositEnabled ?? true);
+    setPercent(settings.checkoutDepositPercent ?? 50);
+    setBizum(settings.payBizum || "");
+    setIban(settings.payIban || "");
+    setHolder(settings.payHolder || "");
+    setNote(settings.payNote || "");
+  }, [settings]);
+  const save = async () => {
+    await onSave({ checkoutDepositEnabled: enabled, checkoutDepositPercent: Number(percent) || 0, payBizum: bizum.trim(), payIban: iban.trim(), payHolder: holder.trim(), payNote: note.trim() });
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+  const inputStyle = { background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" };
+  return (
+    <div className="rounded-2xl p-5 flex flex-col gap-3 max-w-md" style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}>
+      <h4 className="font-semibold" style={{ color: "var(--bone)" }}>Pago del pedido (seña al comprar)</h4>
+      <p className="text-xs" style={{ color: "var(--slate)" }}>
+        Al terminar la compra, el cliente ve cuánto tiene que pagar para que prepares el pedido y los datos de pago. Tiene que poner el código del pedido como concepto, así sabés de quién es cada pago. Si el envío es fuera de Barcelona y alrededores (zonas en Ajustes → Entrega local), el pago se pide en el momento; en la zona local también se pide, pero puede coordinarse en persona.
+      </p>
+      <label className="flex items-center gap-2 text-sm" style={{ color: "var(--bone)" }}>
+        <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
+        Pedir seña en todos los pedidos
+      </label>
+      {enabled && (
+        <>
+          <div className="flex items-center gap-2">
+            <input type="number" min="1" max="100" value={percent} onChange={(e) => setPercent(e.target.value)} className="w-20 rounded-xl p-2 text-sm" style={inputStyle} />
+            <span className="text-sm" style={{ color: "var(--slate)" }}>% del total del pedido</span>
+          </div>
+          <input value={bizum} onChange={(e) => setBizum(e.target.value)} placeholder="Número de Bizum (ej: +34662317094)" className="rounded-xl p-3 text-sm" style={inputStyle} />
+          <input value={iban} onChange={(e) => setIban(e.target.value)} placeholder="IBAN para transferencia (ej: ES00 0000 0000 0000 0000 0000)" className="rounded-xl p-3 text-sm" style={inputStyle} />
+          <input value={holder} onChange={(e) => setHolder(e.target.value)} placeholder="Titular de la cuenta" className="rounded-xl p-3 text-sm" style={inputStyle} />
+          <textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Aviso extra (opcional)" className="rounded-xl p-3 text-sm" style={inputStyle} />
+        </>
+      )}
+      <button onClick={save} className="kulto-btn self-start rounded-full px-5 py-2.5 text-sm font-semibold" style={{ background: "var(--signal)", color: "var(--bone)" }}>
+        {saved ? "¡Guardado!" : "Guardar"}
+      </button>
+    </div>
+  );
+}
+
 function AdminDepositSettings({ settings, onSave }) {
   const [enabled, setEnabled] = useState(settings.depositEnabled);
   const [percent, setPercent] = useState(settings.depositPercent);
@@ -14522,7 +14690,7 @@ function AdminCustomWorkGallery({ items, onAdd, onRemove, speed = 0.5, onSpeedCh
   );
 }
 
-function AdminPanel({ products, categories, groups, orders, customers, onAdjustCustomerPoints, onDeleteCustomer, onCreateCustomer, onUpdateCustomerInfo, onSendPasswordHelp, reviews, settings, hasDraftChanges, publishing, onPublishChanges, onDiscardChanges, photoInbox, onAddToInbox, onCreateProductFromInbox, onAddInboxToExisting, onRemoveFromInbox, savedColors, onSaveColorToLibrary, onRemoveColorFromLibrary, designLibrary, onAddDesignToLibrary, onRemoveDesignFromLibrary, designFolders, onAddDesignFolder, onRenameDesignFolder, onRemoveDesignFolder, onToggleDesignFolderCover, onAssignDesignToFolder, onSetDesignFolderCategory, onSetDesignFolderGarments, customWorkGallery, onAddCustomWork, onRemoveCustomWork, onAddCategory, onRenameCategory, onDeleteCategory, onAddGroup, onRenameGroup, onDeleteGroup, onSaveProduct, onSaveProductVerbose, onSaveProductsBulk, onQuickRestock, onDeleteProduct, onToggleOrderStatus, onSetLocalStatus, onSetLocalTracking, onUpdateTracking, onApplyDiscount, onRequestReview, onBulkComplete, onBulkArchive, onBulkDelete, onSaveReview, onDeleteReview, onReorderReview, onSaveSettings, onLogout, permissions, isOwner, onSetAdminPermissions, jumpTo }) {
+function AdminPanel({ products, categories, groups, orders, customers, onAdjustCustomerPoints, onDeleteCustomer, onCreateCustomer, onUpdateCustomerInfo, onSendPasswordHelp, reviews, settings, hasDraftChanges, publishing, onPublishChanges, onDiscardChanges, photoInbox, onAddToInbox, onCreateProductFromInbox, onAddInboxToExisting, onRemoveFromInbox, savedColors, onSaveColorToLibrary, onRemoveColorFromLibrary, designLibrary, onAddDesignToLibrary, onRemoveDesignFromLibrary, designFolders, onAddDesignFolder, onRenameDesignFolder, onRemoveDesignFolder, onToggleDesignFolderCover, onAssignDesignToFolder, onSetDesignFolderCategory, onSetDesignFolderGarments, customWorkGallery, onAddCustomWork, onRemoveCustomWork, onAddCategory, onRenameCategory, onDeleteCategory, onAddGroup, onRenameGroup, onDeleteGroup, onSaveProduct, onSaveProductVerbose, onSaveProductsBulk, onQuickRestock, onDeleteProduct, onToggleOrderStatus, onSetLocalStatus, onSetLocalTracking, onUpdateTracking, onApplyDiscount, onRequestReview, onBulkComplete, onBulkArchive, onBulkDelete, onSaveReview, onDeleteReview, onReorderReview, onSaveSettings, onSetPaymentStatus, onLogout, permissions, isOwner, onSetAdminPermissions, jumpTo }) {
   // El dueño (isOwner) siempre ve todas las pestañas. Una cuenta de admin con
   // permisos limitados solo ve — y solo puede abrir — las que le dieron.
   const allowedTabs = isOwner ? ADMIN_TAB_KEYS : (permissions || []);
@@ -15593,7 +15761,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
         </div>
       )}
 
-      {tab === "pedidos" && <AdminOrders orders={orders} settings={settings} onSetLocalStatus={onSetLocalStatus} onSetLocalTracking={onSetLocalTracking} onToggleStatus={onToggleOrderStatus} onUpdateTracking={onUpdateTracking} onApplyDiscount={onApplyDiscount} onRequestReview={onRequestReview} onBulkComplete={onBulkComplete} onBulkArchive={onBulkArchive} onBulkDelete={onBulkDelete} />}
+      {tab === "pedidos" && <AdminOrders orders={orders} settings={settings} onSetPaymentStatus={onSetPaymentStatus} onSetLocalStatus={onSetLocalStatus} onSetLocalTracking={onSetLocalTracking} onToggleStatus={onToggleOrderStatus} onUpdateTracking={onUpdateTracking} onApplyDiscount={onApplyDiscount} onRequestReview={onRequestReview} onBulkComplete={onBulkComplete} onBulkArchive={onBulkArchive} onBulkDelete={onBulkDelete} />}
       {tab === "ventas" && <AdminSalesPanel products={sellableProducts} orders={orders} settings={settings} onSaveSettings={onSaveSettings} />}
       {tab === "estadisticas" && <AdminAnalyticsPanel settings={settings} onSaveSettings={onSaveSettings} />}
       {tab === "compras" && <AdminRestockPanel products={sellableProducts} onQuickRestock={onQuickRestock} settings={settings} onSaveSettings={onSaveSettings} />}
@@ -15614,6 +15782,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
           <AdminLocalAreasSettings settings={settings} onSave={onSaveSettings} />
           <AdminDesignFeedbackSettings settings={settings} onSave={onSaveSettings} />
           <AdminPrintSizeGuideSettings settings={settings} onSave={onSaveSettings} />
+          <AdminCheckoutPaymentSettings settings={settings} onSave={onSaveSettings} />
           <AdminDepositSettings settings={settings} onSave={onSaveSettings} />
           <AdminEmailTestSettings settings={settings} />
           <AdminStoreTrustSettings settings={settings} onSave={onSaveSettings} />
@@ -16722,6 +16891,7 @@ export default function App() {
   const [confirmedOrderId, setConfirmedOrderId] = useState(null);
   const [confirmedHasCustom, setConfirmedHasCustom] = useState(false);
   const [confirmedIsLocal, setConfirmedIsLocal] = useState(false);
+  const [confirmedPayment, setConfirmedPayment] = useState(null);
   const [confirmedWhatsappText, setConfirmedWhatsappText] = useState(null);
   const [cartSavedAt, setCartSavedAt] = useState(null);
   const [showAbandonedBanner, setShowAbandonedBanner] = useState(false);
@@ -17034,6 +17204,8 @@ export default function App() {
       trackingNumber: "",
       archived: false,
     };
+    order.payment = buildOrderPayment(order, settings);
+    order.paymentStatus = order.payment ? "pendiente" : "no_aplica";
     // El pedido ya NO depende de que WhatsApp se abra bien en el celular del
     // cliente (en varios navegadores, sobre todo Safari de iPhone, el popup
     // se bloqueaba y el pedido se podía perder sin que nadie se enterara).
@@ -17101,6 +17273,7 @@ export default function App() {
     setCartOpen(false);
     setConfirmedWhatsappText(buildOrderMessage(order, settings));
     setConfirmedIsLocal(isLocalOrder(order, settings));
+    setConfirmedPayment(order.payment || null);
     setConfirmedOrderId(order.id);
     setConfirmedHasCustom(order.items.some((it) => it.designName?.startsWith("Personalizado")));
   };
@@ -17742,6 +17915,14 @@ export default function App() {
     setOrders((prev) => prev.map((o) => (o.id === order.id ? updated : o)));
   };
 
+  // Marca si un pedido ya pagó la seña o el total (el admin lo controla a mano
+  // al ver el pago con el código del pedido en el concepto).
+  const handleSetPaymentStatus = async (order, paymentStatus) => {
+    const updated = { ...order, paymentStatus };
+    await updateOrder(updated);
+    setOrders((prev) => prev.map((o) => (o.id === order.id ? updated : o)));
+  };
+
   // Cambia un pedido de envío entre "entrego yo en persona" (etapas) y
   // "envío normal" (link de seguimiento), cuando la zona automática no acierta.
   const handleSetLocalTracking = async (order, flag) => {
@@ -18036,6 +18217,7 @@ export default function App() {
               onToggleOrderStatus={handleToggleOrderStatus}
               onUpdateTracking={handleUpdateTracking}
               onSetLocalStatus={handleSetLocalStatus}
+              onSetPaymentStatus={handleSetPaymentStatus}
               onSetLocalTracking={handleSetLocalTracking}
               onApplyDiscount={handleApplyDiscount}
               onRequestReview={handleRequestReview}
@@ -18123,7 +18305,7 @@ export default function App() {
         />
       )}
 
-      {confirmedOrderId && <OrderConfirm orderId={confirmedOrderId} isLocal={confirmedIsLocal} hasCustom={confirmedHasCustom} whatsappText={confirmedWhatsappText} whatsappNumber={settings.whatsappNumber} onClose={() => { setConfirmedOrderId(null); setConfirmedWhatsappText(null); }} />}
+      {confirmedOrderId && <OrderConfirm orderId={confirmedOrderId} isLocal={confirmedIsLocal} hasCustom={confirmedHasCustom} payment={confirmedPayment} whatsappText={confirmedWhatsappText} whatsappNumber={settings.whatsappNumber} onClose={() => { setConfirmedOrderId(null); setConfirmedWhatsappText(null); }} />}
     </div>
   );
 }
