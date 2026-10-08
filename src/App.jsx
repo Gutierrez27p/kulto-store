@@ -1642,6 +1642,7 @@ const DEFAULT_SETTINGS = {
   qualityPolicyText: "Reponemos sin cargo cualquier prenda que llegue con fallas de fabricación.",
   productionTimeNormal: "3-5 días",
   signupDiscountEnabled: true,
+  signupPopupEnabled: true,
   signupDiscountPercent: 10,
   loyaltyEnabled: true,
   loyaltyPointsPerItem: 1,
@@ -3951,6 +3952,37 @@ function Home({ products, settings, reviews, customWorkGallery, onOpen, onGoCata
 /*  Catalog                                                             */
 /* ------------------------------------------------------------------ */
 
+// Lista de filtros desplegable (como el panel de la izquierda de las tiendas
+// grandes): cada sección se abre y se cierra tocando su título.
+function FilterAccordion({ title, defaultOpen = false, badge = null, children }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div style={{ borderBottom: "1px solid var(--line)" }}>
+      <button type="button" onClick={() => setOpen((o) => !o)} className="kulto-btn w-full flex items-center justify-between py-3.5 text-left" aria-expanded={open}>
+        <span className="text-sm" style={{ color: "var(--bone)" }}>
+          {title}
+          {badge ? <span className="ml-2 text-[10px] font-semibold rounded-full px-1.5 py-0.5" style={{ background: "var(--signal)", color: "var(--bone)" }}>{badge}</span> : null}
+        </span>
+        <ChevronDown size={16} style={{ color: "var(--slate)", transform: open ? "rotate(180deg)" : "none", transition: "transform .15s" }} />
+      </button>
+      {open && <div className="pb-3 flex flex-col gap-1">{children}</div>}
+    </div>
+  );
+}
+function FilterOption({ active, onClick, label, count = null }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="kulto-btn flex items-center justify-between gap-2 text-left text-sm rounded-lg px-3 py-1.5"
+      style={{ background: active ? "var(--ink-3)" : "transparent", color: active ? "var(--sun)" : "var(--bone)", fontWeight: active ? 600 : 400 }}
+    >
+      <span className="truncate">{label}</span>
+      {count !== null && <span className="text-[11px] shrink-0" style={{ color: "var(--slate)" }}>{count}</span>}
+    </button>
+  );
+}
+
 function Catalog({ products, categories, groups, onOpen, initialQuery, initialGroup, initialCategory, initialSubcategory, favorites, onToggleFavorite, onlyFavorites = false, onGoHome, onAddToCart }) {
   const [activeGroup, setActiveGroup] = useState(initialGroup || "Todas");
   const [activeCat, setActiveCat] = useState(initialCategory || "Todas");
@@ -4035,6 +4067,9 @@ function Catalog({ products, categories, groups, onOpen, initialQuery, initialGr
   const clearFilters = () => { setPriceMin(""); setPriceMax(""); setSelectedSizes([]); setSelectedColors([]); };
   const filterInputStyle = { background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" };
 
+  const clearAll = () => { clearFilters(); setActiveGroup("Todas"); setActiveCat("Todas"); setActiveSubcat("Todas"); };
+  const anyActive = activeFilterCount > 0 || activeGroup !== "Todas" || activeCat !== "Todas" || activeSubcat !== "Todas";
+
   return (
     <div className="max-w-6xl mx-auto px-4 md:px-6 py-10">
       <Breadcrumbs
@@ -4048,169 +4083,121 @@ function Catalog({ products, categories, groups, onOpen, initialQuery, initialGr
       />
       <SectionTitle eyebrow={onlyFavorites ? "Guardado por vos" : "Todo Kulto"} title={onlyFavorites ? "Tus favoritos" : "Catálogo"} />
 
-      <div className="flex flex-col sm:flex-row gap-2 mb-4">
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Buscar productos..."
-          className="flex-1 rounded-xl p-2.5 text-sm"
-          style={{ background: "var(--ink-2)", color: "var(--bone)", border: "1px solid var(--line)" }}
-        />
-        <select
-          value={sortBy}
-          onChange={(e) => setSortBy(e.target.value)}
-          className="rounded-xl p-2.5 text-sm"
-          style={{ background: "var(--ink-2)", color: "var(--bone)", border: "1px solid var(--line)" }}
-        >
-          <option value="relevancia">Orden: relevancia</option>
-          <option value="vendido">Más vendido</option>
-          <option value="reciente">Más reciente</option>
-          <option value="precio-asc">Precio: menor a mayor</option>
-          <option value="precio-desc">Precio: mayor a menor</option>
-          <option value="nombre">Nombre A-Z</option>
-        </select>
-        <button
-          onClick={() => setShowFilters((v) => !v)}
-          className="kulto-btn rounded-xl px-4 py-2.5 text-sm font-semibold flex items-center justify-center gap-2 shrink-0"
-          style={{ background: activeFilterCount > 0 ? "var(--signal)" : "var(--ink-2)", color: "var(--bone)", border: "1px solid var(--line)" }}
-        >
-          <SlidersHorizontal size={16} /> Filtros{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
-        </button>
-      </div>
-
-      {showFilters && (
-        <div className="rounded-2xl p-4 mb-4 flex flex-col gap-4" style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}>
-          <div>
-            <p className="text-xs font-semibold mb-2" style={{ color: "var(--bone)" }}>Precio</p>
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                min="0"
-                value={priceMin}
-                onChange={(e) => setPriceMin(e.target.value)}
-                placeholder="Mín"
-                className="w-24 rounded-lg p-2 text-sm"
-                style={filterInputStyle}
-              />
-              <span style={{ color: "var(--slate)" }}>—</span>
-              <input
-                type="number"
-                min="0"
-                value={priceMax}
-                onChange={(e) => setPriceMax(e.target.value)}
-                placeholder="Máx"
-                className="w-24 rounded-lg p-2 text-sm"
-                style={filterInputStyle}
-              />
-            </div>
-          </div>
-          {availableSizes.length > 0 && (
-            <div>
-              <p className="text-xs font-semibold mb-2" style={{ color: "var(--bone)" }}>Talle</p>
-              <div className="flex flex-wrap gap-2">
-                {availableSizes.map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => toggleSize(s)}
-                    className="kulto-btn text-xs font-semibold px-3 py-1.5 rounded-full"
-                    style={{ background: selectedSizes.includes(s) ? "var(--signal)" : "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" }}
-                  >
-                    {s}
-                  </button>
+      <div className="flex flex-col lg:flex-row gap-8 mt-4">
+        {/* Filtros a la izquierda (en el celular se abren con el botón "Filtros") */}
+        <aside className={`${showFilters ? "block" : "hidden"} lg:block lg:w-60 shrink-0`}>
+          <div className="lg:sticky lg:top-24">
+            {groups.length > 0 && (
+              <FilterAccordion title="Temática" defaultOpen badge={activeGroup !== "Todas" ? "1" : null}>
+                {["Todas", ...groups].map((g) => (
+                  <FilterOption key={g} label={g === "Todas" ? "Todas" : g} active={activeGroup === g} onClick={() => { setActiveGroup(g); setActiveCat("Todas"); setActiveSubcat("Todas"); }} />
                 ))}
-              </div>
-            </div>
-          )}
-          {availableColors.length > 0 && (
-            <div>
-              <p className="text-xs font-semibold mb-2" style={{ color: "var(--bone)" }}>Color</p>
-              <div className="flex flex-wrap gap-2">
-                {availableColors.map((c) => {
-                  const key = (c.name || "").toLowerCase();
-                  const active = selectedColors.includes(key);
-                  return (
+              </FilterAccordion>
+            )}
+            <FilterAccordion title="Categoría" defaultOpen badge={activeCat !== "Todas" ? "1" : null}>
+              {["Todas", ...catsInGroup].map((c) => (
+                <FilterOption key={c} label={c} active={activeCat === c} onClick={() => { setActiveCat(c); setActiveSubcat("Todas"); }} />
+              ))}
+            </FilterAccordion>
+            {(subcatsInView.length > 0 || activeSubcat !== "Todas") && (
+              <FilterAccordion title="Carpeta / diseños" defaultOpen badge={activeSubcat !== "Todas" ? "1" : null}>
+                {["Todas", ...subcatsInView].map((sc) => (
+                  <FilterOption key={sc} label={sc === "Todas" ? "Todos los diseños" : sc} active={activeSubcat === sc} onClick={() => setActiveSubcat(sc)} />
+                ))}
+              </FilterAccordion>
+            )}
+            {availableColors.length > 0 && (
+              <FilterAccordion title="Color" badge={selectedColors.length ? String(selectedColors.length) : null}>
+                <div className="flex flex-wrap gap-2 px-1 pt-1">
+                  {availableColors.map((c) => {
+                    const key = (c.name || "").toLowerCase();
+                    const active = selectedColors.includes(key);
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => toggleColor(c.name)}
+                        title={c.name}
+                        className="kulto-btn w-8 h-8 rounded-full flex items-center justify-center"
+                        style={{ background: c.hex, border: active ? "2px solid var(--sun)" : "1px solid var(--line)" }}
+                      >
+                        {active && <Check size={14} color="#fff" style={{ filter: "drop-shadow(0 0 2px rgba(0,0,0,0.8))" }} />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </FilterAccordion>
+            )}
+            {availableSizes.length > 0 && (
+              <FilterAccordion title="Talle" badge={selectedSizes.length ? String(selectedSizes.length) : null}>
+                <div className="flex flex-wrap gap-2 px-1 pt-1">
+                  {availableSizes.map((s) => (
                     <button
-                      key={key}
-                      onClick={() => toggleColor(c.name)}
-                      title={c.name}
-                      className="kulto-btn w-8 h-8 rounded-full flex items-center justify-center"
-                      style={{ background: c.hex, border: active ? "2px solid var(--sun)" : "1px solid var(--line)" }}
+                      key={s}
+                      onClick={() => toggleSize(s)}
+                      className="kulto-btn text-xs font-semibold px-3 py-1.5 rounded-full"
+                      style={{ background: selectedSizes.includes(s) ? "var(--signal)" : "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" }}
                     >
-                      {active && <Check size={14} color="#fff" style={{ filter: "drop-shadow(0 0 2px rgba(0,0,0,0.8))" }} />}
+                      {s}
                     </button>
-                  );
-                })}
+                  ))}
+                </div>
+              </FilterAccordion>
+            )}
+            <FilterAccordion title="Precio" badge={(minP !== null ? 1 : 0) + (maxP !== null ? 1 : 0) ? String((minP !== null ? 1 : 0) + (maxP !== null ? 1 : 0)) : null}>
+              <div className="flex items-center gap-2 px-1 pt-1">
+                <input type="number" min="0" value={priceMin} onChange={(e) => setPriceMin(e.target.value)} placeholder="Mín" className="w-full min-w-0 rounded-lg p-2 text-sm" style={filterInputStyle} />
+                <span style={{ color: "var(--slate)" }}>—</span>
+                <input type="number" min="0" value={priceMax} onChange={(e) => setPriceMax(e.target.value)} placeholder="Máx" className="w-full min-w-0 rounded-lg p-2 text-sm" style={filterInputStyle} />
               </div>
+            </FilterAccordion>
+            {anyActive && (
+              <button onClick={clearAll} className="kulto-btn text-xs font-semibold flex items-center gap-1.5 mt-3" style={{ color: "var(--signal)" }}>
+                <RotateCcw size={13} /> Limpiar todos los filtros
+              </button>
+            )}
+          </div>
+        </aside>
+
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 mb-4">
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Buscar productos..."
+              className="flex-1 rounded-xl p-2.5 text-sm"
+              style={{ background: "var(--ink-2)", color: "var(--bone)", border: "1px solid var(--line)" }}
+            />
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
+              className="rounded-xl p-2.5 text-sm"
+              style={{ background: "var(--ink-2)", color: "var(--bone)", border: "1px solid var(--line)" }}
+            >
+              <option value="relevancia">Orden: relevancia</option>
+              <option value="vendido">Más vendido</option>
+              <option value="reciente">Más reciente</option>
+              <option value="precio-asc">Precio: menor a mayor</option>
+              <option value="precio-desc">Precio: mayor a menor</option>
+              <option value="nombre">Nombre A-Z</option>
+            </select>
+            <button
+              onClick={() => setShowFilters((v) => !v)}
+              className="kulto-btn lg:hidden rounded-xl px-4 py-2.5 text-sm font-semibold flex items-center justify-center gap-2 shrink-0"
+              style={{ background: anyActive ? "var(--signal)" : "var(--ink-2)", color: "var(--bone)", border: "1px solid var(--line)" }}
+            >
+              <SlidersHorizontal size={16} /> Filtros{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
+            </button>
+            <span className="hidden lg:block text-xs shrink-0" style={{ color: "var(--slate)" }}>{filtered.length} producto{filtered.length === 1 ? "" : "s"}</span>
+          </div>
+          {filtered.length ? (
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              {filtered.map((p) => <ProductCard key={p.id} product={p} onOpen={onOpen} isFavorite={favorites?.includes(p.id)} onToggleFavorite={onToggleFavorite} onAddToCart={onAddToCart} />)}
             </div>
-          )}
-          {activeFilterCount > 0 && (
-            <button onClick={clearFilters} className="kulto-btn text-xs font-semibold flex items-center gap-1.5 w-fit" style={{ color: "var(--signal)" }}>
-              <RotateCcw size={13} /> Limpiar filtros
-            </button>
+          ) : (
+            <EmptyState text={onlyFavorites ? "Todavía no guardaste ningún producto — tocá el corazón en cualquier producto para guardarlo acá." : "No hay productos con estos filtros todavía."} />
           )}
         </div>
-      )}
-
-      {groups.length > 0 && (
-        <div className="flex gap-2 overflow-x-auto kulto-scrollbar pb-3 mb-2">
-          {["Todas", ...groups].map((g) => (
-            <button
-              key={g}
-              onClick={() => { setActiveGroup(g); setActiveCat("Todas"); setActiveSubcat("Todas"); }}
-              className="kulto-btn shrink-0 text-sm font-semibold px-4 py-2 rounded-full"
-              style={{
-                background: activeGroup === g ? "var(--sun)" : "var(--ink-2)",
-                color: activeGroup === g ? "var(--ink)" : "var(--bone)",
-                border: "1px solid var(--line)",
-              }}
-            >
-              {g}
-            </button>
-          ))}
-        </div>
-      )}
-
-      <div className="flex gap-2 overflow-x-auto kulto-scrollbar pb-3 mb-6">
-        {["Todas", ...catsInGroup].map((c) => (
-          <button
-            key={c}
-            onClick={() => { setActiveCat(c); setActiveSubcat("Todas"); }}
-            className="kulto-btn shrink-0 text-sm font-semibold px-4 py-2 rounded-full"
-            style={{
-              background: activeCat === c ? "var(--signal)" : "var(--ink-2)",
-              color: "var(--bone)",
-              border: "1px solid var(--line)",
-            }}
-          >
-            {c}
-          </button>
-        ))}
       </div>
-      {(subcatsInView.length > 0 || activeSubcat !== "Todas") && (
-        <div className="flex gap-2 overflow-x-auto kulto-scrollbar pb-3 mb-6 -mt-3">
-          {["Todas", ...subcatsInView].map((sc) => (
-            <button
-              key={sc}
-              onClick={() => setActiveSubcat(sc)}
-              className="kulto-btn shrink-0 text-xs font-semibold px-3 py-1.5 rounded-full"
-              style={{
-                background: activeSubcat === sc ? "var(--sun)" : "var(--ink-2)",
-                color: activeSubcat === sc ? "var(--ink)" : "var(--bone)",
-                border: "1px solid var(--line)",
-              }}
-            >
-              {sc === "Todas" ? "Todos los diseños" : sc}
-            </button>
-          ))}
-        </div>
-      )}
-      {filtered.length ? (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-          {filtered.map((p) => <ProductCard key={p.id} product={p} onOpen={onOpen} isFavorite={favorites?.includes(p.id)} onToggleFavorite={onToggleFavorite} onAddToCart={onAddToCart} />)}
-        </div>
-      ) : (
-        <EmptyState text={onlyFavorites ? "Todavía no guardaste ningún producto — tocá el corazón en cualquier producto para guardarlo acá." : "No hay productos en esta categoría todavía."} />
-      )}
     </div>
   );
 }
@@ -6146,7 +6133,119 @@ function LeaveReviewSection({ order }) {
   );
 }
 
-function AccountPage({ customer, onRegister, onLogin, onLogout, onVerifyEmail, onResendVerification, onRequestPasswordReset, onResetPassword, settings, initialResetEmail, initialResetCode }) {
+// Cartel de bienvenida: aparece una sola vez al bajar un poco por la web (si
+// el visitante no tiene cuenta) y ofrece el descuento de la primera compra a
+// cambio de registrarse. Si lo cierra, no vuelve a molestar por 7 días.
+const SIGNUP_POPUP_KEY = "kulto:signup-popup-dismissed";
+function SignupPromoPopup({ settings, customer, page, onSignup }) {
+  const percent = Number(settings?.signupDiscountPercent) || 0;
+  const eligible = !!settings?.signupDiscountEnabled && settings?.signupPopupEnabled !== false && percent > 0 && !customer && page !== "cuenta";
+  const [open, setOpen] = useState(false);
+  const [email, setEmail] = useState("");
+  const [error, setError] = useState("");
+
+  const recentlyDismissed = () => {
+    try {
+      const t = Number(localStorage.getItem(SIGNUP_POPUP_KEY) || 0);
+      return t && Date.now() - t < 7 * 24 * 3600 * 1000;
+    } catch { return false; }
+  };
+  const dismiss = () => {
+    setOpen(false);
+    try { localStorage.setItem(SIGNUP_POPUP_KEY, String(Date.now())); } catch { /* sin memoria del navegador */ }
+  };
+
+  useEffect(() => {
+    if (!eligible || open || recentlyDismissed()) return undefined;
+    const onScroll = () => {
+      if (window.scrollY > 450) {
+        setOpen(true);
+        window.removeEventListener("scroll", onScroll);
+      }
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [eligible, open]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKey = (e) => { if (e.key === "Escape") dismiss(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+
+  if (!eligible || !open) return null;
+
+  const submit = () => {
+    const v = email.trim();
+    if (!isValidEmail(v)) { setError("Escribí un email válido."); return; }
+    dismiss();
+    onSignup?.(v, "register");
+  };
+
+  return (
+    <div
+      className="fixed inset-0 flex items-center justify-center p-4"
+      style={{ zIndex: 90, background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}
+      onClick={dismiss}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Descuento por registrarte"
+    >
+      <div
+        className="relative w-full max-w-2xl rounded-2xl overflow-hidden flex flex-col sm:flex-row"
+        style={{ background: "var(--ink-2)", border: "1px solid var(--line)", boxShadow: "0 20px 60px rgba(0,0,0,0.5)" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="sm:w-2/5 flex flex-col items-center justify-center gap-1 py-6 sm:py-10 px-4 text-center" style={{ background: "linear-gradient(135deg, var(--signal), var(--sun))", color: "var(--ink)" }}>
+          <Sparkles size={26} />
+          <span className="font-black leading-none" style={{ fontSize: 64 }}>{percent}%</span>
+          <span className="text-xs font-bold tracking-widest uppercase">de descuento</span>
+          <span className="text-[11px] opacity-80">en tu primera compra</span>
+        </div>
+        <div className="flex-1 p-6 sm:p-8 flex flex-col gap-3">
+          <button onClick={dismiss} className="kulto-btn absolute top-3 right-3 p-1.5 rounded-full" style={{ color: "var(--slate)" }} aria-label="Cerrar">
+            <X size={18} />
+          </button>
+          <h3 className="text-2xl font-bold leading-tight pr-6" style={{ color: "var(--bone)" }}>¡Regístrate y consigue tu {percent}%!</h3>
+          <p className="text-sm" style={{ color: "var(--slate)" }}>
+            Crea tu cuenta gratis y el {percent}% de descuento se aplica solo en tu primera compra. Además, sumas puntos con cada pedido.
+          </p>
+          <div className="flex">
+            <input
+              type="email"
+              inputMode="email"
+              autoComplete="email"
+              placeholder="Correo electrónico"
+              value={email}
+              onChange={(e) => { setEmail(e.target.value); setError(""); }}
+              onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+              className="flex-1 min-w-0 rounded-l-xl p-3 text-sm"
+              style={{ background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" }}
+            />
+            <button
+              onClick={submit}
+              className="kulto-btn px-4 rounded-r-xl flex items-center justify-center"
+              style={{ background: "var(--signal)", color: "var(--bone)" }}
+              aria-label="Registrarme"
+            >
+              <ArrowRight size={18} />
+            </button>
+          </div>
+          {error && <p className="text-xs" style={{ color: "var(--signal)" }}>{error}</p>}
+          <p className="text-[11px]" style={{ color: "var(--slate)" }}>
+            Al registrarte aceptas recibir correos con novedades y ofertas. Puedes darte de baja cuando quieras.
+          </p>
+          <button onClick={() => { dismiss(); onSignup?.("", "login"); }} className="kulto-btn text-xs self-start underline" style={{ color: "var(--slate)" }}>
+            Ya tengo cuenta
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AccountPage({ registerIntent, customer, onRegister, onLogin, onLogout, onVerifyEmail, onResendVerification, onRequestPasswordReset, onResetPassword, settings, initialResetEmail, initialResetCode }) {
   const [mode, setMode] = useState("login");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -6157,6 +6256,14 @@ function AccountPage({ customer, onRegister, onLogin, onLogout, onVerifyEmail, o
   const [info, setInfo] = useState("");
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
+
+  // Viene del cartel de descuento: abre directo "Crear cuenta" con el email
+  // que el visitante ya escribió (o "Ingresar" si dijo que ya tiene cuenta).
+  useEffect(() => {
+    if (!registerIntent) return;
+    setMode(registerIntent.mode === "login" ? "login" : "register");
+    if (registerIntent.email) setEmail(registerIntent.email);
+  }, [registerIntent]);
 
   // Link del mail "Recuperar contraseña" (?resetEmail=&resetCode=): lleva
   // directo al formulario de contraseña nueva con el email y el código ya
@@ -12364,6 +12471,7 @@ function AdminFaqSettings({ settings, onSave }) {
 function AdminLoyaltySettings({ settings, onSave }) {
   const [signupEnabled, setSignupEnabled] = useState(settings.signupDiscountEnabled ?? true);
   const [signupPercent, setSignupPercent] = useState(settings.signupDiscountPercent ?? 10);
+  const [popupEnabled, setPopupEnabled] = useState(settings.signupPopupEnabled ?? true);
   const [loyaltyEnabled, setLoyaltyEnabled] = useState(settings.loyaltyEnabled ?? true);
   const [pointsPerItem, setPointsPerItem] = useState(settings.loyaltyPointsPerItem ?? 1);
   const [threshold, setThreshold] = useState(settings.loyaltyRewardThreshold ?? 5);
@@ -12373,6 +12481,7 @@ function AdminLoyaltySettings({ settings, onSave }) {
   useEffect(() => {
     setSignupEnabled(settings.signupDiscountEnabled ?? true);
     setSignupPercent(settings.signupDiscountPercent ?? 10);
+    setPopupEnabled(settings.signupPopupEnabled ?? true);
     setLoyaltyEnabled(settings.loyaltyEnabled ?? true);
     setPointsPerItem(settings.loyaltyPointsPerItem ?? 1);
     setThreshold(settings.loyaltyRewardThreshold ?? 5);
@@ -12383,6 +12492,7 @@ function AdminLoyaltySettings({ settings, onSave }) {
     await onSave({
       signupDiscountEnabled: signupEnabled,
       signupDiscountPercent: Number(signupPercent) || 0,
+      signupPopupEnabled: popupEnabled,
       loyaltyEnabled,
       loyaltyPointsPerItem: Number(pointsPerItem) || 0,
       loyaltyRewardThreshold: Number(threshold) || 0,
@@ -12408,6 +12518,12 @@ function AdminLoyaltySettings({ settings, onSave }) {
             <input type="number" min="0" max="100" value={signupPercent} onChange={(e) => setSignupPercent(e.target.value)} className="w-20 rounded-xl p-2 text-sm" style={inputStyle} />
             <span className="text-sm" style={{ color: "var(--slate)" }}>% de descuento en su primer pedido</span>
           </div>
+        )}
+        {signupEnabled && (
+          <label className="flex items-center gap-2 text-sm mt-2" style={{ color: "var(--bone)" }}>
+            <input type="checkbox" checked={popupEnabled} onChange={(e) => setPopupEnabled(e.target.checked)} />
+            Mostrar un cartel con este descuento cuando el visitante baja un poco por la web
+          </label>
         )}
       </div>
 
@@ -13595,6 +13711,28 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
   const [expandedFolders, setExpandedFolders] = useState([]);
   const toggleFolder = (key) => setExpandedFolders((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
   const [movingSelected, setMovingSelected] = useState(false);
+  // Filtros de la lista de productos (panel de la izquierda).
+  const [pfGroup, setPfGroup] = useState("Todos"); // "Todos" | nombre | "__none__"
+  const [pfFolder, setPfFolder] = useState("Todas");
+  const [pfCat, setPfCat] = useState("Todas");
+  const [pfVis, setPfVis] = useState("todos"); // todos | visibles | ocultos
+  const [pfQuery, setPfQuery] = useState("");
+  const pfActive = pfGroup !== "Todos" || pfFolder !== "Todas" || pfCat !== "Todas" || pfVis !== "todos" || !!pfQuery.trim();
+  const pfClear = () => { setPfGroup("Todos"); setPfFolder("Todas"); setPfCat("Todas"); setPfVis("todos"); setPfQuery(""); };
+  const pfMatchGroup = (p) => pfGroup === "Todos" || (pfGroup === "__none__" ? !p.group : p.group === pfGroup);
+  const pfMatchFolder = (p) => pfFolder === "Todas" || (pfFolder === "__none__" ? !p.subcategory : p.subcategory === pfFolder);
+  const pfMatchCat = (p) => pfCat === "Todas" || p.category === pfCat;
+  const pfMatchVis = (p) => pfVis === "todos" || (pfVis === "ocultos" ? !!p.hidden : !p.hidden);
+  const pfMatchQuery = (p) => {
+    const q = pfQuery.trim().toLowerCase();
+    return !q || [p.name, p.sku, p.category, p.subcategory, p.group].some((v) => String(v || "").toLowerCase().includes(q));
+  };
+  const filteredSellable = sellableProducts.filter((p) => pfMatchGroup(p) && pfMatchFolder(p) && pfMatchCat(p) && pfMatchVis(p) && pfMatchQuery(p));
+  const pfGroupNames = Array.from(new Set(sellableProducts.map((p) => p.group).filter(Boolean))).sort((x, y) => x.localeCompare(y, "es"));
+  const pfHasNoGroup = sellableProducts.some((p) => !p.group);
+  const pfFolderNames = Array.from(new Set(sellableProducts.filter(pfMatchGroup).map((p) => p.subcategory).filter(Boolean))).sort((x, y) => x.localeCompare(y, "es"));
+  const pfHasNoFolder = sellableProducts.filter(pfMatchGroup).some((p) => !p.subcategory);
+  const pfCatNames = Array.from(new Set(sellableProducts.filter((p) => pfMatchGroup(p) && pfMatchFolder(p)).map((p) => p.category).filter(Boolean))).sort((x, y) => x.localeCompare(y, "es"));
   const [bulkProgress, setBulkProgress] = useState(null); // { done, total } mientras guarda
   const [bulkMessage, setBulkMessage] = useState("");
   // Aplica un cambio a muchos productos a la vez, siempre con aviso de
@@ -13846,7 +13984,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
   };
 
   return (
-    <div className="max-w-5xl mx-auto px-4 md:px-6 py-10">
+    <div className={`${tab === "productos" ? "max-w-7xl" : "max-w-5xl"} mx-auto px-4 md:px-6 py-10`}>
       <div className="flex items-center justify-between mb-6">
         <SectionTitle eyebrow="Solo para el equipo Kulto" title="Panel de administrador" />
         <button onClick={onLogout} className="kulto-btn text-sm flex items-center gap-1 px-3 py-2 rounded-full" style={{ color: "var(--slate)", border: "1px solid var(--line)" }}>
@@ -13921,7 +14059,51 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
 
           <AdminBulkProductUpload categories={categories} groups={groups} allProducts={sellableProducts} onSaveProduct={onSaveProduct} />
 
-          <div className="grid md:grid-cols-2 gap-6 mt-6">
+          <div className="grid md:grid-cols-2 lg:grid-cols-[240px_minmax(0,1fr)_minmax(0,1fr)] gap-6 mt-6">
+          <aside className="md:col-span-2 lg:col-span-1">
+            <div className="lg:sticky lg:top-24 rounded-2xl p-4" style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}>
+              <p className="text-sm font-semibold mb-2" style={{ color: "var(--bone)" }}>Filtrar productos</p>
+              <input
+                value={pfQuery}
+                onChange={(e) => setPfQuery(e.target.value)}
+                placeholder="Buscar por nombre o SKU…"
+                className="w-full rounded-xl p-2 text-sm mb-1"
+                style={{ background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" }}
+              />
+              <FilterAccordion title="Grupo / temática" defaultOpen badge={pfGroup !== "Todos" ? "1" : null}>
+                <FilterOption label="Todos" count={sellableProducts.length} active={pfGroup === "Todos"} onClick={() => { setPfGroup("Todos"); setPfFolder("Todas"); setPfCat("Todas"); }} />
+                {pfGroupNames.map((g) => (
+                  <FilterOption key={g} label={g} count={sellableProducts.filter((p) => p.group === g).length} active={pfGroup === g} onClick={() => { setPfGroup(g); setPfFolder("Todas"); setPfCat("Todas"); }} />
+                ))}
+                {pfHasNoGroup && <FilterOption label="Sin grupo" count={sellableProducts.filter((p) => !p.group).length} active={pfGroup === "__none__"} onClick={() => { setPfGroup("__none__"); setPfFolder("Todas"); setPfCat("Todas"); }} />}
+              </FilterAccordion>
+              {(pfFolderNames.length > 0 || pfFolder !== "Todas") && (
+                <FilterAccordion title="Carpeta" defaultOpen badge={pfFolder !== "Todas" ? "1" : null}>
+                  <FilterOption label="Todas" active={pfFolder === "Todas"} onClick={() => { setPfFolder("Todas"); setPfCat("Todas"); }} />
+                  {pfFolderNames.map((f) => (
+                    <FilterOption key={f} label={f} count={sellableProducts.filter((p) => pfMatchGroup(p) && p.subcategory === f).length} active={pfFolder === f} onClick={() => { setPfFolder(f); setPfCat("Todas"); }} />
+                  ))}
+                  {pfHasNoFolder && <FilterOption label="Sin carpeta" count={sellableProducts.filter((p) => pfMatchGroup(p) && !p.subcategory).length} active={pfFolder === "__none__"} onClick={() => { setPfFolder("__none__"); setPfCat("Todas"); }} />}
+                </FilterAccordion>
+              )}
+              <FilterAccordion title="Categoría (prenda)" badge={pfCat !== "Todas" ? "1" : null}>
+                <FilterOption label="Todas" active={pfCat === "Todas"} onClick={() => setPfCat("Todas")} />
+                {pfCatNames.map((c) => (
+                  <FilterOption key={c} label={c} count={sellableProducts.filter((p) => pfMatchGroup(p) && pfMatchFolder(p) && p.category === c).length} active={pfCat === c} onClick={() => setPfCat(c)} />
+                ))}
+              </FilterAccordion>
+              <FilterAccordion title="Visibilidad" badge={pfVis !== "todos" ? "1" : null}>
+                <FilterOption label="Todos" active={pfVis === "todos"} onClick={() => setPfVis("todos")} />
+                <FilterOption label="Visibles para clientes" count={sellableProducts.filter((p) => !p.hidden).length} active={pfVis === "visibles"} onClick={() => setPfVis("visibles")} />
+                <FilterOption label="Ocultos" count={sellableProducts.filter((p) => p.hidden).length} active={pfVis === "ocultos"} onClick={() => setPfVis("ocultos")} />
+              </FilterAccordion>
+              {pfActive && (
+                <button onClick={pfClear} className="kulto-btn text-xs font-semibold flex items-center gap-1.5 mt-3" style={{ color: "var(--signal)" }}>
+                  <RotateCcw size={13} /> Limpiar filtros ({filteredSellable.length} de {sellableProducts.length})
+                </button>
+              )}
+            </div>
+          </aside>
             <div className="flex flex-col gap-6">
               <AdminProductForm categories={categories} groups={groups} onAddCategory={onAddCategory} onAddGroup={onAddGroup} savedColors={savedColors} onSaveColorToLibrary={onSaveColorToLibrary} onRemoveColorFromLibrary={onRemoveColorFromLibrary} onSave={async (p) => { await onSaveProduct(p); setEditingProduct(null); }} editing={editingProduct} onCancelEdit={() => setEditingProduct(null)} allProducts={sellableProducts} />
               <AdminGroupManager groups={groups} onRename={onRenameGroup} onDelete={onDeleteGroup} />
@@ -13941,7 +14123,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                 </div>
               )}
               <div className="flex items-center justify-between gap-2 flex-wrap" style={selectedProductIds.length > 0 ? { position: "sticky", top: 8, zIndex: 30, background: "var(--ink)", border: "1px solid var(--sun)", borderRadius: 16, padding: 8 } : undefined}>
-                <p className="text-sm font-semibold" style={{ color: "var(--bone)" }}>Productos ({sellableProducts.length}){selectedProductIds.length > 0 ? ` · ${selectedProductIds.length} tildado${selectedProductIds.length === 1 ? "" : "s"}` : ""}</p>
+                <p className="text-sm font-semibold" style={{ color: "var(--bone)" }}>Productos ({pfActive ? `${filteredSellable.length} de ${sellableProducts.length}` : sellableProducts.length}){selectedProductIds.length > 0 ? ` · ${selectedProductIds.length} tildado${selectedProductIds.length === 1 ? "" : "s"}` : ""}</p>
                 {selectedProductIds.length > 0 && (
                   <div className="flex items-center gap-2 flex-wrap">
                     {groups.length > 0 && (
@@ -14167,8 +14349,9 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                 </div>
               )}
               {sellableProducts.length === 0 && <EmptyState text="Todavía no cargaste ningún producto." />}
+              {sellableProducts.length > 0 && filteredSellable.length === 0 && <EmptyState text="No hay productos con estos filtros." />}
               {Object.entries(
-                sellableProducts.reduce((acc, p) => {
+                filteredSellable.reduce((acc, p) => {
                   // Se agrupa por grupo/temática (ej: "kulto", "anime") y no
                   // por categoría — la categoría es solo la prenda física, lo
                   // que de verdad organiza los diseños para el dueño es el
@@ -14178,7 +14361,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                   return acc;
                 }, {})
               ).map(([grp, items]) => {
-                const isOpen = expandedProductCats.includes(grp) || items.some((p) => editingProduct?.id === p.id);
+                const isOpen = expandedProductCats.includes(grp) || pfActive || items.some((p) => editingProduct?.id === p.id);
                 const allSelected = items.length > 0 && items.every((p) => selectedProductIds.includes(p.id));
                 const toggleSelectGroup = (e) => {
                   e.stopPropagation();
@@ -14247,7 +14430,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                         ).sort(([x], [y]) => (x || "\uffff").localeCompare(y || "\uffff", "es")).map(([folderName, fItems]) => {
                         const hasAnyFolder = items.some((p) => p.subcategory);
                         const folderKey = `${grp}|${folderName}`;
-                        const folderOpen = !hasAnyFolder || expandedFolders.includes(folderKey) || (editingProduct && fItems.some((x) => x.id === editingProduct.id));
+                        const folderOpen = !hasAnyFolder || expandedFolders.includes(folderKey) || pfActive || (editingProduct && fItems.some((x) => x.id === editingProduct.id));
                         const folderAllSelected = fItems.length > 0 && fItems.every((x) => selectedProductIds.includes(x.id));
                         const toggleSelectFolder = () => {
                           const ids = fItems.map((x) => x.id);
@@ -14601,6 +14784,29 @@ function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, cus
       )
     );
   };
+  // Menú grande de "Productos" (escritorio): lista a la izquierda y, a la
+  // derecha, tarjetas con foto de lo que hay dentro de la opción elegida
+  // (carpetas si las tiene; si no, categorías o los primeros productos).
+  const [megaItemId, setMegaItemId] = useState(null);
+  const closeMenus = () => { setOpen(false); setCatalogMenuOpen(false); setCatalogMenuOpenMobile(false); };
+  const tileImage = (p) => (p ? (p.photoPool?.[0] || getColorImages(p.colors?.[0])[0] || null) : null);
+  const productsForItem = (it) => products.filter((p) => (it.type === "group" ? (p.group || "") === it.value : (p.category === it.value || (p.extraCategories || []).includes(it.value))));
+  const megaTiles = (it) => {
+    const ps = productsForItem(it);
+    const withImg = (list) => list.find((p) => tileImage(p)) || list[0];
+    const subs = [...new Set(ps.map((p) => p.subcategory).filter(Boolean))].sort((x, y) => x.localeCompare(y, "es"));
+    const base = { group: it.type === "group" ? it.value : "", category: it.type === "category" ? it.value : "" };
+    if (subs.length) {
+      return subs.slice(0, 8).map((sc) => ({ key: `s:${sc}`, label: sc, img: tileImage(withImg(ps.filter((p) => p.subcategory === sc))), onClick: () => { onGoCatalog?.({ ...base, subcategory: sc }); closeMenus(); } }));
+    }
+    if (it.type === "group") {
+      const cats = [...new Set(ps.map((p) => p.category).filter(Boolean))];
+      if (cats.length > 1) {
+        return cats.slice(0, 8).map((c) => ({ key: `c:${c}`, label: c, img: tileImage(withImg(ps.filter((p) => p.category === c))), onClick: () => { onGoCatalog?.({ group: it.value, category: c }); closeMenus(); } }));
+      }
+    }
+    return ps.slice(0, 4).map((p) => ({ key: p.id, label: p.name, img: tileImage(p), onClick: () => goCatalog(it) }));
+  };
   const go = (p) => { setPage(p); setOpen(false); };
   useEffect(() => {
     if (!catalogMenuOpen) return;
@@ -14648,7 +14854,7 @@ function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, cus
         </button>
         <nav className="hidden md:flex items-center gap-8">
           <NavLink label="Inicio" active={page === "home"} onClick={() => go("home")} />
-          <div className="relative" ref={catalogMenuRef}>
+          <div ref={catalogMenuRef}>
             <button
               onClick={() => setCatalogMenuOpen((o) => !o)}
               className="kulto-btn text-sm font-semibold pb-1 flex items-center gap-1"
@@ -14656,51 +14862,63 @@ function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, cus
             >
               Productos <ChevronDown size={14} />
             </button>
-            {catalogMenuOpen && (
-              <div className="absolute left-0 top-full mt-2 rounded-xl overflow-hidden z-50" style={{ background: "var(--ink-2)", border: "1px solid var(--line)", minWidth: 180 }}>
-                <button onClick={() => goCatalog(null)} className="kulto-btn w-full text-left px-4 py-2.5 text-sm" style={{ color: "var(--bone)" }}>
-                  Catálogo
-                </button>
-                {productsMenuItems.map((it) => {
-                  const subcats = subcatsForItem(it);
-                  const expanded = expandedMenuItemId === it.id;
-                  return (
-                    <React.Fragment key={it.id}>
-                      <div style={{ height: 1, background: "var(--line)" }} />
-                      <div className="flex items-center">
-                        <button onClick={() => goCatalog(it)} className="kulto-btn flex-1 text-left px-4 py-2.5 text-sm" style={{ color: "var(--bone)" }}>
-                          {it.label || it.value}
-                        </button>
-                        {subcats.length > 0 && (
+            {catalogMenuOpen && (() => {
+              const activeItem = productsMenuItems.find((x) => x.id === megaItemId) || productsMenuItems[0] || null;
+              const tiles = activeItem ? megaTiles(activeItem) : [];
+              return (
+                <div className="absolute left-0 right-0 top-full z-50" style={{ background: "var(--ink)", borderBottom: "1px solid var(--line)", boxShadow: "0 24px 40px rgba(0,0,0,0.25)" }}>
+                  <div className="max-w-6xl mx-auto px-4 md:px-6 py-6 grid gap-8" style={{ gridTemplateColumns: "260px minmax(0, 1fr)" }}>
+                    <div className="flex flex-col gap-1">
+                      {productsMenuItems.map((it) => {
+                        const on = activeItem && activeItem.id === it.id;
+                        return (
                           <button
-                            onClick={() => setExpandedMenuItemId(expanded ? null : it.id)}
-                            className="kulto-btn px-2 py-2.5"
-                            style={{ color: "var(--slate)" }}
-                            aria-label={`Ver subcategorías de ${it.label || it.value}`}
+                            key={it.id}
+                            onMouseEnter={() => setMegaItemId(it.id)}
+                            onFocus={() => setMegaItemId(it.id)}
+                            onClick={() => goCatalog(it)}
+                            className="kulto-btn flex items-center justify-between text-left text-sm rounded-xl px-4 py-2.5"
+                            style={{ background: on ? "var(--ink-3)" : "transparent", color: on ? "var(--sun)" : "var(--bone)", fontWeight: on ? 600 : 400 }}
                           >
-                            <ChevronDown size={14} style={{ transform: expanded ? "rotate(180deg)" : "none" }} />
+                            <span className="truncate">{it.label || it.value}</span>
+                            <ChevronRight size={14} style={{ color: "var(--slate)" }} />
                           </button>
-                        )}
-                      </div>
-                      {expanded && subcats.length > 0 && (
-                        <div style={{ background: "var(--ink-3)" }}>
-                          {subcats.map((sc) => (
-                            <button
-                              key={sc}
-                              onClick={() => goCatalogSubcategory(it.value, sc)}
-                              className="kulto-btn w-full text-left pl-7 pr-4 py-2 text-sm"
-                              style={{ color: "var(--slate)" }}
-                            >
-                              {sc}
+                        );
+                      })}
+                      <button onClick={() => goCatalog(null)} className="kulto-btn flex items-center justify-between text-left text-sm rounded-xl px-4 py-2.5 mt-1" style={{ color: "var(--bone)", borderTop: productsMenuItems.length ? "1px solid var(--line)" : "none" }}>
+                        <span>Ver todo el catálogo</span>
+                        <ChevronRight size={14} style={{ color: "var(--slate)" }} />
+                      </button>
+                    </div>
+                    <div>
+                      {activeItem && (
+                        <div className="flex items-center justify-between mb-3">
+                          <p className="text-sm font-semibold" style={{ color: "var(--bone)" }}>{activeItem.label || activeItem.value}</p>
+                          <button onClick={() => goCatalog(activeItem)} className="kulto-btn text-xs font-semibold flex items-center gap-1" style={{ color: "var(--sun)" }}>
+                            Ver todo <ArrowRight size={12} />
+                          </button>
+                        </div>
+                      )}
+                      {tiles.length > 0 ? (
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                          {tiles.map((t) => (
+                            <button key={t.key} onClick={t.onClick} className="kulto-btn text-left flex flex-col gap-2">
+                              <span className="block aspect-[4/3] rounded-2xl overflow-hidden flex items-center justify-center" style={{ background: "var(--ink-3)", border: "1px solid var(--line)" }}>
+                                {t.img ? <FastImg loading="lazy" src={t.img} alt={t.label} className="w-full h-full object-contain p-2" /> : <Shirt size={28} color="rgba(243,239,230,0.35)" />}
+                              </span>
+                              <span className="text-sm truncate" style={{ color: "var(--bone)" }}>{t.label}</span>
                             </button>
                           ))}
                         </div>
+                      ) : (
+                        <p className="text-sm" style={{ color: "var(--slate)" }}>Elegí una opción de la izquierda para ver sus productos.</p>
                       )}
-                    </React.Fragment>
-                  );
-                })}
-              </div>
-            )}
+                    </div>
+                  </div>
+                  <div className="absolute left-0 right-0 top-full" style={{ height: "100vh", background: "rgba(0,0,0,0.35)", backdropFilter: "blur(3px)" }} onClick={() => setCatalogMenuOpen(false)} />
+                </div>
+              );
+            })()}
           </div>
           <NavLink label="Personalizar" active={page === "wizard"} onClick={() => go("wizard")} />
           <NavLink label="Mi pedido" active={page === "seguimiento"} onClick={() => go("seguimiento")} />
@@ -15351,6 +15569,12 @@ export default function App() {
   // Link del mail "Recuperar contraseña" (?resetEmail=&resetCode=): lleva
   // directo a "Mi cuenta" con el formulario de contraseña nueva ya armado.
   const [resetDeepLinkEmail, setResetDeepLinkEmail] = useState("");
+  const [registerIntent, setRegisterIntent] = useState(null);
+  const openSignup = (email, mode = "register") => {
+    setRegisterIntent({ email, mode, t: Date.now() });
+    setPage("cuenta");
+    try { window.scrollTo({ top: 0 }); } catch { /* nada */ }
+  };
   const [resetDeepLinkCode, setResetDeepLinkCode] = useState("");
   useEffect(() => {
     try {
@@ -16707,6 +16931,7 @@ export default function App() {
               onRequestPasswordReset={handleRequestPasswordReset}
               onResetPassword={handleResetPassword}
               settings={settings}
+              registerIntent={registerIntent}
               initialResetEmail={resetDeepLinkEmail}
               initialResetCode={resetDeepLinkCode}
             />
@@ -16718,6 +16943,7 @@ export default function App() {
       </main>
 
       <Footer settings={settings} />
+      <SignupPromoPopup settings={settings} customer={customer} page={page} onSignup={openSignup} />
       <WhatsAppFloat liftForMobileBar={cart.length > 0 && !cartOpen} whatsappNumber={settings.whatsappNumber} enabled={settings.whatsappFloatEnabled} />
       {cart.length > 0 && !cartOpen && (
         <MobileCartBar count={cartCount} total={cart.reduce((s, it) => s + it.qty * it.unitPrice, 0)} onOpen={() => setCartOpen(true)} />
