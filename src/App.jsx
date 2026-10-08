@@ -88,6 +88,19 @@ const ADMIN_TABS = [
   ["ajustes", "Ajustes"],
 ];
 const ADMIN_TAB_KEYS = ADMIN_TABS.map(([key]) => key);
+const ADMIN_TAB_META = {
+  productos: { icon: Shirt, hint: "Fotos, precios y stock" },
+  personalizar: { icon: Sparkles, hint: "Banners, colores y textos" },
+  pedidos: { icon: Package, hint: "Pedidos que llegan" },
+  ventas: { icon: TrendingUp, hint: "Ofertas y ventas" },
+  estadisticas: { icon: BarChart3, hint: "Visitas y números" },
+  compras: { icon: ShoppingBag, hint: "Reponer mercadería" },
+  clientes: { icon: UserPlus, hint: "Cuentas y puntos" },
+  resenas: { icon: Star, hint: "Opiniones de clientes" },
+  contacto: { icon: Mail, hint: "Mensajes recibidos" },
+  beneficios: { icon: Gift, hint: "Recompensas y códigos" },
+  ajustes: { icon: SlidersHorizontal, hint: "Envíos, pagos, marca" },
+};
 const DEFAULT_CATEGORIES = [
   "Camisetas",
   "Sudaderas con capucha",
@@ -14795,7 +14808,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
   };
 
   return (
-    <div className={`${tab === "productos" ? "max-w-7xl" : "max-w-5xl"} mx-auto px-4 md:px-6 py-10`}>
+    <div className="max-w-[1400px] mx-auto px-4 md:px-6 py-10">
       <div className="flex items-center justify-between mb-6">
         <SectionTitle eyebrow="Solo para el equipo Kulto" title="Panel de administrador" />
         <button onClick={onLogout} className="kulto-btn text-sm flex items-center gap-1 px-3 py-2 rounded-full" style={{ color: "var(--slate)", border: "1px solid var(--line)" }}>
@@ -14803,13 +14816,30 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
         </button>
       </div>
 
-      <div className="flex gap-2 mb-6 overflow-x-auto kulto-scrollbar pb-1 -mx-4 px-4 md:mx-0 md:px-0">
-        {ADMIN_TABS.filter(([key]) => allowedTabs.includes(key)).map(([key, label]) => (
-          <button key={key} onClick={() => setTab(key)} className="kulto-btn text-sm font-semibold px-4 py-2 rounded-full shrink-0 whitespace-nowrap" style={{ background: tab === key ? "var(--signal)" : "var(--ink-2)", color: "var(--bone)", border: "1px solid var(--line)" }}>
-            {label}
-          </button>
-        ))}
-      </div>
+      <div className="md:flex md:gap-6 md:items-start">
+      <nav className="flex md:flex-col gap-2 mb-6 md:mb-0 overflow-x-auto md:overflow-visible kulto-scrollbar pb-1 -mx-4 px-4 md:mx-0 md:px-3 md:py-3 md:w-60 md:shrink-0 md:sticky md:top-4 md:rounded-2xl" style={{ background: "transparent", border: "none" }}>
+        <p className="hidden md:block text-xs font-bold px-3 pb-1" style={{ color: "var(--slate)", letterSpacing: "0.08em" }}>MENÚ</p>
+        {ADMIN_TABS.filter(([key]) => allowedTabs.includes(key)).map(([key, label]) => {
+          const meta = ADMIN_TAB_META[key] || {};
+          const Icon = meta.icon || LayoutGrid;
+          const active = tab === key;
+          return (
+            <button
+              key={key}
+              onClick={() => { setTab(key); try { window.scrollTo({ top: 0 }); } catch { /* nada */ } }}
+              className="kulto-btn shrink-0 whitespace-nowrap flex items-center gap-3 text-left px-3 py-2.5 rounded-xl"
+              style={{ background: active ? "var(--signal)" : "var(--ink-2)", color: "var(--bone)", border: "1px solid var(--line)" }}
+            >
+              <Icon size={18} className="shrink-0" />
+              <span className="min-w-0">
+                <span className="block text-sm font-semibold">{label}</span>
+                {meta.hint && <span className="hidden md:block text-xs font-normal" style={{ color: active ? "rgba(255,255,255,0.85)" : "var(--slate)", whiteSpace: "normal" }}>{meta.hint}</span>}
+              </span>
+            </button>
+          );
+        })}
+      </nav>
+      <div className="flex-1 min-w-0">
 
       {tab === "productos" && (
         <>
@@ -15535,6 +15565,8 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
           <AdminLoyaltySettings settings={settings} onSave={onSaveSettings} />
         </div>
       )}
+      </div>
+      </div>
     </div>
   );
 }
