@@ -9939,6 +9939,323 @@ function AdminSalesPanel({ products, orders, settings, onSaveSettings }) {
 /* ------------------------------------------------------------------ */
 /*  Optimizar fotos — miniaturas para que la web cargue rápido          */
 /* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */
+/*  Copia de seguridad — todo el contenido de la web en un solo .zip   */
+/*  (datos de la base + fotos de Storage) y forma de restaurarlo.      */
+/*  Funciona 100% desde el navegador del admin, sin servidor extra.    */
+/* ------------------------------------------------------------------ */
+
+const ZIP_CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+function zipCrc32(bytes) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) c = ZIP_CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+// entries: [{ name, data: Uint8Array | Blob, size, crc }] → Blob .zip (sin comprimir,
+// las fotos ya vienen comprimidas). Compatible con cualquier programa de zip.
+function buildZipBlob(entries) {
+  const enc = new TextEncoder();
+  const parts = [];
+  const central = [];
+  let offset = 0;
+  let cdSize = 0;
+  const d = new Date();
+  const dosTime = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+  const dosDate = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+  for (const e of entries) {
+    const nameBytes = enc.encode(e.name);
+    const lh = new DataView(new ArrayBuffer(30));
+    lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true); lh.setUint16(8, 0, true);
+    lh.setUint16(10, dosTime, true); lh.setUint16(12, dosDate, true);
+    lh.setUint32(14, e.crc, true); lh.setUint32(18, e.size, true); lh.setUint32(22, e.size, true);
+    lh.setUint16(26, nameBytes.length, true); lh.setUint16(28, 0, true);
+    parts.push(lh.buffer, nameBytes, e.data);
+    const ch = new DataView(new ArrayBuffer(46));
+    ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true); ch.setUint16(8, 0x0800, true); ch.setUint16(10, 0, true);
+    ch.setUint16(12, dosTime, true); ch.setUint16(14, dosDate, true);
+    ch.setUint32(16, e.crc, true); ch.setUint32(20, e.size, true); ch.setUint32(24, e.size, true);
+    ch.setUint16(28, nameBytes.length, true); ch.setUint32(42, offset, true);
+    central.push(ch.buffer, nameBytes);
+    cdSize += 46 + nameBytes.length;
+    offset += 30 + nameBytes.length + e.size;
+  }
+  const end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true); end.setUint16(8, entries.length, true); end.setUint16(10, entries.length, true);
+  end.setUint32(12, cdSize, true); end.setUint32(16, offset, true);
+  return new Blob([...parts, ...central, end.buffer], { type: "application/zip" });
+}
+function textEntry(name, text) {
+  const bytes = new TextEncoder().encode(text);
+  return { name, data: bytes, size: bytes.length, crc: zipCrc32(bytes) };
+}
+// Lee un .zip (el nuestro, o uno que el usuario haya vuelto a comprimir).
+async function readZipEntries(file) {
+  const tail = new Uint8Array(await file.slice(Math.max(0, file.size - 65557)).arrayBuffer());
+  let p = -1;
+  for (let i = tail.length - 22; i >= 0; i--) {
+    if (tail[i] === 0x50 && tail[i + 1] === 0x4b && tail[i + 2] === 5 && tail[i + 3] === 6) { p = i; break; }
+  }
+  if (p < 0) throw new Error("Ese archivo no es una copia de seguridad de Kulto (.zip).");
+  const tv = new DataView(tail.buffer);
+  const count = tv.getUint16(p + 10, true);
+  const cdSize = tv.getUint32(p + 12, true);
+  const cdOff = tv.getUint32(p + 16, true);
+  const cd = new DataView(await file.slice(cdOff, cdOff + cdSize).arrayBuffer());
+  const dec = new TextDecoder();
+  const list = [];
+  let q = 0;
+  for (let i = 0; i < count; i++) {
+    const method = cd.getUint16(q + 10, true);
+    const csize = cd.getUint32(q + 20, true);
+    const nlen = cd.getUint16(q + 28, true);
+    const xlen = cd.getUint16(q + 30, true);
+    const clen = cd.getUint16(q + 32, true);
+    const off = cd.getUint32(q + 42, true);
+    const name = dec.decode(new Uint8Array(cd.buffer, cd.byteOffset + q + 46, nlen));
+    list.push({
+      name,
+      async blob() {
+        const lh = new DataView(await file.slice(off, off + 30).arrayBuffer());
+        const start = off + 30 + lh.getUint16(26, true) + lh.getUint16(28, true);
+        const raw = file.slice(start, start + csize);
+        if (method === 0) return raw;
+        if (method === 8 && typeof DecompressionStream !== "undefined") {
+          return new Response(raw.stream().pipeThrough(new DecompressionStream("deflate-raw"))).blob();
+        }
+        throw new Error("El zip está comprimido de una forma que no puedo leer. Usá el archivo tal cual lo descargaste.");
+      },
+    });
+    q += 46 + nlen + xlen + clen;
+  }
+  return list;
+}
+
+function AdminBackupPanel() {
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState("");
+  const [progress, setProgress] = useState({ done: 0, total: 0 });
+  const [result, setResult] = useState(null);
+  const restoreInput = useRef(null);
+
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const storageBase = () => `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/${STORAGE_BUCKET}/`;
+  const runPool = async (items, n, fn) => {
+    let cursor = 0;
+    await Promise.all(Array.from({ length: n }, async () => {
+      while (cursor < items.length) { const it = items[cursor++]; await fn(it); }
+    }));
+  };
+
+  const readRows = async (keys) => {
+    const rows = [];
+    const go = async (chunk, attempt = 0) => {
+      const { data, error } = await supabase.from(KV_TABLE).select("key,value,updated_at").in("key", chunk);
+      if (!error) { rows.push(...(data || [])); return; }
+      if (chunk.length > 1) { const m = chunk.length >> 1; await go(chunk.slice(0, m)); await go(chunk.slice(m)); return; }
+      if (attempt < 2) { await sleep(800); return go(chunk, attempt + 1); }
+      throw new Error(`No se pudo leer "${chunk[0]}": ${error.message || error}`);
+    };
+    await go(keys);
+    return rows;
+  };
+
+  const downloadBackup = async () => {
+    setBusy(true); setResult(null); setProgress({ done: 0, total: 0 });
+    try {
+      setStatus("Leyendo la lista de datos…");
+      const keys = [];
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await supabase.from(KV_TABLE).select("key").order("key").range(from, from + 999);
+        if (error) throw new Error("No se pudo leer la base de datos: " + (error.message || error));
+        keys.push(...(data || []).map((r) => r.key));
+        if (!data || data.length < 1000) break;
+      }
+      const chunks = [];
+      for (let i = 0; i < keys.length; i += 20) chunks.push(keys.slice(i, i + 20));
+      setProgress({ done: 0, total: chunks.length });
+      setStatus("Copiando productos, pedidos, clientes y ajustes…");
+      const rows = [];
+      let doneChunks = 0;
+      await runPool(chunks, 4, async (chunk) => {
+        rows.push(...(await readRows(chunk)));
+        doneChunks++; setProgress({ done: doneChunks, total: chunks.length });
+      });
+      if (rows.length < keys.length) throw new Error(`Se leyeron ${rows.length} de ${keys.length} datos. Probá de nuevo.`);
+      rows.sort((a, b) => (a.key < b.key ? -1 : 1));
+
+      // Fotos: las que aparecen en los datos + todas las que haya en el bucket.
+      setStatus("Buscando las fotos…");
+      const photoPaths = new Set();
+      const re = new RegExp("/storage/v1/object/public/" + STORAGE_BUCKET + "/([^\"'\\s?#)\\\\]+)", "g");
+      rows.forEach((r) => {
+        const str = typeof r.value === "string" ? r.value : JSON.stringify(r.value);
+        let m;
+        while ((m = re.exec(str))) { try { photoPaths.add(decodeURIComponent(m[1])); } catch { photoPaths.add(m[1]); } }
+      });
+      try {
+        for (let off = 0; ; off += 1000) {
+          const { data, error } = await supabase.storage.from(STORAGE_BUCKET).list("", { limit: 1000, offset: off, sortBy: { column: "name", order: "asc" } });
+          if (error) break;
+          (data || []).filter((f) => f.id).forEach((f) => photoPaths.add(f.name));
+          if (!data || data.length < 1000) break;
+        }
+      } catch { /* con las que aparecen en los datos alcanza */ }
+      const photoList = [...photoPaths].filter((p) => !/_t\.webp$/i.test(p));
+
+      setStatus("Descargando las fotos…");
+      setProgress({ done: 0, total: photoList.length });
+      const entries = [];
+      const failed = [];
+      let donePhotos = 0;
+      await runPool(photoList, 4, async (path) => {
+        let ok = false;
+        for (let attempt = 0; attempt < 3 && !ok; attempt++) {
+          try {
+            const url = storageBase() + path.split("/").map(encodeURIComponent).join("/");
+            const res = await fetch(url, { cache: "no-store" });
+            if (!res.ok) throw new Error(String(res.status));
+            const bytes = new Uint8Array(await res.arrayBuffer());
+            entries.push({ name: "photos/" + path, data: new Blob([bytes]), size: bytes.length, crc: zipCrc32(bytes) });
+            ok = true;
+          } catch { await sleep(500); }
+        }
+        if (!ok) failed.push(path);
+        donePhotos++; setProgress({ done: donePhotos, total: photoList.length });
+      });
+
+      setStatus("Armando el archivo…");
+      if (entries.length + 3 > 65000) throw new Error("Hay demasiadas fotos para un solo archivo.");
+      const meta = { app: "kulto", version: 1, createdAt: new Date().toISOString(), storageBase: storageBase(), rows: rows.length, photos: entries.length, photosFailed: failed };
+      const readme = "COPIA DE SEGURIDAD DE KULTO\n\nkv.json  = todos los datos (productos, categorías, carpetas, pedidos, clientes, ajustes, diseños...)\nphotos/  = todas las fotos subidas\nmeta.json = datos de esta copia\n\nPara recuperar todo: Admin > Ajustes > Copia de seguridad > Restaurar desde un archivo.\nGuardá este archivo en un lugar seguro: contiene datos de tus clientes y pedidos.\n";
+      const all = [textEntry("LEEME.txt", readme), textEntry("meta.json", JSON.stringify(meta, null, 2)), textEntry("kv.json", JSON.stringify(rows)), ...entries];
+      const blob = buildZipBlob(all);
+      const a = document.createElement("a");
+      const day = new Date().toISOString().slice(0, 10);
+      a.href = URL.createObjectURL(blob);
+      a.download = `kulto-copia-${day}.zip`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+      const mb = (blob.size / 1048576).toFixed(1);
+      setResult({
+        ok: failed.length === 0,
+        msg: `Listo: se descargó "kulto-copia-${day}.zip" (${mb} MB) con ${rows.length} datos y ${entries.length} fotos.` + (failed.length ? ` Atención: ${failed.length} foto(s) no se pudieron bajar (${failed.slice(0, 3).join(", ")}${failed.length > 3 ? "…" : ""}). Repetí la copia para reintentar.` : " Guardalo en un lugar seguro (Google Drive, disco externo)."),
+      });
+    } catch (e) {
+      setResult({ ok: false, msg: "No se pudo completar la copia: " + (e?.message || "error desconocido") + ". Podés volver a intentarlo." });
+    } finally {
+      setBusy(false); setStatus("");
+    }
+  };
+
+  const restoreBackup = async (file) => {
+    if (!file) return;
+    setBusy(true); setResult(null); setProgress({ done: 0, total: 0 });
+    try {
+      setStatus("Leyendo el archivo…");
+      const entries = await readZipEntries(file);
+      const metaE = entries.find((e) => e.name === "meta.json");
+      const kvE = entries.find((e) => e.name === "kv.json");
+      if (!metaE || !kvE) throw new Error("Ese archivo no es una copia de seguridad de Kulto.");
+      const meta = JSON.parse(await (await metaE.blob()).text());
+      const rows = JSON.parse(await (await kvE.blob()).text());
+      const photos = entries.filter((e) => e.name.startsWith("photos/"));
+      const ok = window.confirm(
+        `Vas a restaurar la copia del ${String(meta.createdAt || "").slice(0, 10)}:\n• ${rows.length} datos (productos, carpetas, pedidos, clientes, ajustes…)\n• ${photos.length} fotos\n\nLo que haya ahora con el mismo nombre se va a reemplazar por lo de la copia. ¿Continuar?`
+      );
+      if (!ok) { setStatus(""); setBusy(false); return; }
+
+      setStatus("Subiendo las fotos…");
+      setProgress({ done: 0, total: photos.length });
+      let donePhotos = 0; const photoFail = [];
+      await runPool(photos, 4, async (e) => {
+        const path = e.name.slice("photos/".length);
+        try {
+          const blob = await e.blob();
+          const ext = (path.split(".").pop() || "").toLowerCase();
+          const type = ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg";
+          const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(path, blob, { contentType: type, upsert: true, cacheControl: "31536000" });
+          if (error) throw error;
+        } catch { photoFail.push(path); }
+        donePhotos++; setProgress({ done: donePhotos, total: photos.length });
+      });
+
+      setStatus("Recuperando los datos…");
+      const oldBase = meta.storageBase, newBase = storageBase();
+      const fix = (v) => (oldBase && oldBase !== newBase && typeof v === "string" ? v.split(oldBase).join(newBase) : v);
+      const prepared = rows.map((r) => ({ key: r.key, value: fix(r.value), updated_at: new Date().toISOString() }));
+      const batches = [];
+      for (let i = 0; i < prepared.length; i += 10) batches.push(prepared.slice(i, i + 10));
+      setProgress({ done: 0, total: prepared.length });
+      let doneRows = 0; const rowFail = [];
+      await runPool(batches, 3, async (batch) => {
+        const { error } = await supabase.from(KV_TABLE).upsert(batch);
+        if (!error) { doneRows += batch.length; }
+        else {
+          for (const row of batch) {
+            const { error: e1 } = await supabase.from(KV_TABLE).upsert(row);
+            if (e1) rowFail.push(row.key); else doneRows++;
+          }
+        }
+        setProgress({ done: doneRows, total: prepared.length });
+      });
+      setResult({
+        ok: !photoFail.length && !rowFail.length,
+        msg: `Restaurado: ${doneRows} de ${prepared.length} datos y ${photos.length - photoFail.length} de ${photos.length} fotos.` + (rowFail.length || photoFail.length ? ` No se pudieron restaurar ${rowFail.length} dato(s) y ${photoFail.length} foto(s) — repetí la restauración.` : " Recargá la web (Ctrl+F5) para verlo. Después tocá \"Optimizar fotos ahora\" para volver a crear las miniaturas."),
+      });
+    } catch (e) {
+      setResult({ ok: false, msg: "No se pudo restaurar: " + (e?.message || "error desconocido") });
+    } finally {
+      setBusy(false); setStatus("");
+      if (restoreInput.current) restoreInput.current.value = "";
+    }
+  };
+
+  return (
+    <div className="rounded-2xl p-4 flex flex-col gap-3" style={{ background: "var(--ink-2)", border: "1px solid var(--sun)" }}>
+      <div className="flex items-center gap-2">
+        <Download size={16} style={{ color: "var(--sun)" }} />
+        <p className="text-sm font-semibold" style={{ color: "var(--bone)" }}>Copia de seguridad de toda la web</p>
+      </div>
+      <p className="text-xs" style={{ color: "var(--slate)" }}>
+        Descarga un solo archivo (.zip) con todo lo que tenés cargado, tal cual está ahora: productos, grupos, carpetas, colores, categorías, diseños, pedidos, clientes, reseñas, ajustes y todas las fotos. Si algún día se borra algo, lo restaurás desde ese mismo archivo. Hacela cada tanto (por ejemplo, una vez por semana o después de subir mucho contenido) y guardá el archivo fuera de la web: en Google Drive o un disco. Dejá esta pantalla abierta hasta que termine. Ojo: el archivo incluye datos de tus clientes, no lo compartas.
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={downloadBackup}
+          disabled={busy}
+          className="kulto-btn text-sm font-semibold px-4 py-2 rounded-full flex items-center gap-2"
+          style={{ background: "var(--sun)", color: "var(--ink)", opacity: busy ? 0.6 : 1 }}
+        >
+          {busy ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+          {busy ? "Trabajando…" : "Descargar copia de seguridad"}
+        </button>
+        <label
+          className="kulto-btn text-sm font-semibold px-4 py-2 rounded-full flex items-center gap-2 cursor-pointer"
+          style={{ background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)", opacity: busy ? 0.6 : 1, pointerEvents: busy ? "none" : "auto" }}
+        >
+          <Upload size={14} /> Restaurar desde un archivo
+          <input ref={restoreInput} type="file" accept=".zip,application/zip" className="hidden" onChange={(e) => restoreBackup(e.target.files?.[0])} />
+        </label>
+      </div>
+      {busy && (
+        <p className="text-xs" style={{ color: "var(--bone)" }}>
+          {status}{progress.total > 0 ? ` ${progress.done} de ${progress.total}` : ""}
+        </p>
+      )}
+      {result && <p className="text-xs" style={{ color: result.ok ? "var(--sun)" : "var(--signal)" }}>{result.msg}</p>}
+    </div>
+  );
+}
+
 function AdminImageOptimizer() {
   const [running, setRunning] = useState(false);
   const [status, setStatus] = useState("");
@@ -13453,6 +13770,29 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
     setBulkRolyMissing(notFound || []);
     setBulkRolyInput("");
   };
+  // Oculta (o vuelve a mostrar) de una vez todos los productos de un grupo,
+  // carpeta o categoría. Si ya están todos ocultos, los vuelve a mostrar.
+  const toggleHideList = async (list) => {
+    if (!list.length) return;
+    const allHidden = list.every((p) => p.hidden);
+    await applyBulk(list.map((p) => ({ id: p.id, patch: { hidden: !allHidden } })));
+  };
+  const HideListButton = ({ list, what }) => {
+    const allHidden = list.length > 0 && list.every((p) => p.hidden);
+    const someHidden = list.some((p) => p.hidden);
+    return (
+      <button
+        type="button"
+        disabled={movingSelected}
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleHideList(list); }}
+        className="kulto-btn text-[11px] font-semibold px-2.5 py-1 rounded-full flex items-center gap-1 shrink-0"
+        style={{ background: allHidden ? "var(--ink)" : "var(--sun)", color: allHidden ? "var(--bone)" : "var(--ink)", border: "1px solid var(--line)", opacity: movingSelected ? 0.6 : 1 }}
+        title={allHidden ? `Volver a mostrar ${what} a los clientes` : `Ocultar ${what} a los clientes`}
+      >
+        {allHidden ? <><Eye size={12} /> Mostrar</> : <><EyeOff size={12} /> Ocultar{someHidden ? " resto" : ""}</>}
+      </button>
+    );
+  };
   // Atajo: tilda todos los productos de una carpeta/grupo y abre el panel.
   const openColorsFor = (list) => {
     setSelectedProductIds(list.map((p) => p.id));
@@ -13866,6 +14206,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                         <span className="text-sm font-semibold flex-1" style={{ color: "var(--bone)" }}>{grp}</span>
                         <span className="text-xs" style={{ color: "var(--slate)" }}>{items.length} producto{items.length === 1 ? "" : "s"}</span>
                       </button>
+                      <HideListButton list={items} what="todo este grupo" />
                       <button
                         type="button"
                         onClick={() => openColorsFor(items)}
@@ -13929,6 +14270,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                               <span className="text-sm font-semibold flex-1" style={{ color: "var(--bone)" }}>{folderName || "Sin carpeta"}</span>
                               <span className="text-[11px]" style={{ color: "var(--slate)" }}>{fItems.length}</span>
                             </button>
+                            <HideListButton list={fItems} what="toda esta carpeta" />
                             <button
                               type="button"
                               onClick={() => openColorsFor(fItems)}
@@ -13980,9 +14322,10 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                                 style={{ accentColor: "var(--signal)" }}
                                 aria-label={`Seleccionar todo "${cat}"`}
                               />
-                              <p className="text-[11px] font-semibold" style={{ color: "var(--slate)" }}>
-                                {cat} · {catItems.length}
+                              <p className="text-[11px] font-semibold flex-1" style={{ color: "var(--slate)" }}>
+                                {cat} · {catItems.length}{catItems.some((p) => p.hidden) ? ` · ${catItems.filter((p) => p.hidden).length} oculto${catItems.filter((p) => p.hidden).length === 1 ? "" : "s"}` : ""}
                               </p>
+                              <HideListButton list={catItems} what={`todas las "${cat}"`} />
                             </label>
                             <div className="flex flex-col gap-2 p-2">
                         {catItems.map((p) => {
@@ -14176,6 +14519,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
       {tab === "resenas" && <AdminReviews reviews={reviews} onSave={onSaveReview} onDelete={onDeleteReview} onReorder={onReorderReview} />}
       {tab === "ajustes" && (
         <div className="flex flex-col gap-6">
+          <AdminBackupPanel />
           <AdminImageOptimizer />
           <AdminBrandSettings settings={settings} onSave={onSaveSettings} />
           <AdminBannerSettings settings={settings} groups={groups} onSave={onSaveSettings} />
