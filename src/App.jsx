@@ -5218,7 +5218,7 @@ function TemplateProductCard({ product, onSelect, bg }) {
           style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}
         >
           <div className="w-full flex-1 overflow-hidden flex items-center justify-center" style={{ background: bg || product.colors?.[0]?.hex || "var(--ink-3)" }}>
-            {thumb ? <FastImg loading="lazy" src={thumb} className="w-full h-full object-contain" alt={product.name} /> : <Shirt size={32} style={{ color: "rgba(243,239,230,0.4)" }} />}
+            {thumb ? <FastImg loading="lazy" src={thumb} className={`w-full h-full ${product.cardImage ? "object-cover" : "object-contain"}`} alt={product.name} /> : <Shirt size={32} style={{ color: "rgba(243,239,230,0.4)" }} />}
           </div>
           {product.audience && product.audience !== "unisex" && (
             <span
@@ -5304,7 +5304,7 @@ function cardBgFor(settings, keys, fallback) {
 // Tarjeta genérica que se da vuelta (categoría o estilo de prenda en
 // "Personalizar"): adelante la foto y el nombre, atrás la información — igual
 // que TemplateProductCard. "colors" es la lista de bolitas de color.
-function PickFlipCard({ title, thumb, bg, description, details = [], colors = [], onSelect, ctaLabel = "Elegir" }) {
+function PickFlipCard({ title, thumb, thumbFill = false, bg, description, details = [], colors = [], onSelect, ctaLabel = "Elegir" }) {
   const [flipped, setFlipped] = useState(false);
   const unique = [];
   colors.forEach((c) => { if (c?.hex && !unique.some((u) => u.hex === c.hex)) unique.push(c); });
@@ -5319,7 +5319,7 @@ function PickFlipCard({ title, thumb, bg, description, details = [], colors = []
           style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}
         >
           <div className="w-full flex-1 overflow-hidden flex items-center justify-center" style={{ background: bg || "var(--ink-3)" }}>
-            {thumb ? <FastImg loading="lazy" src={thumb} className="w-full h-full object-contain p-3" alt={title} /> : <Shirt size={32} style={{ color: "rgba(243,239,230,0.4)" }} />}
+            {thumb ? <FastImg loading="lazy" src={thumb} className={`w-full h-full ${thumbFill ? "object-cover" : "object-contain p-3"}`} alt={title} /> : <Shirt size={32} style={{ color: "rgba(243,239,230,0.4)" }} />}
           </div>
           <span
             className="font-semibold text-sm py-2 px-2"
@@ -5666,6 +5666,7 @@ function Wizard({ products, categories, settings, designLibrary, designFolders, 
                         key={g}
                         title={g}
                         thumb={thumb}
+                        thumbFill={!!settings.personalizeGroupCovers?.[g]}
                         bg={cardBgFor(settings, [`g:${g}`], sample?.colors?.[0]?.hex)}
                         description={gProducts.find((p) => p.description?.trim())?.description?.trim()}
                         details={[`${gProducts.length} modelo${gProducts.length === 1 ? "" : "s"} disponible${gProducts.length === 1 ? "" : "s"}${styleCount > 1 ? ` en ${styleCount} estilos` : ""}.`]}
@@ -5698,6 +5699,7 @@ function Wizard({ products, categories, settings, designLibrary, designFolders, 
                       key={sg}
                       title={sg}
                       thumb={thumb}
+                      thumbFill={!!settings.personalizeSubcategoryCovers?.[sg]}
                       bg={cardBgFor(settings, [`s:${sg}`, `g:${groupSel}`], sample?.colors?.[0]?.hex)}
                       description={sgProducts.find((p) => p.description?.trim())?.description?.trim()}
                       details={[
@@ -7293,7 +7295,7 @@ const CROP_FRAME_H = 375; // 4:5, matches how photos are shown across the site
 const CROP_OUT_W = 1000;
 const CROP_OUT_H = 1250;
 
-function CropModal({ source, onConfirm, onCancel, frameW = CROP_FRAME_W, frameH = CROP_FRAME_H, outW = CROP_OUT_W, outH = CROP_OUT_H, title = "Elegí qué parte de la foto se ve", fitMode = "cover" }) {
+function CropModal({ source, onConfirm, onCancel, frameW = CROP_FRAME_W, frameH = CROP_FRAME_H, outW = CROP_OUT_W, outH = CROP_OUT_H, title = "Elegí qué parte de la foto se ve", fitMode = "cover", maxZoom = 3 }) {
   const [img, setImg] = useState(null);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -7370,7 +7372,7 @@ function CropModal({ source, onConfirm, onCancel, frameW = CROP_FRAME_W, frameH 
   const endDrag = () => { dragState.current = null; };
 
   const handleZoom = (newZoom) => {
-    const z = Math.max(1, Math.min(3, newZoom));
+    const z = Math.max(1, Math.min(maxZoom, newZoom));
     if (!img) { setZoom(z); return; }
     const newScale = baseScale * z;
     const newW = img.naturalWidth * newScale;
@@ -7444,7 +7446,7 @@ function CropModal({ source, onConfirm, onCancel, frameW = CROP_FRAME_W, frameH 
           <input
             type="range"
             min="1"
-            max="3"
+            max={maxZoom}
             step="0.01"
             value={zoom}
             onChange={(e) => handleZoom(Number(e.target.value))}
@@ -8784,6 +8786,7 @@ const emptyTemplateColorDraft = { name: "", hex: "#E8452C", frontImage: null, ba
 // "Productos" (que además maneja ofertas, fotos genéricas, etc.).
 function AdminTemplateForm({ categories, templateProducts = [], onAddCategory, onSave, editing, onCancelEdit }) {
   const [draft, setDraft] = useState(emptyTemplateDraft);
+  const [cardCropSource, setCardCropSource] = useState(null);
   const [newCat, setNewCat] = useState("");
   const [customSize, setCustomSize] = useState("");
   const [saving, setSaving] = useState(false);
@@ -9251,11 +9254,11 @@ function AdminTemplateForm({ categories, templateProducts = [], onAddCategory, o
                   onChange={(e) => {
                     const file = e.target.files[0];
                     e.target.value = "";
-                    if (!file) return;
-                    fileToBase64(file, (b64) => setDraft((d) => ({ ...d, cardImage: b64 })), 1200, 0.88, file.type === "image/png" ? "image/png" : "image/jpeg");
+                    if (file) setCardCropSource(file);
                   }}
                 />
               </label>
+              {draft.cardImage && <button onClick={() => setCardCropSource(draft.cardImage)} className="kulto-btn text-xs" style={{ color: "var(--sun)" }}>Recortar</button>}
               {draft.cardImage && <button onClick={() => setDraft({ ...draft, cardImage: null })} className="kulto-btn text-xs" style={{ color: "var(--signal)" }}>Quitar</button>}
             </div>
             <p className="text-xs" style={{ color: "var(--slate)" }}>
@@ -9263,6 +9266,15 @@ function AdminTemplateForm({ categories, templateProducts = [], onAddCategory, o
             </p>
           </div>
         </div>
+        {cardCropSource && (
+          <CropModal
+            source={cardCropSource}
+            frameW={300} frameH={345} outW={1000} outH={1150} maxZoom={4}
+            title="Encuadrá la foto como se va a ver en la tarjeta: arrastrala y usá el zoom"
+            onConfirm={(b64) => { setDraft((d) => ({ ...d, cardImage: b64 })); setCardCropSource(null); }}
+            onCancel={() => setCardCropSource(null)}
+          />
+        )}
       </div>
       <div>
         <p className="text-sm font-semibold mb-2" style={{ color: "var(--bone)" }}>Colores ({draft.colors.length})</p>
@@ -14021,15 +14033,19 @@ function AdminPersonalizeGroupImages({ templateProducts = [], settings, onSave }
   const styleNames = Array.from(new Set(templateProducts.map((p) => p.subcategory).filter(Boolean)));
   const [savedKey, setSavedKey] = useState(null);
 
+  const [cropJob, setCropJob] = useState(null);
+  // Al elegir una foto se abre el recorte (mismo marco que la tarjeta del
+  // cliente): se mueve y se hace zoom hasta encuadrar lo que se quiere ver.
   const upload = (settingKey, name, file) => {
     if (!file) return;
-    const isPng = file.type === "image/png";
-    const current = settings[settingKey] || {};
-    fileToBase64(file, async (b64) => {
-      await onSave({ [settingKey]: { ...current, [name]: b64 } });
-      setSavedKey(`${settingKey}:${name}`);
-      setTimeout(() => setSavedKey(null), 1500);
-    }, 1200, 0.88, isPng ? "image/png" : "image/jpeg");
+    setCropJob({ settingKey, name, source: file });
+  };
+  const confirmCrop = async (b64) => {
+    const { settingKey, name } = cropJob;
+    setCropJob(null);
+    await onSave({ [settingKey]: { ...(settings[settingKey] || {}), [name]: b64 } });
+    setSavedKey(`${settingKey}:${name}`);
+    setTimeout(() => setSavedKey(null), 1500);
   };
   const remove = async (settingKey, name) => {
     const next = { ...(settings[settingKey] || {}) };
@@ -14064,6 +14080,7 @@ function AdminPersonalizeGroupImages({ templateProducts = [], settings, onSave }
                 {img ? "Cambiar" : "Elegir"}
                 <input type="file" accept="image/png,image/jpeg" className="hidden" onChange={(e) => { upload(settingKey, g, e.target.files[0]); e.target.value = ""; }} />
               </label>
+              {img && <button onClick={() => setCropJob({ settingKey, name: g, source: img })} className="kulto-btn text-[10px]" style={{ color: "var(--sun)" }}>Recortar</button>}
               {img && <button onClick={() => remove(settingKey, g)} className="kulto-btn text-[10px]" style={{ color: "var(--signal)" }}>Quitar</button>}
             </div>
             {savedKey === `${settingKey}:${g}` && <span className="text-[10px]" style={{ color: "var(--sun)" }}>Guardado ✓</span>}
@@ -14094,6 +14111,15 @@ function AdminPersonalizeGroupImages({ templateProducts = [], settings, onSave }
       <p className="text-xs pt-3" style={{ borderTop: "1px solid var(--line)", color: "var(--slate)" }}>
         3. La foto de cada <b>modelo</b> (la última tarjeta) se elige dentro de cada prenda, tocando en la lista de abajo el lápiz de editar → «Foto de la tarjeta».
       </p>
+      {cropJob && (
+        <CropModal
+          source={cropJob.source}
+          frameW={300} frameH={345} outW={1000} outH={1150} maxZoom={4}
+          title="Encuadrá la foto como se va a ver en la tarjeta: arrastrala y usá el zoom"
+          onConfirm={confirmCrop}
+          onCancel={() => setCropJob(null)}
+        />
+      )}
     </div>
   );
 }
@@ -16558,6 +16584,7 @@ function RewardsWidget({ settings, customer, onLogin, onRedeem, liftForMobileBar
   const [busyId, setBusyId] = useState(null);
   const [msg, setMsg] = useState(null);
   const [copied, setCopied] = useState("");
+  const [hover, setHover] = useState(false);
   if (settings?.rewardsEnabled === false || settings?.loyaltyEnabled === false) return null;
   const accent = settings?.rewardsColor || "#E63946";
   const label = settings?.rewardsButtonLabel || "Recompensas";
@@ -16588,10 +16615,17 @@ function RewardsWidget({ settings, customer, onLogin, onRedeem, liftForMobileBar
     return (
       <button
         onClick={() => setOpen(true)}
-        className={`kulto-btn fixed right-5 z-30 rounded-full px-4 h-12 flex items-center gap-2 font-semibold text-sm ${bottomClass}`}
-        style={{ background: accent, color: "#fff", boxShadow: "0 8px 20px rgba(0,0,0,0.4)" }}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+        onFocus={() => setHover(true)}
+        onBlur={() => setHover(false)}
+        aria-label={label}
+        title={label}
+        className={`kulto-btn fixed right-5 z-30 rounded-full flex items-center font-semibold text-sm ${bottomClass}`}
+        style={{ background: accent, color: "#fff", boxShadow: "0 8px 20px rgba(0,0,0,0.4)", height: 48, paddingLeft: 14, paddingRight: hover ? 18 : 14, transition: "padding 0.25s ease" }}
       >
-        <Gift size={18} /> {label}
+        <Gift size={20} className="shrink-0" />
+        <span style={{ display: "inline-block", overflow: "hidden", whiteSpace: "nowrap", maxWidth: hover ? 180 : 0, opacity: hover ? 1 : 0, marginLeft: hover ? 8 : 0, transition: "max-width 0.3s ease, opacity 0.25s ease, margin 0.3s ease" }}>{label}</span>
       </button>
     );
   }
