@@ -3214,6 +3214,60 @@ function ProductModal({ product, allProducts, settings, onClose, onSwitchProduct
 /*  Home                                                                */
 /* ------------------------------------------------------------------ */
 
+// Contorno para los textos que van encima de una foto (banners): se arma con
+// sombras sin desenfoque en un círculo alrededor de cada letra, así se ve igual
+// en todos los navegadores. width = grosor en píxeles (0 = sin contorno).
+function textOutlineStyle(width, color) {
+  const w = Number(width) || 0;
+  if (w <= 0) return {};
+  const c = color || "#000000";
+  const shadows = [];
+  const ring = (r, steps) => {
+    for (let i = 0; i < steps; i++) {
+      const a = (2 * Math.PI * i) / steps;
+      shadows.push(`${(Math.cos(a) * r).toFixed(2)}px ${(Math.sin(a) * r).toFixed(2)}px 0 ${c}`);
+    }
+  };
+  ring(w, Math.max(16, Math.round(w * 8)));
+  if (w > 2) ring(w / 2, 16);
+  return { textShadow: shadows.join(", ") };
+}
+
+// Texto largo recortado a unas pocas líneas con "Ver más…" / "Ver menos": así
+// una descripción larga no estira ni desarma el banner. El botón solo aparece
+// si el texto de verdad no entra.
+function ClampText({ text, lines = 3, className = "", style = {}, buttonStyle = {} }) {
+  const [expanded, setExpanded] = useState(false);
+  const [overflow, setOverflow] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || expanded) return undefined;
+    const check = () => setOverflow(el.scrollHeight > el.clientHeight + 1);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, [text, lines, expanded]);
+  const clampStyle = expanded ? {} : { display: "-webkit-box", WebkitLineClamp: lines, WebkitBoxOrient: "vertical", overflow: "hidden" };
+  const stop = (e) => e.stopPropagation();
+  return (
+    <>
+      <p ref={ref} className={className} style={{ ...style, ...clampStyle }}>{text}</p>
+      {(overflow || expanded) && (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); e.preventDefault(); setExpanded((v) => !v); }}
+          onKeyDown={stop}
+          className="kulto-btn text-xs font-semibold underline w-fit"
+          style={{ color: "var(--sun)", ...buttonStyle }}
+        >
+          {expanded ? "Ver menos" : "Ver más…"}
+        </button>
+      )}
+    </>
+  );
+}
+
 function Hero({ onGoCatalog, onGoWizard, onSearch, heroTitle, heroSubtitle, heroImage, heroImages, banners = [] }) {
   const [query, setQuery] = useState("");
   const submit = (e) => {
@@ -3265,12 +3319,12 @@ function Hero({ onGoCatalog, onGoWizard, onSearch, heroTitle, heroSubtitle, hero
       <div className="max-w-6xl mx-auto px-4 md:px-6 py-14 md:py-24 grid md:grid-cols-2 gap-10 items-center">
         <div>
           <div key={`text-${slide}`} className="kulto-hero-fade">
-            <h1 className="kulto-display leading-[0.95] text-4xl sm:text-5xl md:text-6xl whitespace-pre-line" style={{ color: "var(--bone)" }}>
+            <h1 className="kulto-display leading-[0.95] text-4xl sm:text-5xl md:text-6xl whitespace-pre-line" style={{ color: "var(--bone)", ...textOutlineStyle(current?.textOutlineWidth, current?.textOutlineColor) }}>
               {title}
             </h1>
-            <p className="mt-5 text-base md:text-lg max-w-md" style={{ color: "var(--slate)" }}>
-              {subtitle}
-            </p>
+            <div className="mt-5 flex flex-col gap-1 max-w-md">
+              <ClampText text={subtitle} lines={4} className="text-base md:text-lg" style={{ color: "var(--slate)", ...textOutlineStyle(current?.textOutlineWidth, current?.textOutlineColor) }} buttonStyle={textOutlineStyle(current?.textOutlineWidth, current?.textOutlineColor)} />
+            </div>
           </div>
           <form onSubmit={submit} className="mt-6 max-w-sm relative">
             <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2" style={{ color: "var(--slate)" }} />
@@ -3436,11 +3490,11 @@ function PromoBanner({ banner, onGoCatalog, onGoWizard }) {
         <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, rgba(21,19,26,0) 45%, rgba(21,19,26,0.88))" }} />
         <div className="relative w-full p-5 flex flex-col gap-1">
           {banner.title && (
-            <h3 className="kulto-display text-xl md:text-2xl leading-[0.95] whitespace-pre-line" style={{ color: "var(--bone)" }}>
+            <h3 className="kulto-display text-xl md:text-2xl leading-[0.95] whitespace-pre-line" style={{ color: "var(--bone)", ...textOutlineStyle(banner.textOutlineWidth, banner.textOutlineColor) }}>
               {banner.title}
             </h3>
           )}
-          {banner.subtitle && <p className="text-xs md:text-sm" style={{ color: "var(--bone)" }}>{banner.subtitle}</p>}
+          {banner.subtitle && <ClampText text={banner.subtitle} lines={3} className="text-xs md:text-sm" style={{ color: "var(--bone)", ...textOutlineStyle(banner.textOutlineWidth, banner.textOutlineColor) }} buttonStyle={textOutlineStyle(banner.textOutlineWidth, banner.textOutlineColor)} />}
         </div>
       </div>
     );
@@ -3474,11 +3528,11 @@ function PromoBanner({ banner, onGoCatalog, onGoWizard }) {
       <div className="relative w-full max-w-6xl mx-auto px-4 md:px-6 py-10">
         <div className="flex flex-col gap-3 max-w-lg">
           {banner.title && (
-            <h3 className="kulto-display text-2xl md:text-4xl leading-[0.95] whitespace-pre-line" style={{ color: "var(--bone)" }}>
+            <h3 className="kulto-display text-2xl md:text-4xl leading-[0.95] whitespace-pre-line" style={{ color: "var(--bone)", ...textOutlineStyle(banner.textOutlineWidth, banner.textOutlineColor) }}>
               {banner.title}
             </h3>
           )}
-          {banner.subtitle && <p className="text-sm md:text-base" style={{ color: "var(--bone)" }}>{banner.subtitle}</p>}
+          {banner.subtitle && <ClampText text={banner.subtitle} lines={3} className="text-sm md:text-base" style={{ color: "var(--bone)", ...textOutlineStyle(banner.textOutlineWidth, banner.textOutlineColor) }} buttonStyle={textOutlineStyle(banner.textOutlineWidth, banner.textOutlineColor)} />}
           {clickable && (
             <span className="kulto-btn rounded-full px-6 py-3 font-semibold w-fit mt-1 inline-block" style={{ background: "var(--signal)", color: "var(--bone)" }}>
               {banner.ctaLabel || "Ver catálogo"}
@@ -10842,6 +10896,28 @@ function AdminBannerSettings({ settings, groups = [], onSave }) {
           <div>
             <label className="text-xs mb-1 block" style={{ color: "var(--bone)" }}>Subtítulo</label>
             <textarea value={draft.subtitle} onChange={(e) => setDraft({ ...draft, subtitle: e.target.value })} rows={2} className="w-full rounded-xl p-3 text-sm" style={inputStyle} />
+          </div>
+          <div>
+            <label className="text-xs mb-1 block" style={{ color: "var(--bone)" }}>Contorno del texto (para que se lea sobre fotos claras o con mucho detalle)</label>
+            <div className="flex items-center gap-3 flex-wrap">
+              <input
+                type="range"
+                min="0"
+                max="8"
+                step="0.5"
+                value={draft.textOutlineWidth ?? 0}
+                onChange={(e) => setDraft({ ...draft, textOutlineWidth: Number(e.target.value) })}
+                className="flex-1 min-w-[140px]"
+                aria-label="Grosor del contorno"
+              />
+              <span className="text-xs w-20 text-right" style={{ color: "var(--slate)" }}>{(draft.textOutlineWidth ?? 0) > 0 ? `Grosor ${draft.textOutlineWidth} px` : "Sin contorno"}</span>
+              <input type="color" value={draft.textOutlineColor || "#000000"} onChange={(e) => setDraft({ ...draft, textOutlineColor: e.target.value })} className="w-12 h-9 rounded" style={{ background: "transparent" }} aria-label="Color del contorno" />
+              <span className="text-xs" style={{ color: "var(--slate)" }}>{draft.textOutlineColor || "#000000"}</span>
+            </div>
+            <div className="mt-2 rounded-xl p-4 overflow-hidden" style={{ background: "var(--ink)", backgroundImage: draft.image ? `url("${draft.image}")` : "none", backgroundSize: "cover", backgroundPosition: "center", border: "1px solid var(--line)" }}>
+              <p className="kulto-display text-2xl leading-tight whitespace-pre-line" style={{ color: "var(--bone)", ...textOutlineStyle(draft.textOutlineWidth, draft.textOutlineColor) }}>{draft.title || "Título de ejemplo"}</p>
+              <p className="text-sm mt-1" style={{ color: "var(--bone)", ...textOutlineStyle(draft.textOutlineWidth, draft.textOutlineColor) }}>{draft.subtitle || "Así se va a ver el texto sobre tu foto."}</p>
+            </div>
           </div>
           <div>
             <label className="text-xs mb-1 block" style={{ color: "var(--bone)" }}>Imagen (PNG o JPG)</label>
