@@ -1,10 +1,11 @@
 // Vercel serverless function. Runs on the server, never in the browser, so
-// the Anthropic API key stays secret. Set ANTHROPIC_API_KEY in Vercel's
-// Environment Variables (Project -> Settings -> Environment Variables) —
-// do NOT prefix it with VITE_, or it would be bundled into the public site.
+// the API key stays secret. Set the key in Vercel's Environment Variables
+// (Project -> Settings -> Environment Variables) — do NOT prefix it with VITE_.
 //
-// Get a key at https://console.anthropic.com (this is a paid API — each
-// call costs a fraction of a cent, but it is not free).
+// Opción GRATIS: GEMINI_API_KEY (clave gratuita en https://aistudio.google.com).
+// Opción de pago: ANTHROPIC_API_KEY (https://console.anthropic.com).
+// Si están las dos, se usa Gemini (gratis). Opcional: GEMINI_MODEL para
+// cambiar el modelo si Google renombra el actual.
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -12,10 +13,11 @@ export default async function handler(req, res) {
     return;
   }
 
+  const geminiKey = process.env.GEMINI_API_KEY;
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
+  if (!geminiKey && !apiKey) {
     res.status(500).json({
-      error: "Falta configurar ANTHROPIC_API_KEY en el servidor. Mirá el README para activarlo.",
+      error: "Falta configurar GEMINI_API_KEY (gratis) o ANTHROPIC_API_KEY en el servidor.",
     });
     return;
   }
@@ -46,6 +48,43 @@ export default async function handler(req, res) {
       '"description": "una descripción breve de 1 a 2 frases en español: tipo de prenda, estilo, posible material o corte"}\n' +
       "Si la imagen no muestra claramente un producto de ropa o accesorio, hacé tu mejor estimación igual.";
 
+    const parseAndReply = (text) => {
+      const clean = String(text || "").trim().replace(/^```json/i, "").replace(/^```/, "").replace(/```$/, "").trim();
+      let parsed;
+      try {
+        parsed = JSON.parse(clean);
+      } catch {
+        res.status(502).json({ error: "No se pudo interpretar la respuesta de la IA." });
+        return;
+      }
+      res.status(200).json({
+        name: typeof parsed.name === "string" ? parsed.name : "",
+        category: typeof parsed.category === "string" ? parsed.category : "",
+        description: typeof parsed.description === "string" ? parsed.description : "",
+      });
+    };
+
+    if (geminiKey) {
+      const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+      const gRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey },
+        body: JSON.stringify({
+          contents: [{ parts: [{ inline_data: { mime_type: mediaType, data: base64Data } }, { text: prompt }] }],
+          generationConfig: { responseMimeType: "application/json", maxOutputTokens: 600 },
+        }),
+      });
+      const gData = await gRes.json().catch(() => ({}));
+      if (!gRes.ok) {
+        const msg = gData?.error?.message || "La IA no pudo procesar la imagen.";
+        res.status(502).json({ error: gRes.status === 429 ? "Se alcanzó el límite gratuito por ahora. Probá en un minuto." : msg });
+        return;
+      }
+      const gText = (gData.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join("");
+      parseAndReply(gText);
+      return;
+    }
+
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -54,7 +93,7 @@ export default async function handler(req, res) {
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-5",
+        model: "claude-sonnet-5-5",
         max_tokens: 400,
         messages: [
           {
@@ -75,22 +114,8 @@ export default async function handler(req, res) {
       return;
     }
 
-    const text = (data.content || []).map((c) => c.text || "").join("").trim();
-    const clean = text.replace(/^```json/i, "").replace(/```$/, "").trim();
-
-    let parsed;
-    try {
-      parsed = JSON.parse(clean);
-    } catch {
-      res.status(502).json({ error: "No se pudo interpretar la respuesta de la IA." });
-      return;
-    }
-
-    res.status(200).json({
-      name: typeof parsed.name === "string" ? parsed.name : "",
-      category: typeof parsed.category === "string" ? parsed.category : "",
-      description: typeof parsed.description === "string" ? parsed.description : "",
-    });
+    const text = (data.content || []).map((c) => c.text || "").join("");
+    parseAndReply(text);
   } catch (err) {
     res.status(500).json({ error: "Error inesperado analizando la imagen." });
   }
