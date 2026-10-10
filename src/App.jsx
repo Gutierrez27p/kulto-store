@@ -16407,12 +16407,13 @@ function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, cus
   return (
     <header className="sticky top-0 z-40" style={{ background: "var(--ink)", borderBottom: "1px solid var(--line)", paddingTop: "env(safe-area-inset-top)" }}>
       <div className="max-w-6xl mx-auto px-4 md:px-6 flex items-center justify-between h-16">
+        <div className="flex items-center min-w-0">
         {page !== "home" && onBack && (
           <button onClick={onBack} aria-label="Volver atrás" className="kulto-btn md:hidden -ml-2 mr-1 w-10 h-10 shrink-0 rounded-full flex items-center justify-center" style={{ color: "var(--bone)", background: "var(--ink-2)", border: "1px solid var(--line)" }}>
             <ChevronLeft size={22} />
           </button>
         )}
-        <button onClick={() => go("home")} className="flex items-center gap-2.5 mr-auto">
+        <button onClick={() => go("home")} className="flex items-center gap-2.5">
           {logoImage ? (
             <>
               <img src={logoImage} alt={logoText || "Logo"} className="h-9 w-9 object-contain" />
@@ -16422,6 +16423,7 @@ function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, cus
             <span className="kulto-display text-xl tracking-wide" style={{ color: "var(--bone)" }}>{logoText || "KULTO"}</span>
           )}
         </button>
+        </div>
         <nav className="hidden md:flex items-center gap-8">
           <NavLink label="Inicio" active={page === "home"} onClick={() => go("home")} />
           <div ref={catalogMenuRef}>
