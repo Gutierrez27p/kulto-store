@@ -1781,7 +1781,10 @@ const DEFAULT_SETTINGS = {
   productionTimeNormal: "3-5 días",
   signupDiscountEnabled: true,
   signupPopupEnabled: true,
-  signupDiscountPercent: 10,
+  signupDiscountPercent: 15,
+  instagramDiscountEnabled: true,
+  instagramDiscountPercent: 20,
+  instagramAutoTrust: false,
   loyaltyEnabled: true,
   loyaltyPointsPerItem: 1,
   loyaltyRewardThreshold: 5,
@@ -2054,6 +2057,29 @@ async function removeContactMessage(id) {
   let ids = idxRaw ? JSON.parse(idxRaw) : [];
   ids = ids.filter((x) => x !== id);
   await storageSet("kulto:contact-index", JSON.stringify(ids), true);
+}
+
+// Descuento de bienvenida con bonus por seguir en Instagram. Instagram no deja
+// que una web compruebe sola quién sigue una cuenta, así que el cliente declara
+// su usuario y el dueño lo confirma en el panel (Clientes). Con "confiar" activo
+// el bonus se da apenas lo declara. El bonus nunca supera el porcentaje
+// "con Instagram" que fije el admin — ese es el tope.
+function instagramHandleFromUrl(url) {
+  const m = String(url || "").match(/instagram\.com\/([^/?#]+)/i);
+  return m ? m[1] : "";
+}
+function normalizeIgHandle(s) {
+  return String(s || "").trim().replace(/^https?:\/\/(www\.)?instagram\.com\//i, "").replace(/^@/, "").replace(/[/?#].*$/, "").toLowerCase();
+}
+function instagramBonusActive(settings, customer) {
+  if (!settings?.instagramDiscountEnabled || !customer) return false;
+  return customer.instagramStatus === "confirmed" || (!!settings.instagramAutoTrust && customer.instagramStatus === "pending");
+}
+function getWelcomePercent(settings, customer) {
+  const base = Number(settings?.signupDiscountPercent) || 0;
+  if (!settings?.instagramDiscountEnabled) return base;
+  const ig = Number(settings.instagramDiscountPercent) || 0;
+  return instagramBonusActive(settings, customer) ? Math.max(base, ig) : base;
 }
 
 function genDiscountCode(percent) {
@@ -6296,10 +6322,11 @@ function CartDrawer({ cart, onClose, onUpdateQty, onRemove, onCheckout, customer
   const promoActive = !!promoEval && promoEval.ok;
   const promoDiscount = promoActive ? promoEval.discount : 0;
   const shippingCost = promoActive && promoEval.freeShipping ? 0 : shippingCostBase;
+  const welcomePercent = getWelcomePercent(settings, customer);
   const eligibleForSignupDiscount = !!customer && !!settings?.signupDiscountEnabled && !customer.firstDiscountUsed;
   // El código de descuento reemplaza al de bienvenida (no se suman): así el
   // descuento de bienvenida no se "gasta" si el cliente usa un código mejor.
-  const discountAmount = eligibleForSignupDiscount && !(promoActive && promoDiscount > 0) ? subtotal * ((settings.signupDiscountPercent || 0) / 100) : 0;
+  const discountAmount = eligibleForSignupDiscount && !(promoActive && promoDiscount > 0) ? subtotal * (welcomePercent / 100) : 0;
   const total = Math.max(0, subtotal - discountAmount - promoDiscount) + shippingCost;
   const addressOk = deliveryMethod !== "envio" || (address.street.trim() && address.city.trim() && address.state.trim() && address.postalCode.trim());
   const canCheckout = emailOk && addressOk;
@@ -6541,7 +6568,7 @@ function CartDrawer({ cart, onClose, onUpdateQty, onRemove, onCheckout, customer
                 </div>
                 {discountAmount > 0 && (
                   <div className="flex items-center justify-between" style={{ color: "var(--sun)" }}>
-                    <span>Descuento de bienvenida ({settings.signupDiscountPercent}%)</span>
+                    <span>Descuento de bienvenida ({welcomePercent}%)</span>
                     <span>-{formatPrice(discountAmount)}</span>
                   </div>
                 )}
@@ -6980,7 +7007,7 @@ function SignupPromoPopup({ settings, customer, page, onSignup }) {
           </button>
           <h3 className="text-2xl font-bold leading-tight pr-6" style={{ color: "var(--bone)" }}>¡Regístrate y consigue tu {percent}%!</h3>
           <p className="text-sm" style={{ color: "var(--slate)" }}>
-            Crea tu cuenta gratis y el {percent}% de descuento se aplica solo en tu primera compra. Además, sumas puntos con cada pedido.
+            Crea tu cuenta gratis y el {percent}% de descuento se aplica solo en tu primera compra{settings?.instagramDiscountEnabled ? `, y ${settings.instagramDiscountPercent}% si además nos sigues en Instagram` : ""}. Además, sumas puntos con cada pedido.
           </p>
           <div className="flex">
             <input
@@ -7016,8 +7043,11 @@ function SignupPromoPopup({ settings, customer, page, onSignup }) {
   );
 }
 
-function AccountPage({ registerIntent, customer, onRegister, onLogin, onLogout, onVerifyEmail, onResendVerification, onRequestPasswordReset, onResetPassword, settings, initialResetEmail, initialResetCode }) {
+function AccountPage({ registerIntent, customer, onClaimInstagram, onRegister, onLogin, onLogout, onVerifyEmail, onResendVerification, onRequestPasswordReset, onResetPassword, settings, initialResetEmail, initialResetCode }) {
   const [mode, setMode] = useState("login");
+  const [igInput, setIgInput] = useState("");
+  const [igBusy, setIgBusy] = useState(false);
+  const [igError, setIgError] = useState("");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -7063,8 +7093,54 @@ function AccountPage({ registerIntent, customer, onRegister, onLogin, onLogout, 
             <p className="text-sm" style={{ color: customer.firstDiscountUsed ? "var(--slate)" : "var(--sun)" }}>
               {customer.firstDiscountUsed
                 ? "Ya usaste tu descuento de bienvenida."
-                : `Tenés ${settings.signupDiscountPercent}% de descuento disponible — se aplica automáticamente en tu próxima compra.`}
+                : `Tenés ${getWelcomePercent(settings, customer)}% de descuento disponible — se aplica automáticamente en tu próxima compra.`}
             </p>
+          )}
+          {settings?.signupDiscountEnabled && settings?.instagramDiscountEnabled && !customer.firstDiscountUsed && (
+            <div className="rounded-xl p-3 flex flex-col gap-2" style={{ background: "var(--ink-3)", border: "1px solid var(--line)" }}>
+              {instagramBonusActive(settings, customer) ? (
+                <p className="text-sm" style={{ color: "var(--sun)" }}>
+                  ¡Gracias por seguirnos{customer.instagramHandle ? ` (@${customer.instagramHandle})` : ""}! Tu descuento en la primera compra es de {getWelcomePercent(settings, customer)}%.
+                </p>
+              ) : customer.instagramStatus === "pending" ? (
+                <p className="text-sm" style={{ color: "var(--slate)" }}>
+                  Estamos verificando que nos seguís (@{customer.instagramHandle}). Apenas lo confirmemos, tu descuento sube a {Number(settings.instagramDiscountPercent) || 0}%.
+                </p>
+              ) : (
+                <>
+                  <p className="text-sm font-semibold" style={{ color: "var(--bone)" }}>
+                    Seguinos en Instagram y tu descuento sube a {Number(settings.instagramDiscountPercent) || 0}%
+                  </p>
+                  {customer.instagramStatus === "rejected" && (
+                    <p className="text-xs" style={{ color: "var(--signal)" }}>No pudimos verlo entre nuestros seguidores. Seguinos y probá de nuevo con tu usuario.</p>
+                  )}
+                  {settings.socialInstagram && (
+                    <a href={settings.socialInstagram} target="_blank" rel="noreferrer" className="kulto-btn text-sm font-semibold rounded-full py-2 px-4 w-fit flex items-center gap-2" style={{ background: "var(--signal)", color: "var(--bone)" }}>
+                      <Instagram size={15} /> Seguir a @{instagramHandleFromUrl(settings.socialInstagram) || "kulto"}
+                    </a>
+                  )}
+                  <div className="flex gap-2">
+                    <input value={igInput} onChange={(e) => setIgInput(e.target.value)} placeholder="Tu usuario de Instagram (@usuario)" autoComplete="off" className="flex-1 min-w-0 rounded-xl p-2.5 text-sm" style={{ background: "var(--ink-2)", color: "var(--bone)", border: "1px solid var(--line)" }} />
+                    <button
+                      disabled={igBusy || !igInput.trim()}
+                      onClick={async () => {
+                        setIgError("");
+                        setIgBusy(true);
+                        const r = await onClaimInstagram(igInput);
+                        setIgBusy(false);
+                        if (!r.ok) setIgError(r.error);
+                        else setIgInput("");
+                      }}
+                      className="kulto-btn rounded-xl px-4 text-sm font-semibold shrink-0"
+                      style={{ background: igInput.trim() ? "var(--sun)" : "var(--ink-2)", color: igInput.trim() ? "var(--ink)" : "var(--slate)" }}
+                    >
+                      {igBusy ? <Loader2 size={14} className="animate-spin" /> : "Ya los sigo"}
+                    </button>
+                  </div>
+                  {igError && <p className="text-xs" style={{ color: "var(--signal)" }}>{igError}</p>}
+                </>
+              )}
+            </div>
           )}
           {settings?.loyaltyEnabled && (
             <div>
@@ -7091,7 +7167,7 @@ function AccountPage({ registerIntent, customer, onRegister, onLogin, onLogout, 
     if (!email.trim() || !password) { setError("Completá email y contraseña."); return; }
     if (!isValidEmail(email.trim())) { setError("Ingresá un email válido."); return; }
     setLoading(true);
-    const result = mode === "register" ? await onRegister({ name, email, password }) : await onLogin({ email, password });
+    const result = mode === "register" ? await onRegister({ name, email, password, instagram: igInput }) : await onLogin({ email, password });
     setLoading(false);
     if (result.needsVerification) {
       setMode("verify");
@@ -7249,12 +7325,20 @@ function AccountPage({ registerIntent, customer, onRegister, onLogin, onLogout, 
       </div>
       {mode === "register" && settings?.signupDiscountEnabled && (
         <p className="text-xs mb-3 rounded-xl p-3" style={{ background: "var(--ink-2)", color: "var(--sun)" }}>
-          Registrate y llevate {settings.signupDiscountPercent}% de descuento en tu primera compra.
+          Registrate y llevate {settings.signupDiscountPercent}% de descuento en tu primera compra{settings.instagramDiscountEnabled ? ` (y ${settings.instagramDiscountPercent}% si además nos seguís en Instagram)` : ""}.
         </p>
       )}
       <div className="flex flex-col gap-3">
         {mode === "register" && (
           <input placeholder="Tu nombre" value={name} onChange={(e) => setName(e.target.value)} className="rounded-xl p-3 text-sm" style={inputStyle} />
+        )}
+        {mode === "register" && settings?.signupDiscountEnabled && settings?.instagramDiscountEnabled && (
+          <div className="flex flex-col gap-1">
+            <input placeholder="Tu usuario de Instagram (opcional, ej: @tuusuario)" value={igInput} onChange={(e) => setIgInput(e.target.value)} autoComplete="off" className="rounded-xl p-3 text-sm" style={inputStyle} />
+            <p className="text-xs" style={{ color: "var(--slate)" }}>
+              Si nos seguís en Instagram{settings.socialInstagram ? ` (@${instagramHandleFromUrl(settings.socialInstagram) || "kulto"})` : ""}, escribí tu usuario: lo verificamos y tu descuento sube a {Number(settings.instagramDiscountPercent) || 0}%.
+            </p>
+          </div>
         )}
         <input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} className="rounded-xl p-3 text-sm" style={inputStyle} />
         <input type="password" placeholder="Contraseña" value={password} onChange={(e) => setPassword(e.target.value)} className="rounded-xl p-3 text-sm" style={inputStyle} />
@@ -10184,7 +10268,8 @@ function AdminGroupManager({ groups, onRename, onDelete }) {
   return <AdminTagManager title="Grupos / temáticas" items={groups} noun="grupo" onRename={onRename} onDelete={onDelete} />;
 }
 
-function AdminCustomers({ customers, onAdjustPoints, loyaltyThreshold, isOwner, onSetAdminPermissions, onDeleteCustomer, onCreateCustomer, onUpdateCustomerInfo, onSendPasswordHelp }) {
+function AdminCustomers({ customers, onAdjustPoints, loyaltyThreshold, isOwner, onSetAdminPermissions, onDeleteCustomer, onCreateCustomer, onUpdateCustomerInfo, onSetInstagramStatus, instagramOn, onSendPasswordHelp }) {
+  const settings_instagramOn = !!instagramOn;
   const [editingEmail, setEditingEmail] = useState(null);
   const [editValue, setEditValue] = useState("");
   const [permissionsOpenFor, setPermissionsOpenFor] = useState(null);
@@ -10319,6 +10404,20 @@ function AdminCustomers({ customers, onAdjustPoints, loyaltyThreshold, isOwner, 
                   <p className="text-xs truncate" style={{ color: "var(--slate)" }}>
                     {c.email} · {c.firstDiscountUsed ? "Ya usó su descuento" : "Descuento de bienvenida disponible"}
                   </p>
+                  {settings_instagramOn && c.instagramHandle && (
+                    <p className="text-xs flex flex-wrap items-center gap-2 mt-0.5" style={{ color: "var(--slate)" }}>
+                      <a href={`https://instagram.com/${c.instagramHandle}`} target="_blank" rel="noreferrer" className="underline" style={{ color: "var(--sun)" }}>@{c.instagramHandle}</a>
+                      <span>
+                        {c.instagramStatus === "confirmed" ? "✓ sigue la cuenta" : c.instagramStatus === "rejected" ? "no lo sigue" : "pendiente de verificar"}
+                      </span>
+                      {c.instagramStatus !== "confirmed" && (
+                        <button onClick={() => onSetInstagramStatus(c.email, "confirmed")} className="kulto-btn font-semibold px-2 py-0.5 rounded-full" style={{ background: "var(--sun)", color: "var(--ink)" }}>Confirmar que nos sigue</button>
+                      )}
+                      {c.instagramStatus !== "rejected" && (
+                        <button onClick={() => onSetInstagramStatus(c.email, "rejected")} className="kulto-btn px-2 py-0.5 rounded-full" style={{ background: "var(--ink-3)", color: "var(--slate)" }}>No me sigue</button>
+                      )}
+                    </p>
+                  )}
                 </div>
                 <button
                   onClick={() => sendPasswordHelp(c)}
@@ -13589,6 +13688,9 @@ function AdminLoyaltySettings({ settings, onSave }) {
   const [signupEnabled, setSignupEnabled] = useState(settings.signupDiscountEnabled ?? true);
   const [signupPercent, setSignupPercent] = useState(settings.signupDiscountPercent ?? 10);
   const [popupEnabled, setPopupEnabled] = useState(settings.signupPopupEnabled ?? true);
+  const [igEnabled, setIgEnabled] = useState(settings.instagramDiscountEnabled ?? true);
+  const [igPercent, setIgPercent] = useState(settings.instagramDiscountPercent ?? 20);
+  const [igTrust, setIgTrust] = useState(settings.instagramAutoTrust ?? false);
   const [loyaltyEnabled, setLoyaltyEnabled] = useState(settings.loyaltyEnabled ?? true);
   const [pointsPerItem, setPointsPerItem] = useState(settings.loyaltyPointsPerItem ?? 1);
   const [threshold, setThreshold] = useState(settings.loyaltyRewardThreshold ?? 5);
@@ -13599,6 +13701,9 @@ function AdminLoyaltySettings({ settings, onSave }) {
     setSignupEnabled(settings.signupDiscountEnabled ?? true);
     setSignupPercent(settings.signupDiscountPercent ?? 10);
     setPopupEnabled(settings.signupPopupEnabled ?? true);
+    setIgEnabled(settings.instagramDiscountEnabled ?? true);
+    setIgPercent(settings.instagramDiscountPercent ?? 20);
+    setIgTrust(settings.instagramAutoTrust ?? false);
     setLoyaltyEnabled(settings.loyaltyEnabled ?? true);
     setPointsPerItem(settings.loyaltyPointsPerItem ?? 1);
     setThreshold(settings.loyaltyRewardThreshold ?? 5);
@@ -13610,6 +13715,9 @@ function AdminLoyaltySettings({ settings, onSave }) {
       signupDiscountEnabled: signupEnabled,
       signupDiscountPercent: Number(signupPercent) || 0,
       signupPopupEnabled: popupEnabled,
+      instagramDiscountEnabled: igEnabled,
+      instagramDiscountPercent: Math.max(Number(igPercent) || 0, Number(signupPercent) || 0),
+      instagramAutoTrust: igTrust,
       loyaltyEnabled,
       loyaltyPointsPerItem: Number(pointsPerItem) || 0,
       loyaltyRewardThreshold: Number(threshold) || 0,
@@ -13643,6 +13751,30 @@ function AdminLoyaltySettings({ settings, onSave }) {
           </label>
         )}
       </div>
+
+      {signupEnabled && (
+        <div className="pt-2" style={{ borderTop: "1px solid var(--line)" }}>
+          <label className="flex items-center gap-2 text-sm mb-2" style={{ color: "var(--bone)" }}>
+            <input type="checkbox" checked={igEnabled} onChange={(e) => setIgEnabled(e.target.checked)} />
+            Descuento mayor si nos siguen en Instagram
+          </label>
+          {igEnabled && (
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <input type="number" min="0" max="100" value={igPercent} onChange={(e) => setIgPercent(e.target.value)} className="w-20 rounded-xl p-2 text-sm" style={inputStyle} />
+                <span className="text-sm" style={{ color: "var(--slate)" }}>% en total (es el máximo: nunca se pasa de esto)</span>
+              </div>
+              <label className="flex items-center gap-2 text-sm" style={{ color: "var(--bone)" }}>
+                <input type="checkbox" checked={igTrust} onChange={(e) => setIgTrust(e.target.checked)} />
+                Darlo apenas el cliente diga que nos sigue (sin que yo lo confirme)
+              </label>
+              <p className="text-xs" style={{ color: "var(--slate)" }}>
+                Instagram no permite que la web compruebe sola quién te sigue. El cliente escribe su usuario y te llega un aviso; vos lo confirmás en Clientes → «Confirmar que nos sigue». Si activás la casilla de arriba, se da sin revisar (más rápido, pero alguien podría poner un usuario falso). Si no sigue la cuenta, lo marcás «No me sigue» y se queda con el descuento común.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="pt-2" style={{ borderTop: "1px solid var(--line)" }}>
         <label className="flex items-center gap-2 text-sm mb-2" style={{ color: "var(--bone)" }}>
@@ -14816,7 +14948,7 @@ function AdminCustomWorkGallery({ items, onAdd, onRemove, speed = 0.5, onSpeedCh
   );
 }
 
-function AdminPanel({ products, categories, groups, orders, customers, onAdjustCustomerPoints, onDeleteCustomer, onCreateCustomer, onUpdateCustomerInfo, onSendPasswordHelp, reviews, settings, hasDraftChanges, publishing, onPublishChanges, onDiscardChanges, photoInbox, onAddToInbox, onCreateProductFromInbox, onAddInboxToExisting, onRemoveFromInbox, savedColors, onSaveColorToLibrary, onRemoveColorFromLibrary, designLibrary, onAddDesignToLibrary, onRemoveDesignFromLibrary, designFolders, onAddDesignFolder, onRenameDesignFolder, onRemoveDesignFolder, onToggleDesignFolderCover, onAssignDesignToFolder, onSetDesignFolderCategory, onSetDesignFolderGarments, customWorkGallery, onAddCustomWork, onRemoveCustomWork, onAddCategory, onRenameCategory, onDeleteCategory, onAddGroup, onRenameGroup, onDeleteGroup, onSaveProduct, onSaveProductVerbose, onSaveProductsBulk, onQuickRestock, onDeleteProduct, onToggleOrderStatus, onSetLocalStatus, onSetLocalTracking, onUpdateTracking, onApplyDiscount, onRequestReview, onBulkComplete, onBulkArchive, onBulkDelete, onSaveReview, onDeleteReview, onReorderReview, onSaveSettings, onSetPaymentStatus, onLogout, permissions, isOwner, onSetAdminPermissions, jumpTo }) {
+function AdminPanel({ products, categories, groups, orders, customers, onAdjustCustomerPoints, onDeleteCustomer, onCreateCustomer, onUpdateCustomerInfo, onSetInstagramStatus, onSendPasswordHelp, reviews, settings, hasDraftChanges, publishing, onPublishChanges, onDiscardChanges, photoInbox, onAddToInbox, onCreateProductFromInbox, onAddInboxToExisting, onRemoveFromInbox, savedColors, onSaveColorToLibrary, onRemoveColorFromLibrary, designLibrary, onAddDesignToLibrary, onRemoveDesignFromLibrary, designFolders, onAddDesignFolder, onRenameDesignFolder, onRemoveDesignFolder, onToggleDesignFolderCover, onAssignDesignToFolder, onSetDesignFolderCategory, onSetDesignFolderGarments, customWorkGallery, onAddCustomWork, onRemoveCustomWork, onAddCategory, onRenameCategory, onDeleteCategory, onAddGroup, onRenameGroup, onDeleteGroup, onSaveProduct, onSaveProductVerbose, onSaveProductsBulk, onQuickRestock, onDeleteProduct, onToggleOrderStatus, onSetLocalStatus, onSetLocalTracking, onUpdateTracking, onApplyDiscount, onRequestReview, onBulkComplete, onBulkArchive, onBulkDelete, onSaveReview, onDeleteReview, onReorderReview, onSaveSettings, onSetPaymentStatus, onLogout, permissions, isOwner, onSetAdminPermissions, jumpTo }) {
   // El dueño (isOwner) siempre ve todas las pestañas. Una cuenta de admin con
   // permisos limitados solo ve — y solo puede abrir — las que le dieron.
   const allowedTabs = isOwner ? ADMIN_TAB_KEYS : (permissions || []);
@@ -15891,7 +16023,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
       {tab === "ventas" && <AdminSalesPanel products={sellableProducts} orders={orders} settings={settings} onSaveSettings={onSaveSettings} />}
       {tab === "estadisticas" && <AdminAnalyticsPanel settings={settings} onSaveSettings={onSaveSettings} />}
       {tab === "compras" && <AdminRestockPanel products={sellableProducts} onQuickRestock={onQuickRestock} settings={settings} onSaveSettings={onSaveSettings} />}
-      {tab === "clientes" && <AdminCustomers customers={customers} onAdjustPoints={onAdjustCustomerPoints} loyaltyThreshold={settings?.loyaltyRewardThreshold} isOwner={isOwner} onSetAdminPermissions={onSetAdminPermissions} onDeleteCustomer={onDeleteCustomer} onCreateCustomer={onCreateCustomer} onUpdateCustomerInfo={onUpdateCustomerInfo} onSendPasswordHelp={onSendPasswordHelp} />}
+      {tab === "clientes" && <AdminCustomers customers={customers} onAdjustPoints={onAdjustCustomerPoints} loyaltyThreshold={settings?.loyaltyRewardThreshold} isOwner={isOwner} onSetAdminPermissions={onSetAdminPermissions} onDeleteCustomer={onDeleteCustomer} onCreateCustomer={onCreateCustomer} onUpdateCustomerInfo={onUpdateCustomerInfo} onSetInstagramStatus={onSetInstagramStatus} instagramOn={!!settings?.instagramDiscountEnabled} onSendPasswordHelp={onSendPasswordHelp} />}
       {tab === "resenas" && <AdminReviews reviews={reviews} onSave={onSaveReview} onDelete={onDeleteReview} onReorder={onReorderReview} />}
       {tab === "beneficios" && <AdminBenefitsPanel settings={settings} onSave={onSaveSettings} />}
       {tab === "ajustes" && (
@@ -16825,7 +16957,7 @@ function RewardsWidget({ settings, customer, onLogin, onRedeem, liftForMobileBar
               <div className="rounded-xl p-4" style={rowStyle}>
                 <p className="font-semibold" style={{ color: "var(--bone)" }}>Registrándote</p>
                 <p className="text-sm mt-1" style={{ color: "var(--slate)" }}>
-                  Al crear tu cuenta tenés {settings.signupDiscountPercent}% de descuento en tu primera compra.
+                  Al crear tu cuenta tenés {settings.signupDiscountPercent}% de descuento en tu primera compra{settings.instagramDiscountEnabled ? `, y ${settings.instagramDiscountPercent}% si además nos seguís en Instagram` : ""}.
                 </p>
               </div>
             )}
@@ -17692,12 +17824,26 @@ export default function App() {
     return { record: updated, emailSent: emailResult.ok, emailError: emailResult.error };
   };
 
-  const handleRegisterCustomer = async ({ name, email, password }) => {
+  const handleRegisterCustomer = async ({ name, email, password, instagram = "" }) => {
     const norm = normalizeEmail(email);
     const existing = await loadCustomer(norm);
     if (existing) return { ok: false, error: "Ya existe una cuenta con ese email — probá iniciar sesión." };
     const passwordHash = await hashPassword(password);
     const record = { id: genId("cu"), name: name.trim(), email: norm, passwordHash, points: 0, firstDiscountUsed: false, createdAt: Date.now() };
+    // Usuario de Instagram opcional: queda "pendiente" hasta que el dueño lo
+    // confirme en Clientes (ver handleClaimInstagram).
+    const igHandle = normalizeIgHandle(instagram);
+    if (igHandle && settings?.instagramDiscountEnabled) {
+      if (!/^[a-z0-9._]{1,30}$/.test(igHandle)) return { ok: false, error: "El usuario de Instagram no parece válido (ej: @tuusuario). Podés dejarlo vacío." };
+      record.instagramHandle = igHandle;
+      record.instagramStatus = "pending";
+      record.instagramClaimedAt = new Date().toISOString();
+      sendEmail({
+        to: ADMIN_EMAIL,
+        subject: `Instagram para verificar: @${igHandle}`,
+        html: emailShell(settings?.logoText || "Kulto", `<p style="margin:0 0 8px;">${record.name || record.email} se registró y dice que sigue la cuenta en Instagram como <strong>@${igHandle}</strong>.</p><p style="margin:0;color:#a9a2b0;font-size:13px;">Entrá al panel → Clientes y tocá «Confirmar que nos sigue» (o «No me sigue») para darle su descuento.</p>`),
+      }).catch(() => { /* el aviso es un extra */ });
+    }
     // La cuenta de administrador (ADMIN_EMAIL) entra directo, sin confirmar
     // mail — así el dueño de la tienda nunca queda afuera de su propio panel
     // por no tener todavía el envío de mails configurado.
@@ -17815,6 +17961,37 @@ export default function App() {
     const updated = { ...customer, favorites: next };
     setCustomer(updated);
     await persistCustomer(updated);
+  };
+
+  // El cliente declara su usuario de Instagram; queda "pendiente" hasta que el
+  // dueño lo confirme en Clientes (o se da directo si activó "confiar").
+  const handleClaimInstagram = async (rawHandle) => {
+    if (!customer) return { ok: false, error: "Iniciá sesión primero." };
+    const handle = normalizeIgHandle(rawHandle);
+    if (!/^[a-z0-9._]{1,30}$/.test(handle)) return { ok: false, error: "Escribí tu usuario de Instagram, por ejemplo @tuusuario." };
+    const updated = { ...customer, instagramHandle: handle, instagramStatus: "pending", instagramClaimedAt: new Date().toISOString() };
+    try {
+      await persistCustomer(updated);
+    } catch {
+      return { ok: false, error: "No pudimos guardarlo. Probá de nuevo." };
+    }
+    setCustomer(updated);
+    setCustomersList((prev) => prev.map((c) => (c.email === updated.email ? updated : c)));
+    sendEmail({
+      to: ADMIN_EMAIL,
+      subject: `Instagram para verificar: @${handle}`,
+      html: emailShell(settings?.logoText || "Kulto", `<p style="margin:0 0 8px;">${updated.name || updated.email} dice que sigue la cuenta en Instagram como <strong>@${handle}</strong>.</p><p style="margin:0;color:#a9a2b0;font-size:13px;">Entrá al panel → Clientes y tocá «Confirmar que nos sigue» (o «No me sigue») para darle su descuento.</p>`),
+    }).catch(() => { /* el aviso es un extra */ });
+    return { ok: true };
+  };
+
+  const handleSetInstagramStatus = async (customerEmail_, status) => {
+    const target = customersList.find((c) => c.email === customerEmail_);
+    if (!target) return;
+    const updated = { ...target, instagramStatus: status };
+    await persistCustomer(updated);
+    setCustomersList((prev) => prev.map((c) => (c.email === customerEmail_ ? updated : c)));
+    if (customer?.email === customerEmail_) setCustomer(updated);
   };
 
   const handleAdjustCustomerPoints = async (customerEmail_, newPoints) => {
@@ -18307,6 +18484,7 @@ export default function App() {
               onDeleteCustomer={handleDeleteCustomer}
               onCreateCustomer={handleAdminCreateCustomer}
               onUpdateCustomerInfo={handleAdminUpdateCustomerInfo}
+              onSetInstagramStatus={handleSetInstagramStatus}
               onSendPasswordHelp={handleRequestPasswordReset}
               reviews={reviews}
               settings={settings}
@@ -18367,6 +18545,7 @@ export default function App() {
           ) : (
             <AccountPage
               customer={customer}
+              onClaimInstagram={handleClaimInstagram}
               onRegister={handleRegisterCustomer}
               onLogin={handleLoginCustomer}
               onLogout={handleLogoutCustomer}
