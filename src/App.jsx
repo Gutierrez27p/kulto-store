@@ -16130,7 +16130,7 @@ function NavLink({ label, active, onClick }) {
   );
 }
 
-function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, customer, themeMode, onToggleThemeMode, fontStep, onDecreaseFont, onIncreaseFont, socialLinks = {}, showAdminMenu = false, onGoAdminTab, onPreviewAsCustomer, productsMenuItems = [], onGoCatalog, products = [] }) {
+function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, customer, themeMode, onToggleThemeMode, fontStep, onDecreaseFont, onIncreaseFont, socialLinks = {}, showAdminMenu = false, onGoAdminTab, onPreviewAsCustomer, productsMenuItems = [], onGoCatalog, products = [], onBack }) {
   const [open, setOpen] = useState(false);
   const [adminMenuOpen, setAdminMenuOpen] = useState(false);
   const adminMenuRef = useRef(null);
@@ -16231,7 +16231,12 @@ function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, cus
   return (
     <header className="sticky top-0 z-40" style={{ background: "var(--ink)", borderBottom: "1px solid var(--line)", paddingTop: "env(safe-area-inset-top)" }}>
       <div className="max-w-6xl mx-auto px-4 md:px-6 flex items-center justify-between h-16">
-        <button onClick={() => go("home")} className="flex items-center gap-2.5">
+        {page !== "home" && onBack && (
+          <button onClick={onBack} aria-label="Volver atrás" className="kulto-btn md:hidden -ml-2 mr-1 w-10 h-10 shrink-0 rounded-full flex items-center justify-center" style={{ color: "var(--bone)", background: "var(--ink-2)", border: "1px solid var(--line)" }}>
+            <ChevronLeft size={22} />
+          </button>
+        )}
+        <button onClick={() => go("home")} className="flex items-center gap-2.5 mr-auto">
           {logoImage ? (
             <>
               <img src={logoImage} alt={logoText || "Logo"} className="h-9 w-9 object-contain" />
@@ -17493,13 +17498,25 @@ export default function App() {
     const cur = { page, sp: selectedProduct?.id || null, cart: !!cartOpen };
     const prev = window.history.state;
     try {
-      if (!prev || prev.page === undefined) window.history.replaceState(cur, "");
+      if (!prev || prev.page === undefined) window.history.replaceState({ ...cur, idx: 0 }, "");
       // Cerrar el carrito o la ficha con la X equivale a "atrás": así no
       // quedan entradas de más en el historial.
       else if (prev.page === cur.page && ((prev.cart && !cur.cart && prev.sp === cur.sp) || (prev.sp && !cur.sp && prev.cart === cur.cart))) window.history.back();
-      else if (prev.page !== cur.page || prev.sp !== cur.sp || prev.cart !== cur.cart) window.history.pushState(cur, "");
+      else if (prev.page !== cur.page || prev.sp !== cur.sp || prev.cart !== cur.cart) window.history.pushState({ ...cur, idx: (prev.idx || 0) + 1 }, "");
     } catch { /* si el navegador no deja tocar el historial, la web sigue igual */ }
   }, [page, selectedProduct, cartOpen, loading]);
+
+  // Botón "Volver" del celular / app instalada (ahí no hay botón atrás del
+  // navegador a la vista): vuelve a la pantalla anterior; si no hay una
+  // anterior dentro de la web, lleva al inicio.
+  const goBack = () => {
+    try {
+      if ((window.history.state?.idx || 0) > 0) { window.history.back(); return; }
+    } catch { /* sigue abajo */ }
+    setSelectedProduct(null);
+    setCartOpen(false);
+    setPage("home");
+  };
 
   const handleAddToCart = useCallback((item) => {
     setCart((prev) => [...prev, item]);
@@ -18468,7 +18485,7 @@ export default function App() {
   return (
     <div className="kulto-root min-h-screen flex flex-col" data-mode={themeMode}>
       <GlobalStyle colors={settings.theme} />
-      <Header page={page} setPage={setPage} cartCount={cartCount} onOpenCart={() => setCartOpen(true)} logoImage={settings.logoImage} logoText={settings.logoText} customer={customer} themeMode={themeMode} onToggleThemeMode={toggleThemeMode} fontStep={fontStep} onDecreaseFont={decreaseFont} onIncreaseFont={increaseFont} socialLinks={{ instagram: settings.socialInstagram, facebook: settings.socialFacebook, tiktok: settings.socialTiktok }} showAdminMenu={hasAdminAccess} onGoAdminTab={jumpToAdminTab} onPreviewAsCustomer={() => { setPreviewAsCustomer(true); setPage("home"); }} productsMenuItems={settings.productsMenuItems || []} onGoCatalog={goToCatalog} products={sellableProducts} />
+      <Header page={page} setPage={setPage} onBack={goBack} cartCount={cartCount} onOpenCart={() => setCartOpen(true)} logoImage={settings.logoImage} logoText={settings.logoText} customer={customer} themeMode={themeMode} onToggleThemeMode={toggleThemeMode} fontStep={fontStep} onDecreaseFont={decreaseFont} onIncreaseFont={increaseFont} socialLinks={{ instagram: settings.socialInstagram, facebook: settings.socialFacebook, tiktok: settings.socialTiktok }} showAdminMenu={hasAdminAccess} onGoAdminTab={jumpToAdminTab} onPreviewAsCustomer={() => { setPreviewAsCustomer(true); setPage("home"); }} productsMenuItems={settings.productsMenuItems || []} onGoCatalog={goToCatalog} products={sellableProducts} />
       {hasAdminAccess && previewAsCustomer && (
         <div className="sticky top-16 z-30 flex items-center justify-center gap-3 px-4 py-2 text-sm font-semibold" style={{ background: "var(--sun)", color: "var(--ink)" }}>
           <span>Estás viendo la web como la vería un cliente.</span>
