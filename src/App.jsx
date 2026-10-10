@@ -2224,6 +2224,13 @@ function GlobalStyle({ colors }) {
       .kulto-card{ transition:box-shadow .25s ease, transform .25s ease; box-shadow:${CARD_SHADOWS[c.cardShadow] || CARD_SHADOWS.media}; }
       .kulto-card:hover{ box-shadow:${CARD_SHADOWS_HOVER[c.cardShadow] || CARD_SHADOWS_HOVER.media}; transform:translateY(-3px); }
       .kulto-banner-tile:hover .kulto-banner-tile-img{ transform:scale(1.06); }
+      .kulto-tile-desc{ display:grid; grid-template-rows:0fr; opacity:0; transition:grid-template-rows .35s ease, opacity .35s ease; }
+      .kulto-tile-desc > div{ overflow:hidden; min-height:0; }
+      .kulto-banner-tile:hover .kulto-tile-desc, .kulto-banner-tile:focus-within .kulto-tile-desc{ grid-template-rows:1fr; opacity:1; }
+      @media (hover:none){
+        .kulto-tile-desc{ grid-template-rows:1fr; opacity:1; }
+        .kulto-tile-desc-text{ display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden !important; }
+      }
       .kulto-banner-tile-img{ transition:transform .4s ease; }
       .kulto-banner-tile{ transition:transform .25s ease, box-shadow .25s ease; }
       .kulto-banner-clickable:hover{ transform:scale(1.012); box-shadow:0 0 0 3px var(--banner-glow, transparent), 0 18px 40px -14px var(--banner-glow, transparent); }
@@ -2557,7 +2564,7 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
             <Shirt size={36} style={{ color: "rgba(243,239,230,0.35)" }} />
           </div>
         )}
-        <div className="absolute top-2 left-2 flex flex-col gap-1 items-start">
+        <div className="absolute top-2 left-2 flex flex-col gap-1 items-start max-w-[68%]">
           {product.tags?.oferta && <Badge tone="signal">Oferta</Badge>}
           {product.tags?.bestseller && <Badge tone="sun">Más vendido</Badge>}
           {(product.stock ?? 0) <= 0 && <Badge tone="neutral">Sin stock</Badge>}
@@ -2565,7 +2572,7 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
         {onToggleFavorite && (
           <button
             onClick={(e) => { e.stopPropagation(); onToggleFavorite(product.id); }}
-            className="kulto-btn absolute top-2 right-2 w-8 h-8 rounded-full flex items-center justify-center"
+            className="kulto-btn absolute top-2 right-2 w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center"
             style={{ background: "rgba(21,19,26,0.55)" }}
             title={isFavorite ? "Quitar de favoritos" : "Guardar en favoritos"}
           >
@@ -2576,7 +2583,7 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
           <>
             <button
               onClick={prev}
-              className="kulto-btn absolute left-1 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full flex items-center justify-center"
+              className="kulto-btn absolute left-1 top-1/2 -translate-y-1/2 w-7 h-7 sm:w-9 sm:h-9 rounded-full flex items-center justify-center"
               style={{ background: "rgba(21,19,26,0.55)", color: "var(--bone)" }}
               aria-label="Foto anterior"
             >
@@ -2584,7 +2591,7 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
             </button>
             <button
               onClick={next}
-              className="kulto-btn absolute right-1 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full flex items-center justify-center"
+              className="kulto-btn absolute right-1 top-1/2 -translate-y-1/2 w-7 h-7 sm:w-9 sm:h-9 rounded-full flex items-center justify-center"
               style={{ background: "rgba(21,19,26,0.55)", color: "var(--bone)" }}
               aria-label="Foto siguiente"
             >
@@ -2598,10 +2605,10 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
           </>
         )}
       </div>
-      <div className="p-3 flex flex-col gap-1.5 flex-1">
-        <span className="text-xs" style={{ color: "var(--slate)" }}>{product.category}</span>
+      <div className="p-2.5 sm:p-3 flex flex-col gap-1.5 flex-1 min-w-0">
+        <span className="text-xs truncate" style={{ color: "var(--slate)" }}>{product.category}</span>
         <span
-          className="font-semibold leading-snug"
+          className="font-semibold leading-snug text-sm sm:text-base"
           style={{
             color: "var(--bone)",
             display: "-webkit-box",
@@ -2639,17 +2646,17 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
         <div className="flex items-center gap-2 mt-auto pt-1">
           {onSale ? (
             <>
-              <span className="font-bold" style={{ color: "var(--sun)" }}>{formatPrice(product.salePrice)}</span>
+              <span className="font-bold text-sm sm:text-base" style={{ color: "var(--sun)" }}>{formatPrice(product.salePrice)}</span>
               <span className="text-sm line-through" style={{ color: "var(--slate)" }}>{formatPrice(product.price)}</span>
             </>
           ) : (
-            <span className="font-bold" style={{ color: "var(--sun)" }}>{formatPrice(product.price)}</span>
+            <span className="font-bold text-sm sm:text-base" style={{ color: "var(--sun)" }}>{formatPrice(product.price)}</span>
           )}
           {canQuickAdd && (
             <button
               type="button"
               onClick={openQuickAdd}
-              className="kulto-btn ml-auto w-8 h-8 rounded-full flex items-center justify-center shrink-0"
+              className="kulto-btn ml-auto w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center shrink-0"
               style={{ background: "var(--signal)", color: "var(--bone)" }}
               title="Agregar al carrito"
               aria-label={`Agregar ${product.name} al carrito`}
@@ -3741,13 +3748,25 @@ function PromoBanner({ banner, onGoCatalog, onGoWizard }) {
           />
         )}
         <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, rgba(21,19,26,0) 45%, rgba(21,19,26,0.88))" }} />
-        <div className="relative w-full p-5 flex flex-col gap-1">
+        {/* El título siempre se ve (con el contorno que elige el admin); la
+            descripción sube desde abajo sobre un fondo negro translúcido al
+            pasar el mouse. En el celular, donde no hay mouse, queda a la vista
+            en 3 líneas. */}
+        <div className="absolute left-0 right-0 bottom-0 flex flex-col">
           {banner.title && (
-            <h3 className="kulto-display text-xl md:text-2xl leading-[0.95] whitespace-pre-line" style={{ color: "var(--bone)", ...textOutlineStyle(banner.textOutlineWidth, banner.textOutlineColor) }}>
+            <h3 className="kulto-display text-xl md:text-2xl leading-[0.95] whitespace-pre-line px-5 pt-5 pb-4" style={{ color: "var(--bone)", ...textOutlineStyle(banner.textOutlineWidth, banner.textOutlineColor) }}>
               {banner.title}
             </h3>
           )}
-          {banner.subtitle && <ClampText text={banner.subtitle} lines={3} className="text-xs md:text-sm" style={{ color: "var(--bone)", ...textOutlineStyle(banner.textOutlineWidth, banner.textOutlineColor) }} buttonStyle={textOutlineStyle(banner.textOutlineWidth, banner.textOutlineColor)} />}
+          {banner.subtitle && (
+            <div className="kulto-tile-desc">
+              <div>
+                <p className="kulto-tile-desc-text text-xs md:text-sm px-5 py-3 whitespace-pre-line" style={{ color: "#fff", background: "rgba(0,0,0,0.72)", maxHeight: "9rem", overflowY: "auto" }}>
+                  {banner.subtitle}
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -11672,7 +11691,7 @@ function AdminBannerSettings({ settings, groups = [], onSave }) {
             <textarea value={draft.subtitle} onChange={(e) => setDraft({ ...draft, subtitle: e.target.value })} rows={2} className="w-full rounded-xl p-3 text-sm" style={inputStyle} />
           </div>
           <div>
-            <label className="text-xs mb-1 block" style={{ color: "var(--bone)" }}>Contorno del texto (para que se lea sobre fotos claras o con mucho detalle)</label>
+            <label className="text-xs mb-1 block" style={{ color: "var(--bone)" }}>Contorno del título (para que se lea sobre fotos claras o con mucho detalle). En el estilo «grilla» la descripción aparece al pasar el mouse sobre un fondo negro translúcido.</label>
             <div className="flex items-center gap-3 flex-wrap">
               <input
                 type="range"
