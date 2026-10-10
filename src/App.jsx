@@ -1200,38 +1200,42 @@ function activeMockup(product) {
 
 function MockupComposite({ mockup, hex, innerRef, designProps }) {
   const canvasRef = useRef(null);
-  const [st, setSt] = useState({ prep: null, dimg: null, error: false });
+  const [st, setSt] = useState({ prep: null, dimg: null, limg: null, error: false });
+  // texto/logo que cambia según la prenda: negro para prendas claras, blanco para oscuras
+  const hexL = (() => { const c = hexToRgb(hex || "#ffffff"); return 0.299 * c.r + 0.587 * c.g + 0.114 * c.b; })();
+  const logoSrc = hexL > 150 ? (mockup.logoLight || mockup.logoDark || null) : (mockup.logoDark || mockup.logoLight || null);
   useEffect(() => {
     let alive = true;
-    setSt({ prep: null, dimg: null, error: false });
-    Promise.all([prepareMockupBase(mockup.base), mockup.design ? loadMockupImg(mockup.design) : Promise.resolve(null)])
-      .then(([prep, dimg]) => { if (alive) setSt({ prep, dimg, error: false }); })
-      .catch(() => { if (alive) setSt({ prep: null, dimg: null, error: true }); });
+    Promise.all([prepareMockupBase(mockup.base), mockup.design ? loadMockupImg(mockup.design) : Promise.resolve(null), logoSrc ? loadMockupImg(logoSrc).catch(() => null) : Promise.resolve(null)])
+      .then(([prep, dimg, limg]) => { if (alive) setSt({ prep, dimg, limg, error: false }); })
+      .catch(() => { if (alive) setSt({ prep: null, dimg: null, limg: null, error: true }); });
     return () => { alive = false; };
-  }, [mockup.base, mockup.design]);
+  }, [mockup.base, mockup.design, logoSrc]);
   useEffect(() => {
-    const { prep, dimg } = st;
+    const { prep, dimg, limg } = st;
     const cv = canvasRef.current;
     if (!prep || !cv) return;
     cv.width = prep.w; cv.height = prep.h;
     const ctx = cv.getContext("2d");
     ctx.clearRect(0, 0, prep.w, prep.h);
     ctx.drawImage(tintedMockupCanvas(mockup.base, prep, hex || "#ffffff"), 0, 0);
-    if (dimg) {
+    const drawLayer = (im, px, py, pw, pr) => {
       const layer = document.createElement("canvas");
       layer.width = prep.w; layer.height = prep.h;
       const lctx = layer.getContext("2d");
-      const dw = prep.w * ((mockup.w ?? 40) / 100);
-      const dh = dw * (dimg.naturalHeight / dimg.naturalWidth);
-      lctx.translate(prep.w * ((mockup.x ?? 50) / 100), prep.h * ((mockup.y ?? 38) / 100));
-      lctx.rotate(((mockup.rot || 0) * Math.PI) / 180);
-      lctx.drawImage(dimg, -dw / 2, -dh / 2, dw, dh);
+      const dw = prep.w * (pw / 100);
+      const dh = dw * (im.naturalHeight / im.naturalWidth);
+      lctx.translate(prep.w * (px / 100), prep.h * (py / 100));
+      lctx.rotate((pr * Math.PI) / 180);
+      lctx.drawImage(im, -dw / 2, -dh / 2, dw, dh);
       lctx.setTransform(1, 0, 0, 1, 0, 0);
       lctx.globalCompositeOperation = "destination-in";
       lctx.drawImage(prep.maskCv, 0, 0);
       ctx.drawImage(layer, 0, 0);
-    }
-  }, [st, hex, mockup.base, mockup.x, mockup.y, mockup.w, mockup.rot]);
+    };
+    if (dimg) drawLayer(dimg, mockup.x ?? 50, mockup.y ?? 38, mockup.w ?? 40, mockup.rot || 0);
+    if (limg) drawLayer(limg, mockup.lx ?? 30, mockup.ly ?? 20, mockup.lw ?? 15, mockup.lrot || 0);
+  }, [st, hex, mockup.base, mockup.x, mockup.y, mockup.w, mockup.rot, mockup.lx, mockup.ly, mockup.lw, mockup.lrot]);
   const ar = st.prep ? st.prep.w / st.prep.h : Number(mockup.ar) > 0 ? Number(mockup.ar) : 0.8;
   const boxStyle = { position: "relative", width: `min(100cqw, calc(100cqh * ${ar}))`, aspectRatio: String(ar), ...(designProps?.style || {}) };
   const { style: _ignored, ...handlers } = designProps || {};
@@ -1242,6 +1246,7 @@ function MockupComposite({ mockup, hex, innerRef, designProps }) {
           <>
             <img src={mockup.base} alt="" draggable={false} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "fill", pointerEvents: "none" }} />
             {mockup.design && <img src={mockup.design} alt="" draggable={false} style={{ position: "absolute", left: `${mockup.x ?? 50}%`, top: `${mockup.y ?? 38}%`, width: `${mockup.w ?? 40}%`, transform: `translate(-50%, -50%) rotate(${mockup.rot || 0}deg)`, objectFit: "contain", pointerEvents: "none" }} />}
+            {logoSrc && <img src={logoSrc} alt="" draggable={false} style={{ position: "absolute", left: `${mockup.lx ?? 30}%`, top: `${mockup.ly ?? 20}%`, width: `${mockup.lw ?? 15}%`, transform: `translate(-50%, -50%) rotate(${mockup.lrot || 0}deg)`, objectFit: "contain", pointerEvents: "none" }} />}
           </>
         ) : (
           <canvas ref={canvasRef} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }} />
@@ -1373,6 +1378,7 @@ function AdminMockupEditor({ draft, setDraft, inputStyle }) {
   const [detecting, setDetecting] = useState(false);
   const [detectMsg, setDetectMsg] = useState("");
   const [showExample, setShowExample] = useState(false);
+  const [target, setTarget] = useState("design"); // qué se mueve: "design" o "logo"
   const autoPlace = async () => {
     if (!m.base || !m.design || !m.cover) return;
     setDetecting(true);
@@ -1397,6 +1403,8 @@ function AdminMockupEditor({ draft, setDraft, inputStyle }) {
       const ar = await new Promise((resolve) => { const i = new Image(); i.onload = () => resolve(i.naturalWidth / i.naturalHeight); i.onerror = () => resolve(0.8); i.src = b64; });
       set({ base: url, ar });
     } else if (kind === "design") set({ design: url });
+    else if (kind === "logoLight") set({ logoLight: url });
+    else if (kind === "logoDark") set({ logoDark: url });
     else set({ cover: url });
     setBusy(false);
   };
@@ -1406,7 +1414,8 @@ function AdminMockupEditor({ draft, setDraft, inputStyle }) {
     if (!r) return;
     const x = Math.max(0, Math.min(100, ((e.clientX - r.left) / r.width) * 100));
     const y = Math.max(0, Math.min(100, ((e.clientY - r.top) / r.height) * 100));
-    set({ x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 });
+    if (target === "logo") set({ lx: Math.round(x * 10) / 10, ly: Math.round(y * 10) / 10 });
+    else set({ x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 });
   };
   const designProps = {
     onPointerDown: (e) => { dragging.current = true; e.currentTarget.setPointerCapture?.(e.pointerId); e.preventDefault(); moveTo(e); },
@@ -1451,6 +1460,8 @@ function AdminMockupEditor({ draft, setDraft, inputStyle }) {
       {slot("1. Mockup vacío", "La prenda sin estampa, de frente.", "base", m.base)}
       {slot("2. Diseño (PNG)", "La estampa con fondo transparente.", "design", m.design)}
       {slot("3. Ejemplo / portada", "Foto de cómo debe quedar: el mismo mockup con el diseño ya puesto en su lugar. Se ve en las tarjetas y sirve para acomodar el diseño solo.", "cover", m.cover)}
+      {slot("4. Texto para prendas claras (negro)", "Opcional: el texto o logo en negro, PNG sin fondo (ej. Kulto en el frente).", "logoLight", m.logoLight)}
+      {slot("5. Texto para prendas oscuras (blanco)", "Opcional: el mismo texto en blanco. Se usa solo en las prendas oscuras.", "logoDark", m.logoDark)}
       {m.base && m.design && m.cover && (
         <div className="flex flex-col gap-1.5">
           <button type="button" onClick={autoPlace} disabled={detecting} className="kulto-btn text-xs font-semibold px-4 py-2.5 rounded-full self-start" style={{ background: "var(--sun)", color: "var(--ink)", opacity: detecting ? 0.6 : 1 }}>
@@ -1463,7 +1474,14 @@ function AdminMockupEditor({ draft, setDraft, inputStyle }) {
       {canPreview && m.design && (
         <div className="grid sm:grid-cols-2 gap-4">
           <div>
-            <p className="text-xs mb-1" style={{ color: "var(--slate)" }}>Tocá o arrastrá sobre la prenda para mover el diseño:</p>
+            {(m.logoLight || m.logoDark) && (
+              <div className="flex gap-2 mb-2">
+                {[["design", "Mover el diseño"], ["logo", "Mover el texto"]].map(([k, l]) => (
+                  <button key={k} type="button" onClick={() => setTarget(k)} className="kulto-btn text-[11px] font-semibold px-3 py-1.5 rounded-full" style={{ background: target === k ? "var(--sun)" : "var(--ink)", color: target === k ? "var(--ink)" : "var(--bone)", border: "1px solid var(--line)" }}>{l}</button>
+                ))}
+              </div>
+            )}
+            <p className="text-xs mb-1" style={{ color: "var(--slate)" }}>Tocá o arrastrá sobre la prenda para mover {target === "logo" ? "el texto" : "el diseño"}:</p>
             <div className="rounded-xl overflow-hidden mx-auto relative" style={{ aspectRatio: "4 / 5", maxWidth: 280, background: "var(--ink-2)", border: "1px solid var(--line)" }}>
               <MockupComposite mockup={m} hex={previewHex} innerRef={innerRef} designProps={designProps} />
               {showExample && m.cover && <img src={m.cover} alt="" draggable={false} className="absolute inset-0 w-full h-full object-contain" style={{ opacity: 0.45, pointerEvents: "none" }} />}
@@ -1476,12 +1494,16 @@ function AdminMockupEditor({ draft, setDraft, inputStyle }) {
             )}
           </div>
           <div className="flex flex-col gap-3">
-            {[["Tamaño", "w", 10, 90], ["Izquierda ↔ derecha", "x", 0, 100], ["Arriba ↕ abajo", "y", 0, 100], ["Giro (inclinación)", "rot", -45, 45]].map(([label, key, min, max]) => (
+            {[["Tamaño", "w", 10, 90], ["Izquierda ↔ derecha", "x", 0, 100], ["Arriba ↕ abajo", "y", 0, 100], ["Giro (inclinación)", "rot", -45, 45]].map(([label, k0, min, max]) => {
+              const key = target === "logo" ? (k0 === "rot" ? "lrot" : "l" + k0) : k0;
+              const dflt = { w: 40, x: 50, y: 38, rot: 0, lw: 15, lx: 30, ly: 20, lrot: 0 }[key];
+              return (
               <label key={key} className="text-xs" style={{ color: "var(--bone)" }}>
-                {label}: {Math.round(m[key] ?? 0)}{key === "rot" ? "°" : "%"}
-                <input type="range" min={min} max={max} step="0.5" value={m[key] ?? 0} onChange={(e) => set({ [key]: Number(e.target.value) })} className="w-full" />
+                {label}: {Math.round(m[key] ?? dflt)}{k0 === "rot" ? "°" : "%"}
+                <input type="range" min={target === "logo" && k0 === "w" ? 3 : min} max={max} step="0.5" value={m[key] ?? dflt} onChange={(e) => set({ [key]: Number(e.target.value) })} className="w-full" />
               </label>
-            ))}
+              );
+            })}
             <div>
               <p className="text-xs mb-1" style={{ color: "var(--slate)" }}>Probar en otro color:</p>
               <div className="flex flex-wrap items-center gap-1.5">
@@ -1668,6 +1690,57 @@ function recolorExistingPhoto(src, refHex, targetHex) {
             for (let i = 0; i < n; i++) mask[i] = grown[i] && mask[i] ? 1 : 0;
           }
         }
+        /*FILL*/
+        // Completar la prenda: lo que queda ENCERRADO dentro de la prenda y es del
+        // color de la tela (zonas blancas del diseño, luces de los hombros) también
+        // cambia de color; lo oscuro o de color (texto negro, tintas) se queda igual.
+        {
+          const dil = morph(mask, false);
+          const closed = morph(dil, true);
+          const outside = new Uint8Array(n);
+          const stk = [];
+          for (let x = 0; x < w; x++) { for (const y of [0, h - 1]) { const c = y * w + x; if (!closed[c] && !outside[c]) { outside[c] = 1; stk.push(c); } } }
+          for (let y = 0; y < h; y++) { for (const x of [0, w - 1]) { const c = y * w + x; if (!closed[c] && !outside[c]) { outside[c] = 1; stk.push(c); } } }
+          while (stk.length) {
+            const c = stk.pop();
+            const x = c % w, y = (c - x) / w;
+            if (x > 0 && !closed[c - 1] && !outside[c - 1]) { outside[c - 1] = 1; stk.push(c - 1); }
+            if (x < w - 1 && !closed[c + 1] && !outside[c + 1]) { outside[c + 1] = 1; stk.push(c + 1); }
+            if (y > 0 && !closed[c - w] && !outside[c - w]) { outside[c - w] = 1; stk.push(c - w); }
+            if (y < h - 1 && !closed[c + w] && !outside[c + w]) { outside[c + w] = 1; stk.push(c + w); }
+          }
+          // color real de la tela en esta foto
+          const rs = [], gs = [], bs = [];
+          for (let i = 0; i < n; i += 7) if (mask[i]) { rs.push(d[i * 4]); gs.push(d[i * 4 + 1]); bs.push(d[i * 4 + 2]); }
+          const med = (a) => { a.sort((x, y) => x - y); return a.length ? a[a.length >> 1] : 128; };
+          const real = { r: med(rs), g: med(gs), b: med(bs) };
+          const realL = Math.max(1, 0.299 * real.r + 0.587 * real.g + 0.114 * real.b);
+          const tolF = realL < 70 ? 26 : 46;
+          for (let i = 0; i < n; i++) {
+            if (mask[i] || outside[i]) continue;
+            const L = lum[i];
+            if (d[i * 4 + 3] < 10 || L < 6) continue;
+            const f = realL / L;
+            if (f > 3.2 || f < 0.35) continue;
+            const dr = d[i * 4] * f - real.r, dg = d[i * 4 + 1] * f - real.g, db = d[i * 4 + 2] * f - real.b;
+            if (Math.sqrt(dr * dr + dg * dg + db * db) < tolF) mask[i] = 1;
+          }
+          /*PROT*/
+          // El diseño no se toca: dentro de la prenda se protege todo lo que tenga
+          // bordes o detalle (líneas, texto, dibujos, degradados fuertes). Solo se
+          // pinta la tela lisa.
+          const edge = new Uint8Array(n);
+          for (let y = 1; y < h - 1; y++) {
+            for (let x = 1; x < w - 1; x++) {
+              const c = y * w + x;
+              const g = Math.max(Math.abs(lum[c + 1] - lum[c - 1]), Math.abs(lum[c + w] - lum[c - w]), Math.abs(lum[c + 1 + w] - lum[c - 1 - w]) * 0.7, Math.abs(lum[c + 1 - w] - lum[c - 1 + w]) * 0.7);
+              if (g > 34) edge[c] = 1;
+            }
+          }
+          const prot = new Uint8Array(n); for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) { const c = y * w + x; if (edge[c] || edge[c-1] || edge[c+1] || edge[c-w] || edge[c+w]) prot[c] = 1; }
+          const inner = morph(Uint8Array.from(outside, (v) => (v ? 0 : 1)), true);
+          for (let i = 0; i < n; i++) if (mask[i] && prot[i] && inner[i]) mask[i] = 0;
+        }
         // borde suave
         let soft = Float32Array.from(mask);
         const next = new Float32Array(n);
@@ -1711,31 +1784,72 @@ function recolorExistingPhoto(src, refHex, targetHex) {
 
 // Foto de partida para generar un color sin foto, y de qué color es la prenda
 // en esa foto (refHex).
-function autoColorSource(product) {
+function autoColorSource(product, imgIdx = 0) {
   const base = product?.baseImages?.frontImage;
   if (base) return { src: base, clean: true };
   const lum = (hex) => { const { r, g, b } = hexToRgb(hex); return 0.299 * r + 0.587 * g + 0.114 * b; };
   const withImg = (product?.colors || []).filter((c) => getColorImages(c).length > 0).sort((a, b) => lum(b.hex) - lum(a.hex));
-  if (withImg.length) return { src: getColorImages(withImg[0])[0], clean: false, refHex: withImg[0].hex };
+  if (withImg.length) { const li = getColorImages(withImg[0]); return { src: li[imgIdx] || li[0], clean: false, refHex: withImg[0].hex }; }
   if (product?.photoPool?.length && product?.colors?.length) {
     const idx = Number.isInteger(product.sourceColorIdx) && product.colors[product.sourceColorIdx] ? product.sourceColorIdx : 0;
-    return { src: product.photoPool[0], clean: false, refHex: product.colors[idx].hex };
+    const explicit = Number.isInteger(product.sourceColorIdx) && product.colors[product.sourceColorIdx];
+    return { src: product.photoPool[imgIdx] || product.photoPool[0], clean: false, refHex: product.colors[idx].hex, guessFrom: explicit ? null : product.colors };
   }
   return null;
 }
 
+// Adivina de qué color de la lista es la prenda en una foto: se cuenta, para
+// cada color, cuántos píxeles de la foto se le parecen (con otra luz) y gana el
+// que tenga más.
+async function guessRefColorHex(src, colors) {
+  try {
+    const img = await loadMockupImg(src);
+    const k = Math.min(1, 220 / Math.max(img.naturalWidth, img.naturalHeight));
+    const w = Math.max(1, Math.round(img.naturalWidth * k)), h = Math.max(1, Math.round(img.naturalHeight * k));
+    const cv = document.createElement("canvas");
+    cv.width = w; cv.height = h;
+    const ctx = cv.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0, w, h);
+    const d = ctx.getImageData(0, 0, w, h).data;
+    let best = null;
+    for (const c of colors) {
+      const ref = hexToRgb(c.hex);
+      const refL = Math.max(1, 0.299 * ref.r + 0.587 * ref.g + 0.114 * ref.b);
+      let cnt = 0;
+      for (let i = 0; i < w * h; i++) {
+        if (d[i * 4 + 3] < 10) continue;
+        const L = 0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2];
+        if (L < 6) continue;
+        const f = refL / L;
+        if (f > 3.2 || f < 0.35) continue;
+        const dr = d[i * 4] * f - ref.r, dg = d[i * 4 + 1] * f - ref.g, db = d[i * 4 + 2] * f - ref.b;
+        if (Math.sqrt(dr * dr + dg * dg + db * db) < 22 && Math.abs(L - refL) < Math.max(60, refL * 0.6)) cnt++;
+      }
+      if (!best || cnt > best.cnt) best = { hex: c.hex, cnt };
+    }
+    return best ? best.hex : null;
+  } catch {
+    return null;
+  }
+}
+
 const autoRecolorCache = new Map();
 // Foto generada para un color que no tiene foto propia (ver arriba).
-function useAutoColorImage(product, color, enabled) {
-  const info = enabled && color && getColorImages(color).length === 0 && !activeMockup(product) ? autoColorSource(product) : null;
-  const key = info ? `${info.src}|${info.refHex || ""}|${info.clean ? 1 : 0}|${color.hex}` : null;
+function useAutoColorImage(product, color, enabled, imgIdx = 0) {
+  const info = enabled && color && getColorImages(color).length === 0 && !activeMockup(product) ? autoColorSource(product, imgIdx) : null;
+  const key = info ? `${info.src}|${info.refHex || ""}|${info.guessFrom ? "g" : ""}|${info.clean ? 1 : 0}|${color.hex}` : null;
   const [url, setUrl] = useState(() => (key ? autoRecolorCache.get(key) || null : null));
   useEffect(() => {
     if (!key) { setUrl(null); return; }
     if (autoRecolorCache.has(key)) { setUrl(autoRecolorCache.get(key)); return; }
-    if (info.refHex && info.refHex.toLowerCase() === (color.hex || "").toLowerCase()) { setUrl(null); return; }
     let alive = true;
-    (info.clean ? tintImageToColor(info.src, color.hex) : recolorExistingPhoto(info.src, info.refHex, color.hex)).then((r) => {
+    (async () => {
+      if (info.clean) return tintImageToColor(info.src, color.hex);
+      const ref = info.guessFrom ? (await guessRefColorHex(info.src, info.guessFrom)) || info.refHex : info.refHex;
+      // la foto ya es de este color: se muestra tal cual
+      if (ref && ref.toLowerCase() === (color.hex || "").toLowerCase()) return null;
+      return recolorExistingPhoto(info.src, ref, color.hex);
+    })().then((r) => {
       autoRecolorCache.set(key, r || null);
       if (alive) setUrl(r || null);
     });
@@ -3715,16 +3829,18 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
   useEffect(() => { setImgIdx(0); }, [colorIdx]);
 
   const color = product.colors && product.colors[colorIdx];
-  const images = color ? getColorImages(color) : (product.photoPool || []);
-  // Si este color no tiene foto propia, se genera sola repintando la prenda de
-  // otra foto del producto (ver recolorExistingPhoto).
+  // Si el color no tiene fotos propias, se muestran las fotos generales del
+  // producto (las mismas de la tarjeta) y, si hace falta, se repintan solas con
+  // el color elegido (ver recolorExistingPhoto).
+  const colorImages = color ? getColorImages(color) : [];
+  const images = colorImages.length > 0 ? colorImages : (product.photoPool || []);
   const mock = activeMockup(product);
-  const mockActive = !!mock && images.length === 0;
+  const mockActive = !!mock && colorImages.length === 0;
   const mockHex = color?.hex || "#ffffff";
-  const autoImage = useAutoColorImage(product, color, images.length === 0);
-  const activeImage = images[imgIdx] || autoImage || null;
+  const autoImage = useAutoColorImage(product, color, colorImages.length === 0, imgIdx);
+  const activeImage = (colorImages.length === 0 && autoImage) || images[imgIdx] || null;
   const isCover = product.imageFit === "cover";
-  const previewBg = product.imageBackground || (color && !mock ? color.hex : "var(--ink-3)");
+  const previewBg = product.imageBackground || (color && !mock && colorImages.length > 0 ? color.hex : "var(--ink-3)");
   const hasSizes = product.sizes && product.sizes.length > 0;
   const size = hasSizes ? product.sizes[sizeIdx] : null;
   const design = product.designs && product.designs[designIdx];
@@ -15184,7 +15300,8 @@ function AdminBulkColorsBySubcategory({ templateProducts = [], onSaveVerbose }) 
 // Beagle, etc.), sin forma de elegirla. Esto deja subir una foto
 // independiente por categoría, que se usa tal cual (o la automática si no se
 // cargó ninguna).
-function AdminPersonalizeGroupImages({ templateProducts = [], settings, onSave }) {
+function AdminPersonalizeGroupImages({ templateProducts = [], settings, onSave, onSaveProducts }) {
+  const [namesBusy, setNamesBusy] = useState(null);
   const groupNames = Array.from(new Set(templateProducts.map((p) => p.category).filter(Boolean)));
   const styleNames = Array.from(new Set(templateProducts.map((p) => p.subcategory).filter(Boolean)));
   const [savedKey, setSavedKey] = useState(null);
@@ -15248,6 +15365,26 @@ function AdminPersonalizeGroupImages({ templateProducts = [], settings, onSave }
               />
               Mostrar nombre
             </label>
+            {onSaveProducts && (() => {
+              const members = templateProducts.filter((p) => (settingKey === "personalizeGroupCovers" ? p.category === g : p.subcategory === g));
+              if (!members.length) return null;
+              const allHidden = members.every((p) => p.hideCardName);
+              return (
+                <label className="flex items-center gap-1.5 text-[10px] cursor-pointer text-center" style={{ color: "var(--bone)", opacity: namesBusy === `${settingKey}:${g}` ? 0.5 : 1 }}>
+                  <input
+                    type="checkbox"
+                    disabled={!!namesBusy}
+                    checked={!allHidden}
+                    onChange={async (e) => {
+                      setNamesBusy(`${settingKey}:${g}`);
+                      await onSaveProducts(members.map((p) => ({ ...p, hideCardName: !e.target.checked })));
+                      setNamesBusy(null);
+                    }}
+                  />
+                  Nombre en sus {members.length} modelos
+                </label>
+              );
+            })()}
             {savedKey === `${settingKey}:${g}` && <span className="text-[10px]" style={{ color: "var(--sun)" }}>Guardado ✓</span>}
           </div>
         );
@@ -17001,7 +17138,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
             </div>
           </div>
           <AdminBulkColorsBySubcategory templateProducts={templateProducts} onSaveVerbose={onSaveProductVerbose} />
-          <AdminPersonalizeGroupImages templateProducts={templateProducts} settings={settings} onSave={onSaveSettings} />
+          <AdminPersonalizeGroupImages templateProducts={templateProducts} settings={settings} onSave={onSaveSettings} onSaveProducts={onSaveProductsBulk} />
           <AdminPersonalizeCardColors templateProducts={templateProducts} settings={settings} onSave={onSaveSettings} />
           <AdminPersonalizeSubcategoryPrices templateProducts={templateProducts} settings={settings} onSave={onSaveSettings} />
           <AdminDesignLibrary
