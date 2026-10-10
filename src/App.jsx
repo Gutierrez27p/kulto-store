@@ -3494,6 +3494,49 @@ function LinkedStyleProducts({ product, allProducts, onOpen, favorites, onToggle
   );
 }
 
+// Selector de prenda dentro de la misma ficha: si el diseño también se vende
+// en otras prendas (mismo designGroup), el cliente las ve en un desplegable
+// con su precio y cambia de una a otra sin salir de la ventana de compra.
+function GarmentPicker({ product, allProducts, onPick }) {
+  const [open, setOpen] = useState(false);
+  if (!product.designGroup) return null;
+  const options = allProducts
+    .filter((p) => p.designGroup === product.designGroup)
+    .sort((a, b) => (a.category || "").localeCompare(b.category || "", "es") || (a.subcategory || "").localeCompare(b.subcategory || "", "es"));
+  if (options.length < 2) return null;
+  const labelOf = (p) => [p.category, p.subcategory].filter(Boolean).join(" · ") || p.name;
+  const priceOf = (p) => (p.salePrice && Number(p.salePrice) > 0 ? p.salePrice : p.price);
+  return (
+    <div className="mb-4 rounded-2xl" style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}>
+      <button type="button" onClick={() => setOpen((o) => !o)} className="kulto-btn w-full flex items-center justify-between gap-3 p-3 text-left" aria-expanded={open}>
+        <span className="min-w-0">
+          <span className="block text-[11px]" style={{ color: "var(--slate)" }}>Este diseño también se puede elegir en otras prendas</span>
+          <span className="block text-sm font-semibold truncate" style={{ color: "var(--bone)" }}>{labelOf(product)} · {formatPrice(priceOf(product))}</span>
+        </span>
+        <ChevronDown size={18} style={{ color: "var(--slate)", transform: open ? "rotate(180deg)" : "none", transition: "transform .2s" }} />
+      </button>
+      {open && (
+        <div className="px-3 pb-3 flex flex-col gap-1.5">
+          {options.map((p) => {
+            const on = p.id === product.id;
+            return (
+              <label
+                key={p.id}
+                className="kulto-btn flex items-center gap-3 rounded-xl px-3 py-2 cursor-pointer"
+                style={{ background: on ? "var(--ink-3)" : "transparent", border: on ? "1px solid var(--sun)" : "1px solid var(--line)" }}
+              >
+                <input type="radio" name={`garment-${product.designGroup}`} checked={on} onChange={() => { if (!on) { onPick?.(p); setOpen(false); } }} />
+                <span className="flex-1 text-sm truncate" style={{ color: "var(--bone)" }}>{labelOf(p)}</span>
+                <span className="text-sm font-semibold" style={{ color: "var(--sun)" }}>{formatPrice(priceOf(p))}</span>
+              </label>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ProductModal({ product, allProducts, settings, onClose, onSwitchProduct, onAddToCart, favorites, onToggleFavorite, reviews, onGoHome, onGoCatalog, onView }) {
   const isFavorite = favorites?.includes(product.id);
   // Cuenta como "vista" cada vez que se abre la ficha de un producto — es la
@@ -3532,7 +3575,8 @@ function ProductModal({ product, allProducts, settings, onClose, onSwitchProduct
             { label: product.name },
           ]}
         />
-        <ProductConfigurator product={product} settings={settings} onAddToCart={onAddToCart} reviews={reviews} />
+        <GarmentPicker product={product} allProducts={allProducts} onPick={onSwitchProduct} />
+        <ProductConfigurator key={product.id} product={product} settings={settings} onAddToCart={onAddToCart} reviews={reviews} />
         <LinkedStyleProducts product={product} allProducts={allProducts} onOpen={onSwitchProduct} favorites={favorites} onToggleFavorite={onToggleFavorite} />
         <RelatedProducts product={product} allProducts={allProducts} onOpen={onSwitchProduct} favorites={favorites} onToggleFavorite={onToggleFavorite} />
       </div>
@@ -8097,6 +8141,11 @@ function AdminProductForm({ categories, groups, onAddCategory, onAddGroup, saved
   const [duplicating, setDuplicating] = useState(false);
   const [dupDone, setDupDone] = useState(0);
   const toggleDupCat = (cat) => setDupCats((prev) => (prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat]));
+  // Precio y carpeta (tipo de prenda) propios de cada categoría elegida: una
+  // sudadera no vale lo mismo que una camiseta. Si no se escribe un precio,
+  // la copia usa el del producto.
+  const [dupCfg, setDupCfg] = useState({});
+  const setDupField = (cat, field, value) => setDupCfg((prev) => ({ ...prev, [cat]: { ...(prev[cat] || {}), [field]: value } }));
 
   const handleDuplicateToCategories = async () => {
     if (!draft.name || !draft.category || !draft.price || dupCats.length === 0) return;
@@ -8121,6 +8170,9 @@ function AdminProductForm({ categories, groups, onAddCategory, onAddGroup, saved
         category: cat,
         designGroup: group,
         sku: "",
+        price: Number(dupCfg[cat]?.price) > 0 ? Number(dupCfg[cat].price) : Number(draft.price),
+        salePrice: null,
+        subcategory: (dupCfg[cat]?.sub || "").trim(),
         // Que un diseño esté disponible en otra prenda no significa que
         // también sea "más vendido", "oferta" o "tendencia" — cada modelo
         // arranca sin esas etiquetas, aunque el original ya las tuviera.
@@ -8134,6 +8186,7 @@ function AdminProductForm({ categories, groups, onAddCategory, onAddGroup, saved
     }
     setDuplicating(false);
     setDupCats([]);
+    setDupCfg({});
   };
 
   const inputStyle = { background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" };
@@ -8423,6 +8476,22 @@ function AdminProductForm({ categories, groups, onAddCategory, onAddGroup, saved
               </label>
             ))}
           </div>
+          {dupCats.length > 0 && (
+            <div className="flex flex-col gap-2 mb-3">
+              <p className="text-xs" style={{ color: "var(--slate)" }}>Para cada prenda elegida, indicá qué tipo es (carpeta, ej: "Con capucha") y su precio. Si dejás el precio vacío, usa el de este producto.</p>
+              {dupCats.map((c) => {
+                const subs = Array.from(new Set(allProducts.filter((p) => p.category === c && p.subcategory).map((p) => p.subcategory)));
+                return (
+                  <div key={c} className="grid grid-cols-[1fr_1fr_90px] gap-2 items-center">
+                    <span className="text-xs font-semibold truncate" style={{ color: "var(--bone)" }}>{c}</span>
+                    <input list={`kulto-dup-sub-${c}`} placeholder="Tipo / carpeta" value={dupCfg[c]?.sub || ""} onChange={(e) => setDupField(c, "sub", e.target.value)} className="rounded-lg p-2 text-xs" style={inputStyle} />
+                    <datalist id={`kulto-dup-sub-${c}`}>{subs.map((s) => <option key={s} value={s} />)}</datalist>
+                    <input type="number" placeholder="Precio €" value={dupCfg[c]?.price || ""} onChange={(e) => setDupField(c, "price", e.target.value)} className="rounded-lg p-2 text-xs" style={inputStyle} />
+                  </div>
+                );
+              })}
+            </div>
+          )}
           <button
             type="button"
             disabled={dupCats.length === 0 || duplicating || !draft.name || !draft.category || !draft.price}
@@ -15215,6 +15284,38 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
   const [expandedModelsFor, setExpandedModelsFor] = useState(null);
   const [savingModelsFor, setSavingModelsFor] = useState(null);
   const linkedVariants = (p) => (p.designGroup ? sellableProducts.filter((x) => x.designGroup === p.designGroup) : [p]);
+  // Precio y tipo (carpeta) de cada prenda donde está disponible un diseño.
+  // Se arma en "modelCfg" antes de guardar; si la copia ya existe, se edita.
+  const [modelCfg, setModelCfg] = useState({});
+  const setModelField = (key, patch) => setModelCfg((prev) => ({ ...prev, [key]: { ...(prev[key] || {}), ...patch } }));
+  const saveModelVariant = async (p, cat) => {
+    const key = `${p.id}|${cat}`;
+    const cfg = modelCfg[key] || {};
+    const variants = linkedVariants(p);
+    const existing = variants.find((x) => x.category === cat);
+    setSavingModelsFor(p.id);
+    try {
+      if (existing) {
+        const newPrice = cfg.price !== undefined && Number(cfg.price) > 0 ? Number(cfg.price) : existing.price;
+        const priceChanged = newPrice !== existing.price;
+        await onSaveProduct({ ...existing, subcategory: cfg.sub !== undefined ? cfg.sub.trim() : existing.subcategory || "", price: newPrice, salePrice: priceChanged ? null : existing.salePrice, tags: { ...existing.tags, oferta: priceChanged ? false : !!existing.tags?.oferta } });
+      } else {
+        let group = p.designGroup;
+        let base = p;
+        if (!group) {
+          group = `${p.name} (${genId("dg").slice(-5)})`;
+          base = { ...p, designGroup: group };
+          await onSaveProduct(base);
+        }
+        const price = Number(cfg.price) > 0 ? Number(cfg.price) : p.price;
+        const copy = { ...base, id: genId("p"), category: cat, subcategory: (cfg.sub || "").trim(), price, salePrice: null, designGroup: group, sku: generateSku(base.name, sellableProducts), tags: { ...base.tags, bestseller: false, oferta: false, tendencia: false }, createdAt: Date.now(), salesCount: 0, viewsCount: 0 };
+        await onSaveProduct(copy);
+      }
+      setModelCfg((prev) => { const n = { ...prev }; delete n[key]; return n; });
+    } finally {
+      setSavingModelsFor(null);
+    }
+  };
   const toggleModelForProduct = async (p, cat) => {
     if (cat === p.category || savingModelsFor) return;
     const variants = linkedVariants(p);
@@ -15991,23 +16092,62 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                             {modelsOpen && (
                               <div className="rounded-xl p-3 flex flex-col gap-2 ml-2" style={{ background: "var(--ink-3)", border: "1px solid var(--line)" }} onClick={(e) => e.stopPropagation()}>
                                 <p className="text-[11px]" style={{ color: "var(--slate)" }}>
-                                  Tildá los modelos donde también está disponible "{p.name}". Destildá uno para sacarlo de ese modelo.
+                                  Tildá las prendas donde también se vende "{p.name}", elegí qué tipo es (carpeta) y ponele su precio — cada prenda puede costar distinto. Destildar una la saca (borra esa copia).
                                 </p>
-                                <div className="flex flex-wrap gap-1.5">
+                                <div className="flex flex-col gap-2">
                                   {categories.map((cat) => {
                                     const isOwn = cat === p.category;
-                                    const isOn = isOwn || variants.some((v) => v.category === cat);
+                                    const existing = variants.find((v) => v.category === cat);
+                                    const key = `${p.id}|${cat}`;
+                                    const cfg = modelCfg[key];
+                                    const isOn = isOwn || !!existing || !!cfg?.on;
+                                    const subs = Array.from(new Set(sellableProducts.filter((x) => x.category === cat && x.subcategory).map((x) => x.subcategory)));
+                                    const busy = savingModelsFor === p.id;
                                     return (
-                                      <button
-                                        key={cat}
-                                        type="button"
-                                        disabled={isOwn || savingModelsFor === p.id}
-                                        onClick={() => toggleModelForProduct(p, cat)}
-                                        className="kulto-btn text-[11px] font-semibold px-2.5 py-1 rounded-full flex items-center gap-1"
-                                        style={{ background: isOn ? "var(--sun)" : "var(--ink)", color: isOn ? "var(--ink)" : "var(--bone)", border: "1px solid var(--line)", opacity: isOwn ? 0.7 : 1 }}
-                                      >
-                                        {isOn && <Check size={11} />} {cat}
-                                      </button>
+                                      <div key={cat} className="flex flex-col gap-1.5 rounded-lg p-2" style={{ background: isOn ? "rgba(255,255,255,0.04)" : "transparent", border: "1px solid var(--line)" }}>
+                                        <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer" style={{ color: "var(--bone)", opacity: isOwn ? 0.7 : 1 }}>
+                                          <input
+                                            type="checkbox"
+                                            checked={isOn}
+                                            disabled={isOwn || busy}
+                                            onChange={() => {
+                                              if (existing) toggleModelForProduct(p, cat);
+                                              else setModelField(key, { on: !cfg?.on });
+                                            }}
+                                          />
+                                          {cat}{isOwn ? " (esta prenda)" : ""}
+                                        </label>
+                                        {isOn && !isOwn && (
+                                          <div className="grid grid-cols-[1fr_90px_auto] gap-2 items-center">
+                                            <input
+                                              list={`kulto-sub-${p.id}-${cat}`}
+                                              placeholder="Tipo / carpeta (ej: Con capucha)"
+                                              value={cfg?.sub !== undefined ? cfg.sub : (existing?.subcategory || "")}
+                                              onChange={(e) => setModelField(key, { sub: e.target.value })}
+                                              className="rounded-lg p-2 text-xs"
+                                              style={{ background: "var(--ink)", color: "var(--bone)", border: "1px solid var(--line)" }}
+                                            />
+                                            <datalist id={`kulto-sub-${p.id}-${cat}`}>{subs.map((s) => <option key={s} value={s} />)}</datalist>
+                                            <input
+                                              type="number"
+                                              placeholder="Precio €"
+                                              value={cfg?.price !== undefined ? cfg.price : (existing ? existing.price : "")}
+                                              onChange={(e) => setModelField(key, { price: e.target.value })}
+                                              className="rounded-lg p-2 text-xs"
+                                              style={{ background: "var(--ink)", color: "var(--bone)", border: "1px solid var(--line)" }}
+                                            />
+                                            <button
+                                              type="button"
+                                              disabled={busy || (!!existing && cfg?.sub === undefined && cfg?.price === undefined)}
+                                              onClick={() => saveModelVariant(p, cat)}
+                                              className="kulto-btn text-[11px] font-semibold px-3 py-2 rounded-full"
+                                              style={{ background: "var(--sun)", color: "var(--ink)", opacity: busy || (!!existing && cfg?.sub === undefined && cfg?.price === undefined) ? 0.5 : 1 }}
+                                            >
+                                              {existing ? "Guardar" : "Agregar"}
+                                            </button>
+                                          </div>
+                                        )}
+                                      </div>
                                     );
                                   })}
                                 </div>
