@@ -876,12 +876,48 @@ function buildAdminOrderEmailHtml(order, settings) {
 // Calls the serverless function in /api/analyze-product.js to suggest a name,
 // category and description from a product photo. Needs ANTHROPIC_API_KEY set
 // on the server (Vercel) — see the README. Fails gracefully if not configured.
+// La foto puede venir como dirección web (ya subida al almacenamiento) o como
+// dato en base64. La IA necesita base64 y chica (para que el envío sea rápido
+// y no supere el límite del servidor): se descarga si hace falta y se achica
+// a 1024 px como JPG.
+async function photoToSmallDataUrl(src, maxSide = 1024) {
+  let blob;
+  if (/^data:/i.test(src)) blob = await (await fetch(src)).blob();
+  else blob = await (await fetch(src, { mode: "cors" })).blob();
+  const url = URL.createObjectURL(blob);
+  try {
+    const img = await new Promise((resolve, reject) => {
+      const i = new Image();
+      i.onload = () => resolve(i);
+      i.onerror = reject;
+      i.src = url;
+    });
+    const k = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement("canvas");
+    c.width = Math.max(1, Math.round(img.naturalWidth * k));
+    c.height = Math.max(1, Math.round(img.naturalHeight * k));
+    const ctx = c.getContext("2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.drawImage(img, 0, 0, c.width, c.height);
+    return c.toDataURL("image/jpeg", 0.85);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 async function analyzeProductPhoto(imageBase64, categories) {
   try {
+    let image = imageBase64;
+    try {
+      image = await photoToSmallDataUrl(imageBase64);
+    } catch {
+      return { ok: false, error: "No se pudo leer la foto para analizarla. Probá subir la foto de nuevo." };
+    }
     const res = await fetch("/api/analyze-product", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ image: imageBase64, categories }),
+      body: JSON.stringify({ image, categories }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
