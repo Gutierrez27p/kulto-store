@@ -2265,6 +2265,13 @@ function GlobalStyle({ colors }) {
       .kulto-flip-face{ position:absolute; inset:0; width:100%; height:100%; backface-visibility:hidden; -webkit-backface-visibility:hidden; }
       .kulto-flip-back{ transform:rotateY(180deg); }
       .kulto-flip-inner.is-flipped{ transform:rotateY(180deg); }
+      .kulto-tip{ position:relative; }
+      .kulto-tip::after{ content:attr(data-tip); position:absolute; bottom:calc(100% + 8px); left:50%; transform:translateX(-50%) translateY(4px); background:rgba(0,0,0,.9); color:#fff; font-size:11px; font-weight:600; line-height:1; padding:6px 9px; border-radius:8px; white-space:nowrap; opacity:0; pointer-events:none; transition:opacity .15s ease, transform .15s ease; z-index:80; }
+      .kulto-tip-l::after{ left:0; transform:translateY(4px); }
+      @media (hover:hover){
+        .kulto-tip:hover::after{ opacity:1; transform:translateX(-50%) translateY(0); }
+        .kulto-tip-l:hover::after{ opacity:1; transform:translateY(0); }
+      }
       .kulto-float-img{ transition:transform .3s ease, filter .3s ease; filter:drop-shadow(0 6px 8px rgba(0,0,0,.35)); }
       @media (hover:hover){
         .kulto-flip-outer:hover .kulto-float-img{ transform:translateY(-8px) scale(1.06); filter:drop-shadow(0 18px 16px rgba(0,0,0,.5)); }
@@ -2362,9 +2369,10 @@ function ColorSwatch({ hex, selected, onClick, title }) {
   return (
     <button
       type="button"
-      title={title}
+      data-tip={title}
+      aria-label={title}
       onClick={onClick}
-      className="kulto-btn rounded-full"
+      className="kulto-btn kulto-tip rounded-full"
       style={{
         width: 34, height: 34, background: hex,
         border: selected ? "3px solid var(--sun)" : "2px solid rgba(243,239,230,0.35)",
@@ -2653,14 +2661,14 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
                 key={i}
                 type="button"
                 onClick={(e) => pickColor(e, i)}
-                className="kulto-btn rounded-full shrink-0"
+                className="kulto-btn kulto-tip kulto-tip-l rounded-full shrink-0"
                 style={{
                   width: 14,
                   height: 14,
                   background: c.hex,
                   border: i === activeColorIdx ? "2px solid var(--sun)" : "1px solid rgba(243,239,230,0.3)",
                 }}
-                title={c.name}
+                data-tip={c.name}
                 aria-label={`Ver ${product.name} en color ${c.name}`}
               />
             ))}
@@ -2712,9 +2720,9 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
                       key={i}
                       type="button"
                       onClick={() => setQuickColorIdx(i)}
-                      className="kulto-btn rounded-full shrink-0"
+                      className="kulto-btn kulto-tip kulto-tip-l rounded-full shrink-0"
                       style={{ width: 26, height: 26, background: c.hex, border: i === quickColorIdx ? "2px solid var(--sun)" : "1px solid var(--line)" }}
-                      title={c.name}
+                      data-tip={c.name}
                       aria-label={`Color ${c.name}`}
                     />
                   ))}
@@ -4704,8 +4712,9 @@ function Catalog({ settings, initialCollection, products, categories, groups, on
                       <button
                         key={key}
                         onClick={() => toggleColor(c.name)}
-                        title={c.name}
-                        className="kulto-btn w-8 h-8 rounded-full flex items-center justify-center"
+                        data-tip={c.name}
+                        aria-label={c.name}
+                        className="kulto-btn kulto-tip kulto-tip-l w-8 h-8 rounded-full flex items-center justify-center"
                         style={{ background: c.hex, border: active ? "2px solid var(--sun)" : "1px solid var(--line)" }}
                       >
                         {active && <Check size={14} color="#fff" style={{ filter: "drop-shadow(0 0 2px rgba(0,0,0,0.8))" }} />}
@@ -5340,12 +5349,14 @@ function TemplateProductCard({ product, onSelect, bg }) {
               {AUDIENCE_LABELS[product.audience] || product.audience}
             </span>
           )}
+          {!product.hideCardName && (
           <span
             className="font-semibold text-sm py-2 px-2"
             style={{ color: "var(--bone)", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", minHeight: "2.6em" }}
           >
             {product.name}
           </span>
+          )}
           {hasBackInfo && (
             <span
               role="button"
@@ -5417,7 +5428,7 @@ function cardBgFor(settings, keys, fallback) {
 // Tarjeta genérica que se da vuelta (categoría o estilo de prenda en
 // "Personalizar"): adelante la foto y el nombre, atrás la información — igual
 // que TemplateProductCard. "colors" es la lista de bolitas de color.
-function PickFlipCard({ title, thumb, thumbFill = false, bg, description, details = [], colors = [], onSelect, ctaLabel = "Elegir" }) {
+function PickFlipCard({ title, hideName = false, thumb, thumbFill = false, bg, description, details = [], colors = [], onSelect, ctaLabel = "Elegir" }) {
   const [flipped, setFlipped] = useState(false);
   const unique = [];
   colors.forEach((c) => { if (c?.hex && !unique.some((u) => u.hex === c.hex)) unique.push(c); });
@@ -5434,12 +5445,14 @@ function PickFlipCard({ title, thumb, thumbFill = false, bg, description, detail
           <div className="w-full flex-1 overflow-hidden flex items-center justify-center" style={{ background: bg || "var(--ink-3)" }}>
             {thumb ? (thumbFill ? <FastImg loading="lazy" src={thumb} className="kulto-float-img w-full h-full object-cover" alt={title} /> : <UniformGarmentImg src={thumb} className="kulto-float-img w-full h-full object-contain p-4" alt={title} />) : <Shirt size={32} style={{ color: "rgba(243,239,230,0.4)" }} />}
           </div>
+          {!hideName && (
           <span
             className="font-semibold text-sm py-2 px-2"
             style={{ color: "var(--bone)", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", minHeight: "2.6em" }}
           >
             {title}
           </span>
+          )}
           <span
             role="button"
             tabIndex={0}
@@ -5499,6 +5512,7 @@ function Wizard({ products, categories, settings, designLibrary, designFolders, 
   const [step, setStep] = useState(1); // 1 prenda, 2 color, 3 talla, 4 diseño (fuente/adelante/atrás/vista final)
   const [prod, setProd] = useState(null);
   const [colorIdx, setColorIdx] = useState(0);
+  const [colorConfirm, setColorConfirm] = useState(null);
   const [sizeIdx, setSizeIdx] = useState(0);
   // "source": null (eligiendo) | "self" (sube su foto) | "library" (elige un diseño de Kulto) | "service" (pide que se lo hagamos)
   const [source, setSource] = useState(null);
@@ -5778,6 +5792,7 @@ function Wizard({ products, categories, settings, designLibrary, designFolders, 
                       <PickFlipCard
                         key={g}
                         title={g}
+                        hideName={!!settings.personalizeHideNames?.[`g:${g}`]}
                         thumb={thumb}
                         thumbFill={!!settings.personalizeGroupCovers?.[g]}
                         bg={cardBgFor(settings, [`g:${g}`], sample?.colors?.[0]?.hex)}
@@ -5811,6 +5826,7 @@ function Wizard({ products, categories, settings, designLibrary, designFolders, 
                     <PickFlipCard
                       key={sg}
                       title={sg}
+                      hideName={!!settings.personalizeHideNames?.[`s:${sg}`]}
                       thumb={thumb}
                       thumbFill={!!settings.personalizeSubcategoryCovers?.[sg]}
                       bg={cardBgFor(settings, [`s:${sg}`, `g:${groupSel}`], sample?.colors?.[0]?.hex)}
@@ -5889,7 +5905,7 @@ function Wizard({ products, categories, settings, designLibrary, designFolders, 
             {colorsForProduct.map((c, i) => (
               <button
                 key={i}
-                onClick={() => { setColorIdx(i); if (hasSizes) { setStep(3); } else { resetDesignState(); setStep(4); } }}
+                onClick={() => setColorConfirm(i)}
                 className="kulto-btn flex flex-col items-center gap-2"
               >
                 <span
@@ -5902,6 +5918,35 @@ function Wizard({ products, categories, settings, designLibrary, designFolders, 
               </button>
             ))}
           </div>
+        {colorConfirm !== null && colorsForProduct[colorConfirm] && (() => {
+          const cc = colorsForProduct[colorConfirm];
+          return (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.7)" }} onClick={() => setColorConfirm(null)}>
+              <div onClick={(e) => e.stopPropagation()} className="rounded-3xl p-6 max-w-xs w-full text-center" style={{ background: "var(--ink)", border: "1px solid var(--line)" }}>
+                <span className="w-28 h-28 rounded-full mx-auto flex items-center justify-center mb-4" style={{ background: cc.hex, border: "3px solid var(--sun)" }}>
+                  {(cc.frontImage || cc.images?.[0]) && <FastImg loading="lazy" src={cc.frontImage || cc.images[0]} className="w-20 h-20 object-contain rounded-full" alt="" />}
+                </span>
+                <p className="text-xs" style={{ color: "var(--slate)" }}>Vas a elegir el color</p>
+                <p className="text-xl font-bold mt-1" style={{ color: "var(--bone)" }}>{cc.name}</p>
+                <p className="text-xs mt-1 mb-5" style={{ color: "var(--slate)" }}>Código y nombre del color · {prod.name}</p>
+                <button
+                  onClick={() => {
+                    setColorIdx(colorConfirm);
+                    setColorConfirm(null);
+                    if (hasSizes) { setStep(3); } else { resetDesignState(); setStep(4); }
+                  }}
+                  className="kulto-btn w-full rounded-full py-3 font-semibold mb-2"
+                  style={{ background: "var(--signal)", color: "var(--bone)" }}
+                >
+                  Confirmar este color
+                </button>
+                <button onClick={() => setColorConfirm(null)} className="kulto-btn w-full rounded-full py-3 font-semibold" style={{ background: "var(--ink-2)", color: "var(--bone)", border: "1px solid var(--line)" }}>
+                  Elegir otro
+                </button>
+              </div>
+            </div>
+          );
+        })()}
         </div>
       )}
 
@@ -8933,6 +8978,7 @@ const AUDIENCE_OPTIONS = ["unisex", "hombre", "mujer", "kids"];
 const emptyTemplateDraft = {
   id: null,
   cardImage: null,
+  hideCardName: false,
   name: "",
   description: "",
   category: "",
@@ -9090,6 +9136,7 @@ function AdminTemplateForm({ categories, templateProducts = [], onAddCategory, o
         imageFit: editing.imageFit || "contain",
         imageBackground: editing.imageBackground ?? null,
         cardImage: editing.cardImage || null,
+        hideCardName: !!editing.hideCardName,
       });
       // La foto base queda guardada junto con la prenda, así no hay que
       // volver a subirla cada vez que se edita (y la carga masiva por
@@ -9239,6 +9286,7 @@ function AdminTemplateForm({ categories, templateProducts = [], onAddCategory, o
       imageFit: draft.imageFit || "contain",
       imageBackground: draft.imageBackground ?? null,
       cardImage: draft.cardImage || null,
+      hideCardName: !!draft.hideCardName,
       sizeGuide: draft.sizeGuide || [],
       sizeGuideImage: draft.sizeGuideImage || null,
       // Guardamos la foto base junto con la prenda (si se cargó una) para no
@@ -9438,6 +9486,10 @@ function AdminTemplateForm({ categories, templateProducts = [], onAddCategory, o
             <p className="text-xs" style={{ color: "var(--slate)" }}>
               {draft.cardImage ? "Esta foto se ve en la tarjeta de este modelo." : "Automática: se usa la foto del color de portada. Subí una acá si querés otra distinta."} No cambia las fotos de los colores. Recordá guardar la prenda.
             </p>
+            <label className="flex items-center gap-2 text-xs mt-3 cursor-pointer" style={{ color: "var(--bone)" }}>
+              <input type="checkbox" checked={!draft.hideCardName} onChange={(e) => setDraft({ ...draft, hideCardName: !e.target.checked })} />
+              Mostrar el nombre en la tarjeta (si lo desmarcás, se ve solo la prenda)
+            </label>
           </div>
         </div>
         {cardCropSource && (
@@ -14315,6 +14367,14 @@ function AdminPersonalizeGroupImages({ templateProducts = [], settings, onSave }
               {img && <button onClick={() => setCropJob({ settingKey, name: g, source: img })} className="kulto-btn text-[10px]" style={{ color: "var(--sun)" }}>Recortar</button>}
               {img && <button onClick={() => remove(settingKey, g)} className="kulto-btn text-[10px]" style={{ color: "var(--signal)" }}>Quitar</button>}
             </div>
+            <label className="flex items-center gap-1.5 text-[10px] cursor-pointer" style={{ color: "var(--bone)" }}>
+              <input
+                type="checkbox"
+                checked={!(settings.personalizeHideNames || {})[`${settingKey === "personalizeGroupCovers" ? "g" : "s"}:${g}`]}
+                onChange={(e) => onSave({ personalizeHideNames: { ...(settings.personalizeHideNames || {}), [`${settingKey === "personalizeGroupCovers" ? "g" : "s"}:${g}`]: !e.target.checked } })}
+              />
+              Mostrar nombre
+            </label>
             {savedKey === `${settingKey}:${g}` && <span className="text-[10px]" style={{ color: "var(--sun)" }}>Guardado ✓</span>}
           </div>
         );
