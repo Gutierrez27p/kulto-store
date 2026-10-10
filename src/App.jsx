@@ -1024,6 +1024,726 @@ function tintImageToColor(src, hex) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Mockup con diseño: el admin sube la prenda vacía (clara), el diseño en PNG y
+// dónde va. Al cambiar de color solo se repinta la prenda y el diseño se queda
+// en el mismo lugar. Las posiciones están en % de la foto del mockup (no de la
+// caja donde se muestra), así se ve igual en la ficha, la tarjeta y el editor.
+// ---------------------------------------------------------------------------
+const mockupPrepCache = new Map(); // src -> Promise<prep>
+const mockupTintedCache = new Map(); // `${src}|${hex}` -> canvas
+const mockupImgCache = new Map(); // src -> Promise<Image>
+function loadMockupImg(src) {
+  if (!mockupImgCache.has(src)) {
+    mockupImgCache.set(src, new Promise((resolve, reject) => {
+      const i = new Image();
+      i.crossOrigin = "anonymous";
+      i.onload = () => resolve(i);
+      i.onerror = reject;
+      i.src = src;
+    }));
+  }
+  return mockupImgCache.get(src);
+}
+
+// Analiza la foto del mockup UNA vez: detecta cuál es la prenda (los píxeles
+// parecidos al color del centro de la foto, conectados entre sí) y guarda las
+// luces y sombras de la tela. Así se puede repintar la prenda de cualquier
+// color —aunque el mockup sea negro— sin tocar el fondo, y el diseño se
+// recorta a la forma de la prenda.
+function prepareMockupBase(src) {
+  if (mockupPrepCache.has(src)) return mockupPrepCache.get(src);
+  const p = (async () => {
+    const img = await loadMockupImg(src);
+    const k = Math.min(1, 900 / Math.max(img.naturalWidth, img.naturalHeight));
+    const w = Math.max(1, Math.round(img.naturalWidth * k));
+    const h = Math.max(1, Math.round(img.naturalHeight * k));
+    const cv = document.createElement("canvas");
+    cv.width = w; cv.height = h;
+    const ctx = cv.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0, w, h);
+    const orig = ctx.getImageData(0, 0, w, h);
+    const d = orig.data;
+    const n = w * h;
+    const lum = new Float32Array(n);
+    for (let i = 0; i < n; i++) lum[i] = 0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2];
+    // color de la prenda: mediana de un parche en el centro de la foto
+    const rs = [], gs = [], bs = [];
+    for (let y = Math.floor(h * 0.35); y < Math.floor(h * 0.55); y += 3) {
+      for (let x = Math.floor(w * 0.4); x < Math.floor(w * 0.6); x += 3) {
+        const o = (y * w + x) * 4;
+        if (d[o + 3] < 10) continue;
+        rs.push(d[o]); gs.push(d[o + 1]); bs.push(d[o + 2]);
+      }
+    }
+    const med = (a) => { a.sort((x, y) => x - y); return a.length ? a[a.length >> 1] : 128; };
+    const rr = med(rs), gg = med(gs), bb = med(bs);
+    const refLum = 0.299 * rr + 0.587 * gg + 0.114 * bb;
+    const thr = refLum < 90 ? 70 : 48;
+    const cand = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+      if (d[i * 4 + 3] < 10) continue;
+      const dr = d[i * 4] - rr, dg = d[i * 4 + 1] - gg, db = d[i * 4 + 2] - bb;
+      if (Math.sqrt(dr * dr + dg * dg + db * db) < thr) cand[i] = 1;
+    }
+    // zona conectada que contiene el centro
+    let seed = -1;
+    for (let r = 0; r < Math.max(w, h) / 2 && seed < 0; r += 4) {
+      for (let dy = -r; dy <= r && seed < 0; dy += 4) {
+        for (let dx = -r; dx <= r; dx += 4) {
+          const x = Math.floor(w / 2) + dx, y = Math.floor(h * 0.45) + dy;
+          if (x < 0 || y < 0 || x >= w || y >= h) continue;
+          if (cand[y * w + x]) { seed = y * w + x; break; }
+        }
+      }
+    }
+    const mask = new Uint8Array(n);
+    if (seed >= 0) {
+      const stack = [seed];
+      mask[seed] = 1;
+      while (stack.length) {
+        const c = stack.pop();
+        const x = c % w, y = (c - x) / w;
+        if (x > 0 && cand[c - 1] && !mask[c - 1]) { mask[c - 1] = 1; stack.push(c - 1); }
+        if (x < w - 1 && cand[c + 1] && !mask[c + 1]) { mask[c + 1] = 1; stack.push(c + 1); }
+        if (y > 0 && cand[c - w] && !mask[c - w]) { mask[c - w] = 1; stack.push(c - w); }
+        if (y < h - 1 && cand[c + w] && !mask[c + w]) { mask[c + w] = 1; stack.push(c + w); }
+      }
+      // rellenar huecos (todo lo que no se alcanza desde el borde)
+      const outside = new Uint8Array(n);
+      const st2 = [];
+      const push = (i) => { if (!mask[i] && !outside[i]) { outside[i] = 1; st2.push(i); } };
+      for (let x = 0; x < w; x++) { push(x); push((h - 1) * w + x); }
+      for (let y = 0; y < h; y++) { push(y * w); push(y * w + w - 1); }
+      while (st2.length) {
+        const c = st2.pop();
+        const x = c % w, y = (c - x) / w;
+        if (x > 0) push(c - 1);
+        if (x < w - 1) push(c + 1);
+        if (y > 0) push(c - w);
+        if (y < h - 1) push(c + w);
+      }
+      for (let i = 0; i < n; i++) if (!outside[i]) mask[i] = 1;
+    }
+    let count = 0;
+    for (let i = 0; i < n; i++) count += mask[i];
+    if (count < n * 0.03) {
+      // no se pudo distinguir la prenda: se trata toda la foto como prenda
+      for (let i = 0; i < n; i++) mask[i] = d[i * 4 + 3] >= 10 ? 1 : 0;
+    }
+    // borde suave (desenfoque simple de 3x3, dos veces)
+    let soft = Float32Array.from(mask);
+    for (let pass = 0; pass < 2; pass++) {
+      const next = new Float32Array(n);
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          let s = 0, c = 0;
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              const xx = x + dx, yy = y + dy;
+              if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+              s += soft[yy * w + xx]; c++;
+            }
+          }
+          next[y * w + x] = s / c;
+        }
+      }
+      soft = next;
+    }
+    // luces y sombras de la tela, normalizadas
+    const sample = [];
+    for (let i = 0; i < n; i += 7) if (mask[i]) sample.push(lum[i]);
+    sample.sort((a, b) => a - b);
+    const lref = Math.max(1, sample.length ? sample[sample.length >> 1] : 128);
+    const ratios = sample.map((v) => Math.min(3, Math.max(0.2, v / lref))).sort((a, b) => a - b);
+    const p97 = ratios.length ? ratios[Math.min(ratios.length - 1, Math.floor(ratios.length * 0.97))] : 1;
+    const shade = new Float32Array(n);
+    for (let i = 0; i < n; i++) shade[i] = Math.min(1, Math.max(0.12, 0.88 + 0.5 * (Math.min(3, Math.max(0.2, lum[i] / lref)) - 1)));
+    const maskCv = document.createElement("canvas");
+    maskCv.width = w; maskCv.height = h;
+    const mctx = maskCv.getContext("2d");
+    const mimg = mctx.createImageData(w, h);
+    for (let i = 0; i < n; i++) { mimg.data[i * 4 + 3] = Math.round(soft[i] * 255); }
+    mctx.putImageData(mimg, 0, 0);
+    return { w, h, orig, soft, shade, maskCv };
+  })();
+  mockupPrepCache.set(src, p);
+  return p;
+}
+
+function tintedMockupCanvas(src, prep, hex) {
+  const key = `${src}|${hex}`;
+  if (mockupTintedCache.has(key)) return mockupTintedCache.get(key);
+  const { w, h, orig, soft, shade } = prep;
+  const { r: tr, g: tg, b: tb } = hexToRgb(hex);
+  const cv = document.createElement("canvas");
+  cv.width = w; cv.height = h;
+  const ctx = cv.getContext("2d");
+  const out = ctx.createImageData(w, h);
+  const d = orig.data, o = out.data;
+  for (let i = 0; i < w * h; i++) {
+    const a = soft[i], s = shade[i] * 0.98;
+    o[i * 4] = d[i * 4] * (1 - a) + tr * s * a;
+    o[i * 4 + 1] = d[i * 4 + 1] * (1 - a) + tg * s * a;
+    o[i * 4 + 2] = d[i * 4 + 2] * (1 - a) + tb * s * a;
+    o[i * 4 + 3] = d[i * 4 + 3];
+  }
+  ctx.putImageData(out, 0, 0);
+  mockupTintedCache.set(key, cv);
+  return cv;
+}
+
+function activeMockup(product) {
+  const m = product?.mockup;
+  return m && m.enabled && m.base ? m : null;
+}
+
+function MockupComposite({ mockup, hex, innerRef, designProps }) {
+  const canvasRef = useRef(null);
+  const [st, setSt] = useState({ prep: null, dimg: null, error: false });
+  useEffect(() => {
+    let alive = true;
+    setSt({ prep: null, dimg: null, error: false });
+    Promise.all([prepareMockupBase(mockup.base), mockup.design ? loadMockupImg(mockup.design) : Promise.resolve(null)])
+      .then(([prep, dimg]) => { if (alive) setSt({ prep, dimg, error: false }); })
+      .catch(() => { if (alive) setSt({ prep: null, dimg: null, error: true }); });
+    return () => { alive = false; };
+  }, [mockup.base, mockup.design]);
+  useEffect(() => {
+    const { prep, dimg } = st;
+    const cv = canvasRef.current;
+    if (!prep || !cv) return;
+    cv.width = prep.w; cv.height = prep.h;
+    const ctx = cv.getContext("2d");
+    ctx.clearRect(0, 0, prep.w, prep.h);
+    ctx.drawImage(tintedMockupCanvas(mockup.base, prep, hex || "#ffffff"), 0, 0);
+    if (dimg) {
+      const layer = document.createElement("canvas");
+      layer.width = prep.w; layer.height = prep.h;
+      const lctx = layer.getContext("2d");
+      const dw = prep.w * ((mockup.w ?? 40) / 100);
+      const dh = dw * (dimg.naturalHeight / dimg.naturalWidth);
+      lctx.translate(prep.w * ((mockup.x ?? 50) / 100), prep.h * ((mockup.y ?? 38) / 100));
+      lctx.rotate(((mockup.rot || 0) * Math.PI) / 180);
+      lctx.drawImage(dimg, -dw / 2, -dh / 2, dw, dh);
+      lctx.setTransform(1, 0, 0, 1, 0, 0);
+      lctx.globalCompositeOperation = "destination-in";
+      lctx.drawImage(prep.maskCv, 0, 0);
+      ctx.drawImage(layer, 0, 0);
+    }
+  }, [st, hex, mockup.base, mockup.x, mockup.y, mockup.w, mockup.rot]);
+  const ar = st.prep ? st.prep.w / st.prep.h : Number(mockup.ar) > 0 ? Number(mockup.ar) : 0.8;
+  const boxStyle = { position: "relative", width: `min(100cqw, calc(100cqh * ${ar}))`, aspectRatio: String(ar), ...(designProps?.style || {}) };
+  const { style: _ignored, ...handlers } = designProps || {};
+  return (
+    <div className="w-full h-full flex items-center justify-center" style={{ containerType: "size" }}>
+      <div ref={innerRef} style={boxStyle} {...handlers}>
+        {st.error ? (
+          <>
+            <img src={mockup.base} alt="" draggable={false} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "fill", pointerEvents: "none" }} />
+            {mockup.design && <img src={mockup.design} alt="" draggable={false} style={{ position: "absolute", left: `${mockup.x ?? 50}%`, top: `${mockup.y ?? 38}%`, width: `${mockup.w ?? 40}%`, transform: `translate(-50%, -50%) rotate(${mockup.rot || 0}deg)`, objectFit: "contain", pointerEvents: "none" }} />}
+          </>
+        ) : (
+          <canvas ref={canvasRef} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Averigua dónde está puesto el diseño en la foto de ejemplo: compara el
+// ejemplo con el mockup vacío (tienen que ser la misma foto), toma lo que
+// cambió y calcula posición, tamaño e inclinación del diseño.
+async function detectDesignPlacement(baseSrc, exampleSrc, designSrc) {
+  const [bi, ei, di] = await Promise.all([loadMockupImg(baseSrc), loadMockupImg(exampleSrc), loadMockupImg(designSrc)]);
+  const ra = bi.naturalWidth / bi.naturalHeight, rb = ei.naturalWidth / ei.naturalHeight;
+  if (Math.abs(ra - rb) / ra > 0.04) return { ok: false, error: "El ejemplo y el mockup vacío no tienen las mismas proporciones. Tienen que ser la misma foto, una sin diseño y otra con el diseño puesto." };
+  const k = Math.min(1, 520 / Math.max(bi.naturalWidth, bi.naturalHeight));
+  const W = Math.max(1, Math.round(bi.naturalWidth * k)), H = Math.max(1, Math.round(bi.naturalHeight * k));
+  const grab = (img) => {
+    const c = document.createElement("canvas");
+    c.width = W; c.height = H;
+    const x = c.getContext("2d", { willReadFrequently: true });
+    x.drawImage(img, 0, 0, W, H);
+    return x.getImageData(0, 0, W, H).data;
+  };
+  const A = grab(bi), B = grab(ei);
+  const n = W * H;
+  const diff = new Uint8Array(n);
+  let total = 0;
+  for (let i = 0; i < n; i++) {
+    const m = Math.max(Math.abs(A[i * 4] - B[i * 4]), Math.abs(A[i * 4 + 1] - B[i * 4 + 1]), Math.abs(A[i * 4 + 2] - B[i * 4 + 2]));
+    if (m > 22) { diff[i] = 1; total++; }
+  }
+  if (total < n * 0.004) return { ok: false, error: "No encontré diferencias entre el ejemplo y el mockup vacío. ¿Es la misma foto, pero con el diseño puesto?" };
+  // unir pedacitos cercanos (dilatación) y quedarse con la zona más grande
+  const R = 5;
+  const dil = new Uint8Array(n);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      if (!diff[y * W + x]) continue;
+      for (let dy = -R; dy <= R; dy += 2) for (let dx = -R; dx <= R; dx += 2) {
+        const xx = x + dx, yy = y + dy;
+        if (xx >= 0 && yy >= 0 && xx < W && yy < H) dil[yy * W + xx] = 1;
+      }
+    }
+  }
+  const lab = new Int32Array(n);
+  let best = 0, bestId = 0, id = 0;
+  for (let i = 0; i < n; i++) {
+    if (!dil[i] || lab[i]) continue;
+    id++;
+    let cnt = 0;
+    const st = [i];
+    lab[i] = id;
+    while (st.length) {
+      const c = st.pop();
+      cnt++;
+      const x = c % W, y = (c - x) / W;
+      if (x > 0 && dil[c - 1] && !lab[c - 1]) { lab[c - 1] = id; st.push(c - 1); }
+      if (x < W - 1 && dil[c + 1] && !lab[c + 1]) { lab[c + 1] = id; st.push(c + 1); }
+      if (y > 0 && dil[c - W] && !lab[c - W]) { lab[c - W] = id; st.push(c - W); }
+      if (y < H - 1 && dil[c + W] && !lab[c + W]) { lab[c + W] = id; st.push(c + W); }
+    }
+    if (cnt > best) { best = cnt; bestId = id; }
+  }
+  const px = [], py = [];
+  for (let i = 0; i < n; i++) if (diff[i] && lab[i] === bestId) { px.push(i % W); py.push(Math.floor(i / W)); }
+  if (px.length < 50) return { ok: false, error: "No pude ubicar el diseño en el ejemplo." };
+  const sub = Math.max(1, Math.floor(px.length / 4000));
+  const P = [];
+  for (let i = 0; i < px.length; i += sub) P.push([px[i], py[i]]);
+  const q = (arr, p) => arr[Math.min(arr.length - 1, Math.max(0, Math.floor(arr.length * p)))];
+  let bestA = null;
+  for (let deg = -45; deg <= 45; deg += 1) {
+    const t = (-deg * Math.PI) / 180, c = Math.cos(t), s = Math.sin(t);
+    const us = [], vs = [];
+    for (const [x, y] of P) { us.push(x * c - y * s); vs.push(x * s + y * c); }
+    us.sort((a, b) => a - b); vs.sort((a, b) => a - b);
+    const u0 = q(us, 0.001), u1 = q(us, 0.999), v0 = q(vs, 0.001), v1 = q(vs, 0.999);
+    const area = (u1 - u0) * (v1 - v0);
+    if (!bestA || area < bestA.area) bestA = { area, deg, u0, u1, v0, v1 };
+  }
+  const { deg, u0, u1, v0, v1 } = bestA;
+  const th = (deg * Math.PI) / 180;
+  // centro del rectángulo girado, de vuelta a coordenadas de la foto
+  const uc = (u0 + u1) / 2, vc = (v0 + v1) / 2;
+  const t0 = (-deg * Math.PI) / 180;
+  const cx = uc * Math.cos(t0) + vc * Math.sin(t0);
+  const cy = -uc * Math.sin(t0) + vc * Math.cos(t0);
+  const bw = u1 - u0;
+  // parte "con tinta" del diseño (sin los márgenes transparentes)
+  const dc = document.createElement("canvas");
+  const dsc = Math.min(1, 400 / Math.max(di.naturalWidth, di.naturalHeight));
+  dc.width = Math.max(1, Math.round(di.naturalWidth * dsc));
+  dc.height = Math.max(1, Math.round(di.naturalHeight * dsc));
+  const dx = dc.getContext("2d", { willReadFrequently: true });
+  dx.drawImage(di, 0, 0, dc.width, dc.height);
+  const dd = dx.getImageData(0, 0, dc.width, dc.height).data;
+  let mnx = dc.width, mxx = 0, mny = dc.height, mxy = 0;
+  for (let y = 0; y < dc.height; y++) for (let x = 0; x < dc.width; x++) {
+    if (dd[(y * dc.width + x) * 4 + 3] > 110) { if (x < mnx) mnx = x; if (x > mxx) mxx = x; if (y < mny) mny = y; if (y > mxy) mxy = y; }
+  }
+  if (mxx <= mnx) return { ok: false, error: "No pude leer el diseño (¿es un PNG con fondo transparente?)." };
+  const cw = (mxx - mnx + 1) / dc.width; // ancho de la parte con tinta, como fracción del diseño
+  const offX = ((mnx + mxx) / 2 / dc.width - 0.5), offY = ((mny + mxy) / 2 / dc.height - 0.5);
+  const dwPx = bw / cw; // ancho total del diseño en px de la foto
+  const dhPx = dwPx * (di.naturalHeight / di.naturalWidth);
+  const lx = offX * dwPx, ly = offY * dhPx;
+  const centerX = cx - (lx * Math.cos(th) - ly * Math.sin(th));
+  const centerY = cy - (lx * Math.sin(th) + ly * Math.cos(th));
+  return {
+    ok: true,
+    x: Math.round((centerX / W) * 1000) / 10,
+    y: Math.round((centerY / H) * 1000) / 10,
+    w: Math.round(((dwPx / W) * 100) * 10) / 10,
+    rot: deg,
+  };
+}
+
+// Editor del admin: sube mockup vacío, diseño PNG y portada, y acomoda el
+// diseño arrastrándolo (o con los deslizadores) viendo cómo queda en un color.
+function AdminMockupEditor({ draft, setDraft, inputStyle }) {
+  const m = draft.mockup || { enabled: true, base: null, ar: 0.8, design: null, x: 50, y: 38, w: 40, rot: 0, cover: null };
+  const set = (patch) => setDraft((d) => ({ ...d, mockup: { ...(d.mockup || { enabled: true, base: null, ar: 0.8, design: null, x: 50, y: 38, w: 40, rot: 0, cover: null }), ...patch } }));
+  const [previewHex, setPreviewHex] = useState(draft.colors?.[0]?.hex || "#E8452C");
+  const [busy, setBusy] = useState(false);
+  const innerRef = useRef(null);
+  const dragging = useRef(false);
+  const [detecting, setDetecting] = useState(false);
+  const [detectMsg, setDetectMsg] = useState("");
+  const [showExample, setShowExample] = useState(false);
+  const autoPlace = async () => {
+    if (!m.base || !m.design || !m.cover) return;
+    setDetecting(true);
+    setDetectMsg("");
+    try {
+      const r = await detectDesignPlacement(m.base, m.cover, m.design);
+      if (r.ok) { set({ x: r.x, y: r.y, w: r.w, rot: r.rot }); setDetectMsg("Listo: acomodé el diseño como en el ejemplo. Podés ajustarlo a mano si hace falta."); }
+      else setDetectMsg(r.error);
+    } catch {
+      setDetectMsg("No pude leer las fotos para compararlas. Probá subirlas de nuevo.");
+    }
+    setDetecting(false);
+  };
+
+  const pick = async (file, kind) => {
+    if (!file) return;
+    setBusy(true);
+    const isPng = file.type === "image/png";
+    const b64 = await new Promise((resolve) => fileToBase64(file, resolve, 1400, isPng ? 1 : 0.9, isPng ? "image/png" : "image/jpeg"));
+    const url = (await uploadDataUrlToStorage(b64)) || b64;
+    if (kind === "base") {
+      const ar = await new Promise((resolve) => { const i = new Image(); i.onload = () => resolve(i.naturalWidth / i.naturalHeight); i.onerror = () => resolve(0.8); i.src = b64; });
+      set({ base: url, ar });
+    } else if (kind === "design") set({ design: url });
+    else set({ cover: url });
+    setBusy(false);
+  };
+
+  const moveTo = (e) => {
+    const r = innerRef.current?.getBoundingClientRect();
+    if (!r) return;
+    const x = Math.max(0, Math.min(100, ((e.clientX - r.left) / r.width) * 100));
+    const y = Math.max(0, Math.min(100, ((e.clientY - r.top) / r.height) * 100));
+    set({ x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 });
+  };
+  const designProps = {
+    onPointerDown: (e) => { dragging.current = true; e.currentTarget.setPointerCapture?.(e.pointerId); e.preventDefault(); moveTo(e); },
+    onPointerMove: (e) => { if (dragging.current) moveTo(e); },
+    onPointerUp: () => { dragging.current = false; },
+    onPointerCancel: () => { dragging.current = false; },
+    style: { cursor: "crosshair", touchAction: "none" },
+  };
+
+  const slot = (label, hint, kind, value) => (
+    <div className="flex items-center gap-3">
+      <div className="w-14 h-16 rounded-lg overflow-hidden flex items-center justify-center shrink-0" style={{ background: "var(--ink)", border: value ? "2px solid var(--sun)" : "1px solid var(--line)" }}>
+        {value ? <img src={value} alt={label} className="w-full h-full object-contain" /> : <Upload size={16} style={{ color: "var(--slate)" }} />}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-xs font-semibold" style={{ color: "var(--bone)" }}>{label}</p>
+        <p className="text-[11px]" style={{ color: "var(--slate)" }}>{hint}</p>
+        <div className="flex items-center gap-3 mt-1">
+          <label className="kulto-btn text-[11px] px-2.5 py-1 rounded-full cursor-pointer" style={{ background: "var(--ink)", color: "var(--bone)", border: "1px solid var(--line)" }}>
+            {value ? "Cambiar" : "Subir"}
+            <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => { pick(e.target.files[0], kind); e.target.value = ""; }} />
+          </label>
+          {value && <button type="button" onClick={() => set({ [kind]: null })} className="kulto-btn text-[11px]" style={{ color: "var(--signal)" }}>Quitar</button>}
+        </div>
+      </div>
+    </div>
+  );
+
+  const canPreview = !!m.base;
+  return (
+    <div className="rounded-2xl p-3 flex flex-col gap-3" style={{ background: "var(--ink-3)", border: "1px dashed var(--line)" }}>
+      <div>
+        <p className="text-sm font-semibold" style={{ color: "var(--bone)" }}>Mockup con diseño (los colores se generan solos)</p>
+        <p className="text-xs mt-1" style={{ color: "var(--slate)" }}>
+          Subí la prenda vacía (mejor blanca o muy clara), el diseño en PNG sin fondo y una foto de portada de cómo querés que se vea. Cuando el cliente cambie de color, solo se pinta la prenda y el diseño queda en el mismo lugar.
+        </p>
+      </div>
+      <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer" style={{ color: "var(--bone)" }}>
+        <input type="checkbox" checked={!!m.enabled} onChange={(e) => set({ enabled: e.target.checked })} />
+        Usar el mockup en este producto
+      </label>
+      {slot("1. Mockup vacío", "La prenda sin estampa, de frente.", "base", m.base)}
+      {slot("2. Diseño (PNG)", "La estampa con fondo transparente.", "design", m.design)}
+      {slot("3. Ejemplo / portada", "Foto de cómo debe quedar: el mismo mockup con el diseño ya puesto en su lugar. Se ve en las tarjetas y sirve para acomodar el diseño solo.", "cover", m.cover)}
+      {m.base && m.design && m.cover && (
+        <div className="flex flex-col gap-1.5">
+          <button type="button" onClick={autoPlace} disabled={detecting} className="kulto-btn text-xs font-semibold px-4 py-2.5 rounded-full self-start" style={{ background: "var(--sun)", color: "var(--ink)", opacity: detecting ? 0.6 : 1 }}>
+            {detecting ? "Comparando…" : "Acomodar el diseño solo, según el ejemplo"}
+          </button>
+          {detectMsg && <p className="text-xs" style={{ color: detectMsg.startsWith("Listo") ? "var(--sun)" : "var(--signal)" }}>{detectMsg}</p>}
+        </div>
+      )}
+      {busy && <p className="text-xs" style={{ color: "var(--sun)" }}>Subiendo…</p>}
+      {canPreview && m.design && (
+        <div className="grid sm:grid-cols-2 gap-4">
+          <div>
+            <p className="text-xs mb-1" style={{ color: "var(--slate)" }}>Tocá o arrastrá sobre la prenda para mover el diseño:</p>
+            <div className="rounded-xl overflow-hidden mx-auto relative" style={{ aspectRatio: "4 / 5", maxWidth: 280, background: "var(--ink-2)", border: "1px solid var(--line)" }}>
+              <MockupComposite mockup={m} hex={previewHex} innerRef={innerRef} designProps={designProps} />
+              {showExample && m.cover && <img src={m.cover} alt="" draggable={false} className="absolute inset-0 w-full h-full object-contain" style={{ opacity: 0.45, pointerEvents: "none" }} />}
+            </div>
+            {m.cover && (
+              <label className="flex items-center gap-2 text-[11px] mt-2 cursor-pointer" style={{ color: "var(--bone)" }}>
+                <input type="checkbox" checked={showExample} onChange={(e) => setShowExample(e.target.checked)} />
+                Ver el ejemplo encima, para comparar
+              </label>
+            )}
+          </div>
+          <div className="flex flex-col gap-3">
+            {[["Tamaño", "w", 10, 90], ["Izquierda ↔ derecha", "x", 0, 100], ["Arriba ↕ abajo", "y", 0, 100], ["Giro (inclinación)", "rot", -45, 45]].map(([label, key, min, max]) => (
+              <label key={key} className="text-xs" style={{ color: "var(--bone)" }}>
+                {label}: {Math.round(m[key] ?? 0)}{key === "rot" ? "°" : "%"}
+                <input type="range" min={min} max={max} step="0.5" value={m[key] ?? 0} onChange={(e) => set({ [key]: Number(e.target.value) })} className="w-full" />
+              </label>
+            ))}
+            <div>
+              <p className="text-xs mb-1" style={{ color: "var(--slate)" }}>Probar en otro color:</p>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {(draft.colors || []).slice(0, 14).map((c, i) => (
+                  <button key={i} type="button" onClick={() => setPreviewHex(c.hex)} className="kulto-btn kulto-tip kulto-tip-l rounded-full" data-tip={c.name} aria-label={c.name} style={{ width: 22, height: 22, background: c.hex, border: previewHex === c.hex ? "2px solid var(--sun)" : "1px solid var(--line)" }} />
+                ))}
+                <input type="color" value={previewHex} onChange={(e) => setPreviewHex(e.target.value)} className="w-8 h-7 rounded" style={{ background: "transparent" }} aria-label="Otro color" />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      <p className="text-[11px]" style={{ color: "var(--slate)" }}>Recordá guardar el producto. Los colores que tengan su propia foto siguen usando esa foto.</p>
+    </div>
+  );
+}
+
+// Genera "al vuelo" la foto de un color que no tiene foto propia, a partir de
+// otra foto del mismo producto: solo se pinta la tela (píxeles claros y casi
+// sin color) y se respeta la estampa. Si hay una foto base limpia (sin
+// estampa) se pinta entera con tintImageToColor. Devuelve null si no se pudo.
+function tintGarmentPhoto(src, hex) {
+  return new Promise((resolve) => {
+    if (!src) { resolve(null); return; }
+    const { r: tr, g: tg, b: tb } = hexToRgb(hex);
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      try {
+        const k = Math.min(1, 900 / Math.max(img.naturalWidth, img.naturalHeight));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(img.naturalWidth * k));
+        canvas.height = Math.max(1, Math.round(img.naturalHeight * k));
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const d = frame.data;
+        let changed = 0;
+        for (let i = 0; i < d.length; i += 4) {
+          if (d[i + 3] === 0) continue;
+          const mx = Math.max(d[i], d[i + 1], d[i + 2]);
+          const mn = Math.min(d[i], d[i + 1], d[i + 2]);
+          const lum = (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) / 255;
+          const sat = mx === 0 ? 0 : (mx - mn) / mx;
+          if (lum > 0.55 && sat < 0.18) {
+            const f = Math.min(1, lum / 0.95);
+            d[i] = Math.round(tr * f);
+            d[i + 1] = Math.round(tg * f);
+            d[i + 2] = Math.round(tb * f);
+            changed++;
+          }
+        }
+        if (changed < d.length / 4 * 0.02) { resolve(null); return; }
+        ctx.putImageData(frame, 0, 0);
+        resolve(canvas.toDataURL("image/jpeg", 0.88));
+      } catch {
+        resolve(null);
+      }
+    };
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
+}
+
+// Repinta la prenda de una foto que YA tiene el diseño estampado: se detecta
+// la tela (píxeles del color de referencia —el de la prenda en esa foto—, con
+// sus luces y sombras) y solo esa zona cambia de color; la estampa y el fondo
+// quedan como están. Devuelve null si no pudo.
+function recolorExistingPhoto(src, refHex, targetHex) {
+  return new Promise((resolve) => {
+    if (!src) { resolve(null); return; }
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      try {
+        const k = Math.min(1, 900 / Math.max(img.naturalWidth, img.naturalHeight));
+        const w = Math.max(1, Math.round(img.naturalWidth * k));
+        const h = Math.max(1, Math.round(img.naturalHeight * k));
+        const cv = document.createElement("canvas");
+        cv.width = w; cv.height = h;
+        const ctx = cv.getContext("2d", { willReadFrequently: true });
+        ctx.drawImage(img, 0, 0, w, h);
+        const frame = ctx.getImageData(0, 0, w, h);
+        const d = frame.data;
+        const n = w * h;
+        const ref = hexToRgb(refHex);
+        const refL = Math.max(1, 0.299 * ref.r + 0.587 * ref.g + 0.114 * ref.b);
+        const lum = new Float32Array(n);
+        const cand = new Uint8Array(n);
+        for (let i = 0; i < n; i++) {
+          const r = d[i * 4], g = d[i * 4 + 1], b = d[i * 4 + 2];
+          const L = 0.299 * r + 0.587 * g + 0.114 * b;
+          lum[i] = L;
+          if (d[i * 4 + 3] < 10 || L < 6) continue;
+          // mismo color que la prenda pero con otra luz: se compara llevando el píxel a la luminosidad del color de referencia
+          const f = refL / L;
+          if (f > 3.2 || f < 0.35) continue;
+          const dr = r * f - ref.r, dg = g * f - ref.g, db = b * f - ref.b;
+          if (Math.sqrt(dr * dr + dg * dg + db * db) < 20) cand[i] = 1;
+        }
+        // la zona conectada más grande es la prenda
+        const lab = new Int32Array(n);
+        let best = 0, bestId = 0, id = 0;
+        for (let i = 0; i < n; i++) {
+          if (!cand[i] || lab[i]) continue;
+          id++;
+          let cnt = 0;
+          const st = [i];
+          lab[i] = id;
+          while (st.length) {
+            const c = st.pop();
+            cnt++;
+            const x = c % w, y = (c - x) / w;
+            if (x > 0 && cand[c - 1] && !lab[c - 1]) { lab[c - 1] = id; st.push(c - 1); }
+            if (x < w - 1 && cand[c + 1] && !lab[c + 1]) { lab[c + 1] = id; st.push(c + 1); }
+            if (y > 0 && cand[c - w] && !lab[c - w]) { lab[c - w] = id; st.push(c - w); }
+            if (y < h - 1 && cand[c + w] && !lab[c + w]) { lab[c + w] = id; st.push(c + w); }
+          }
+          if (cnt > best) { best = cnt; bestId = id; }
+        }
+        if (best < n * 0.03) { resolve(null); return; }
+        let mask = new Uint8Array(n);
+        for (let i = 0; i < n; i++) mask[i] = lab[i] === bestId ? 1 : 0;
+        // Soltar lo que está pegado a la prenda por una unión finita y toca el
+        // borde de la foto (ej: el piso oscuro de abajo): se erosiona la zona,
+        // se elige la parte grande que NO toca el borde y se vuelve a crecer.
+        const R2 = Math.max(3, Math.round(Math.max(w, h) / 150));
+        const morph = (src, erode) => {
+          const tmp = new Uint8Array(n), out = new Uint8Array(n);
+          for (let y = 0; y < h; y++) {
+            for (let x = 0; x < w; x++) {
+              let v = erode ? 1 : 0;
+              for (let dx = -R2; dx <= R2; dx++) {
+                const xx = x + dx;
+                const val = xx < 0 || xx >= w ? (erode ? 0 : 0) : src[y * w + xx];
+                if (erode && !val) { v = 0; break; }
+                if (!erode && val) { v = 1; break; }
+              }
+              tmp[y * w + x] = v;
+            }
+          }
+          for (let y = 0; y < h; y++) {
+            for (let x = 0; x < w; x++) {
+              let v = erode ? 1 : 0;
+              for (let dy = -R2; dy <= R2; dy++) {
+                const yy = y + dy;
+                const val = yy < 0 || yy >= h ? 0 : tmp[yy * w + x];
+                if (erode && !val) { v = 0; break; }
+                if (!erode && val) { v = 1; break; }
+              }
+              out[y * w + x] = v;
+            }
+          }
+          return out;
+        };
+        const er = morph(mask, true);
+        const lab2 = new Int32Array(n);
+        const comps = [];
+        for (let i = 0; i < n; i++) {
+          if (!er[i] || lab2[i]) continue;
+          const cid = comps.length + 1;
+          let cnt = 0, border = false;
+          const st = [i];
+          lab2[i] = cid;
+          while (st.length) {
+            const c = st.pop();
+            cnt++;
+            const x = c % w, y = (c - x) / w;
+            if (x <= R2 + 1 || y <= R2 + 1 || x >= w - R2 - 2 || y >= h - R2 - 2) border = true;
+            if (x > 0 && er[c - 1] && !lab2[c - 1]) { lab2[c - 1] = cid; st.push(c - 1); }
+            if (x < w - 1 && er[c + 1] && !lab2[c + 1]) { lab2[c + 1] = cid; st.push(c + 1); }
+            if (y > 0 && er[c - w] && !lab2[c - w]) { lab2[c - w] = cid; st.push(c - w); }
+            if (y < h - 1 && er[c + w] && !lab2[c + w]) { lab2[c + w] = cid; st.push(c + w); }
+          }
+          comps.push({ cid, cnt, border });
+        }
+        if (comps.length) {
+          const inner = comps.filter((c) => !c.border).sort((a, b) => b.cnt - a.cnt)[0];
+          const pick = inner || comps.sort((a, b) => b.cnt - a.cnt)[0];
+          if (inner && inner.cnt > n * 0.02) {
+            const seedMask = new Uint8Array(n);
+            for (let i = 0; i < n; i++) seedMask[i] = lab2[i] === pick.cid ? 1 : 0;
+            const grown = morph(seedMask, false);
+            for (let i = 0; i < n; i++) mask[i] = grown[i] && mask[i] ? 1 : 0;
+          }
+        }
+        // borde suave
+        let soft = Float32Array.from(mask);
+        const next = new Float32Array(n);
+        for (let y = 0; y < h; y++) {
+          for (let x = 0; x < w; x++) {
+            let s = 0, c = 0;
+            for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+              const xx = x + dx, yy = y + dy;
+              if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+              s += soft[yy * w + xx]; c++;
+            }
+            next[y * w + x] = s / c;
+          }
+        }
+        soft = next;
+        const sample = [];
+        for (let i = 0; i < n; i += 5) if (mask[i]) sample.push(lum[i]);
+        sample.sort((a, b) => a - b);
+        const lref = Math.max(1, sample.length ? sample[sample.length >> 1] : refL);
+        const ratios = sample.map((v) => Math.min(3, Math.max(0.2, v / lref))).sort((a, b) => a - b);
+        const p97 = ratios.length ? ratios[Math.min(ratios.length - 1, Math.floor(ratios.length * 0.97))] : 1;
+        const t = hexToRgb(targetHex);
+        for (let i = 0; i < n; i++) {
+          const a = soft[i];
+          if (a <= 0) continue;
+          const sh = Math.min(1, Math.max(0.12, 0.88 + 0.5 * (Math.min(3, Math.max(0.2, lum[i] / lref)) - 1)));
+          d[i * 4] = d[i * 4] * (1 - a) + t.r * sh * a;
+          d[i * 4 + 1] = d[i * 4 + 1] * (1 - a) + t.g * sh * a;
+          d[i * 4 + 2] = d[i * 4 + 2] * (1 - a) + t.b * sh * a;
+        }
+        ctx.putImageData(frame, 0, 0);
+        resolve(cv.toDataURL("image/jpeg", 0.9));
+      } catch {
+        resolve(null);
+      }
+    };
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
+}
+
+// Foto de partida para generar un color sin foto, y de qué color es la prenda
+// en esa foto (refHex).
+function autoColorSource(product) {
+  const base = product?.baseImages?.frontImage;
+  if (base) return { src: base, clean: true };
+  const lum = (hex) => { const { r, g, b } = hexToRgb(hex); return 0.299 * r + 0.587 * g + 0.114 * b; };
+  const withImg = (product?.colors || []).filter((c) => getColorImages(c).length > 0).sort((a, b) => lum(b.hex) - lum(a.hex));
+  if (withImg.length) return { src: getColorImages(withImg[0])[0], clean: false, refHex: withImg[0].hex };
+  if (product?.photoPool?.length && product?.colors?.length) {
+    const idx = Number.isInteger(product.sourceColorIdx) && product.colors[product.sourceColorIdx] ? product.sourceColorIdx : 0;
+    return { src: product.photoPool[0], clean: false, refHex: product.colors[idx].hex };
+  }
+  return null;
+}
+
+const autoRecolorCache = new Map();
+// Foto generada para un color que no tiene foto propia (ver arriba).
+function useAutoColorImage(product, color, enabled) {
+  const info = enabled && color && getColorImages(color).length === 0 && !activeMockup(product) ? autoColorSource(product) : null;
+  const key = info ? `${info.src}|${info.refHex || ""}|${info.clean ? 1 : 0}|${color.hex}` : null;
+  const [url, setUrl] = useState(() => (key ? autoRecolorCache.get(key) || null : null));
+  useEffect(() => {
+    if (!key) { setUrl(null); return; }
+    if (autoRecolorCache.has(key)) { setUrl(autoRecolorCache.get(key)); return; }
+    if (info.refHex && info.refHex.toLowerCase() === (color.hex || "").toLowerCase()) { setUrl(null); return; }
+    let alive = true;
+    (info.clean ? tintImageToColor(info.src, color.hex) : recolorExistingPhoto(info.src, info.refHex, color.hex)).then((r) => {
+      autoRecolorCache.set(key, r || null);
+      if (alive) setUrl(r || null);
+    });
+    return () => { alive = false; };
+  }, [key]);
+  return key ? url : null;
+}
+
 // Genera las 4 fotos de UN color a partir de una tanda de fotos base (ya
 // subidas a Storage o como dataURL), pintando cada zona disponible. Es el
 // mismo paso que usa AdminTemplateForm para "Foto base" — lo dejamos acá
@@ -2302,6 +3022,7 @@ function GlobalStyle({ colors }) {
       .kulto-flip-back{ transform:rotateY(180deg); }
       .kulto-flip-inner.is-flipped{ transform:rotateY(180deg); }
       .kulto-tip{ position:relative; }
+      .kulto-tip:hover{ z-index:90; }
       .kulto-tip::after{ content:attr(data-tip); position:absolute; bottom:calc(100% + 8px); left:50%; transform:translateX(-50%) translateY(4px); background:rgba(0,0,0,.9); color:#fff; font-size:11px; font-weight:600; line-height:1; padding:6px 9px; border-radius:8px; white-space:nowrap; opacity:0; pointer-events:none; transition:opacity .15s ease, transform .15s ease; z-index:80; }
       .kulto-tip-l::after{ left:0; transform:translateY(4px); }
       @media (hover:hover){
@@ -2538,21 +3259,32 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
     combined = product.photoPool;
   }
   const images = combined;
+  const mock = activeMockup(product);
+  const [mockColor, setMockColor] = useState(null);
+  const [autoColorIdx, setAutoColorIdx] = useState(null);
 
   const [idx, setIdx] = useState(0);
   // A qué color pertenece la foto que se está mostrando, para resaltar el
   // punto correspondiente aunque se haya llegado ahí con las flechitas.
   let activeColorIdx = -1;
   starts.forEach((s, i) => { if (s !== null && s <= idx) activeColorIdx = i; });
+  if (mock) activeColorIdx = mockColor === null ? -1 : mockColor;
+  else if (autoColorIdx !== null) activeColorIdx = autoColorIdx;
   const activeColor = activeColorIdx >= 0 ? colors[activeColorIdx] : colors[0];
 
   const onSale = product.tags?.oferta && product.salePrice;
   const isCover = product.imageFit === "cover";
-  const bg = product.imageBackground || (activeColor ? activeColor.hex : "var(--ink-3)");
+  const bg = product.imageBackground || (activeColor && !mock ? activeColor.hex : "var(--ink-3)");
 
   const prev = (e) => { e.stopPropagation(); setIdx((i) => (i - 1 + images.length) % images.length); };
   const next = (e) => { e.stopPropagation(); setIdx((i) => (i + 1) % images.length); };
-  const pickColor = (e, i) => { e.stopPropagation(); if (starts[i] !== null) setIdx(starts[i]); };
+  const cardAutoImg = useAutoColorImage(product, autoColorIdx !== null ? colors[autoColorIdx] : null, autoColorIdx !== null);
+  const pickColor = (e, i) => {
+    e.stopPropagation();
+    if (mock) { setMockColor(i); return; }
+    if (starts[i] !== null) { setAutoColorIdx(null); setIdx(starts[i]); return; }
+    if (autoColorSource(product)) setAutoColorIdx(i);
+  };
 
   // "Agregar rápido" — solo para productos que no necesitan que el cliente
   // elija o suba un diseño (esos siguen yendo por la ficha completa) y que
@@ -2607,7 +3339,7 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
       qty: quickQty,
       unitPrice: onSale ? product.salePrice : product.price,
       points: product.points ?? null,
-      previewImage: images[idx] || null,
+      previewImage: (mock ? mock.cover : images[idx]) || null,
     };
     onAddToCart(item);
     setQuickJustAdded(true);
@@ -2627,7 +3359,15 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
         className="relative overflow-hidden"
         style={{ background: bg, aspectRatio: "4 / 5" }}
       >
-        {images.length > 0 ? (
+        {mock ? (
+          mockColor === null && mock.cover ? (
+            <FastImg loading="lazy" src={mock.cover} alt={product.name} className="kulto-card-img w-full h-full object-cover" />
+          ) : (
+            <MockupComposite mockup={mock} hex={colors[mockColor ?? 0]?.hex || "#ffffff"} />
+          )
+        ) : autoColorIdx !== null && cardAutoImg ? (
+          <FastImg loading="lazy" src={cardAutoImg} alt={product.name} className="kulto-card-img w-full h-full object-contain" />
+        ) : images.length > 0 ? (
           <FastImg loading="lazy" src={images[idx]} alt={product.name} className={`kulto-card-img w-full h-full ${isCover ? "object-cover" : "object-contain"}`} />
         ) : (
           <div className="w-full h-full flex items-center justify-center">
@@ -2649,7 +3389,7 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
             <Heart size={16} style={{ color: isFavorite ? "var(--signal)" : "var(--bone)" }} fill={isFavorite ? "var(--signal)" : "none"} />
           </button>
         )}
-        {images.length > 1 && (
+        {!mock && images.length > 1 && (
           <>
             <button
               onClick={prev}
@@ -2976,9 +3716,15 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
 
   const color = product.colors && product.colors[colorIdx];
   const images = color ? getColorImages(color) : (product.photoPool || []);
-  const activeImage = images[imgIdx] || null;
+  // Si este color no tiene foto propia, se genera sola repintando la prenda de
+  // otra foto del producto (ver recolorExistingPhoto).
+  const mock = activeMockup(product);
+  const mockActive = !!mock && images.length === 0;
+  const mockHex = color?.hex || "#ffffff";
+  const autoImage = useAutoColorImage(product, color, images.length === 0);
+  const activeImage = images[imgIdx] || autoImage || null;
   const isCover = product.imageFit === "cover";
-  const previewBg = product.imageBackground || (color ? color.hex : "var(--ink-3)");
+  const previewBg = product.imageBackground || (color && !mock ? color.hex : "var(--ink-3)");
   const hasSizes = product.sizes && product.sizes.length > 0;
   const size = hasSizes ? product.sizes[sizeIdx] : null;
   const design = product.designs && product.designs[designIdx];
@@ -3039,7 +3785,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
       // no se resolvió acá, se usa el general de Ajustes al momento de sumar
       // — ver handleCheckout, que hace lo mismo que ya hacíamos con el precio).
       points: product.points ?? null,
-      previewImage: activeImage,
+      previewImage: activeImage || (mock && mock.cover) || null,
     };
     onAddToCart(item);
     setJustAdded(true);
@@ -3070,7 +3816,9 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
             setZoomOrigin({ x: ((e.clientX - rect.left) / rect.width) * 100, y: ((e.clientY - rect.top) / rect.height) * 100 });
           }}
         >
-          {activeImage ? (
+          {mockActive ? (
+            <MockupComposite mockup={mock} hex={mockHex} />
+          ) : activeImage ? (
             <img
               src={activeImage}
               alt={color?.name}
@@ -4498,7 +5246,7 @@ function Paginator({ page, total, onChange }) {
   );
 }
 
-const productThumbSrc = (p) => p?.photoPool?.[0] || getColorImages(p?.colors?.[0])[0] || null;
+const productThumbSrc = (p) => (activeMockup(p) && p.mockup.cover) || p?.photoPool?.[0] || getColorImages(p?.colors?.[0])[0] || null;
 const effectivePrice = (p) => (p.tags?.oferta && p.salePrice ? p.salePrice : p.price);
 const fabricOf = (p) => (p.material || "").trim();
 
@@ -7783,6 +8531,9 @@ const emptyDraft = {
   // que en Personalizar. Se guarda junto con la prenda para no tener que
   // volver a subirla cada vez que se agrega un color nuevo.
   baseImages: null,
+  // Mockup con diseño (ver AdminMockupEditor): prenda vacía + diseño PNG +
+  // posición; los colores se generan repintando la prenda.
+  mockup: null,
 };
 
 function AdminProductForm({ categories, groups, onAddCategory, onAddGroup, savedColors, onSaveColorToLibrary, onRemoveColorFromLibrary, onSave, editing, onCancelEdit, defaultTemplate = false, allProducts = [] }) {
@@ -8747,6 +9498,23 @@ function AdminProductForm({ categories, groups, onAddCategory, onAddGroup, saved
                 : "Ese color se usa detrás de la foto en vez del color de la prenda."}
             </p>
           </div>
+
+          <AdminMockupEditor draft={draft} setDraft={setDraft} inputStyle={inputStyle} />
+
+          {draft.colors.length > 1 && draft.photoPool.length > 0 && !draft.colors.some((c) => (c.images || []).length > 0) && (
+            <div className="rounded-2xl p-3" style={{ background: "var(--ink-3)", border: "1px dashed var(--line)" }}>
+              <label className="text-xs mb-1 block font-semibold" style={{ color: "var(--bone)" }}>¿De qué color es la prenda en tus fotos?</label>
+              <p className="text-xs mb-2" style={{ color: "var(--slate)" }}>Los demás colores se generan solos repintando solo la prenda de esa foto, con el diseño tal cual. Elegí el color que se ve en la foto.</p>
+              <select
+                value={Number.isInteger(draft.sourceColorIdx) ? draft.sourceColorIdx : 0}
+                onChange={(e) => setDraft({ ...draft, sourceColorIdx: Number(e.target.value) })}
+                className="rounded-xl p-2 text-sm"
+                style={inputStyle}
+              >
+                {draft.colors.map((c, i) => <option key={i} value={i}>{c.name || `Color ${i + 1}`}</option>)}
+              </select>
+            </div>
+          )}
 
           {/* Colors */}
           <div>
