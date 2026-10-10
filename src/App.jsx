@@ -370,6 +370,65 @@ async function uploadThumbFor(fullPath, img) {
   }
 }
 
+// Para que todas las prendas de "Personalizar" se vean del mismo tamaño en
+// las tarjetas: si la foto es un PNG con fondo transparente, se recortan los
+// márgenes vacíos (cada foto trae más o menos aire alrededor) y así la prenda
+// llena siempre el mismo espacio de la tarjeta. Si la foto tiene fondo (JPG) o
+// algo falla, se muestra tal cual.
+const _garmentTrimCache = new Map();
+async function trimTransparentMargins(src) {
+  if (_garmentTrimCache.has(src)) return _garmentTrimCache.get(src);
+  let out = null;
+  try {
+    let img;
+    try { img = await loadImageEl(thumbUrl(src)); } catch { img = await loadImageEl(src); }
+    const w = img.naturalWidth, h = img.naturalHeight;
+    if (w && h) {
+      const c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      const ctx = c.getContext("2d");
+      ctx.drawImage(img, 0, 0);
+      const { data } = ctx.getImageData(0, 0, w, h);
+      let minX = w, minY = h, maxX = -1, maxY = -1, transparent = false;
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const a = data[(y * w + x) * 4 + 3];
+          if (a < 250) transparent = true;
+          if (a > 24) {
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+          }
+        }
+      }
+      if (transparent && maxX >= minX && maxY >= minY) {
+        const cw = maxX - minX + 1, ch = maxY - minY + 1;
+        if (cw < w * 0.98 || ch < h * 0.98) {
+          const c2 = document.createElement("canvas");
+          c2.width = cw; c2.height = ch;
+          c2.getContext("2d").drawImage(c, minX, minY, cw, ch, 0, 0, cw, ch);
+          out = c2.toDataURL("image/png");
+        }
+      }
+    }
+  } catch { out = null; }
+  _garmentTrimCache.set(src, out);
+  return out;
+}
+function UniformGarmentImg({ src, alt, className }) {
+  const [trimmed, setTrimmed] = useState(() => _garmentTrimCache.get(src) || null);
+  useEffect(() => {
+    let alive = true;
+    setTrimmed(_garmentTrimCache.get(src) || null);
+    if (!src) return undefined;
+    trimTransparentMargins(src).then((r) => { if (alive) setTrimmed(r); });
+    return () => { alive = false; };
+  }, [src]);
+  if (trimmed) return <img src={trimmed} alt={alt} decoding="async" className={className} />;
+  return <FastImg loading="lazy" src={src} alt={alt} className={className} />;
+}
+
 // Guardar las fotos como texto (base64) directo en la base de datos hacía
 // que una foto pesada volviera lenta o imposible de leer (junto con otras) —
 // eso es lo que hacía "desaparecer" productos y diseños enteros. Esta
@@ -2173,8 +2232,9 @@ function GlobalStyle({ colors }) {
       .kulto-flip-face{ position:absolute; inset:0; width:100%; height:100%; backface-visibility:hidden; -webkit-backface-visibility:hidden; }
       .kulto-flip-back{ transform:rotateY(180deg); }
       .kulto-flip-inner.is-flipped{ transform:rotateY(180deg); }
+      .kulto-float-img{ transition:transform .3s ease, filter .3s ease; filter:drop-shadow(0 6px 8px rgba(0,0,0,.35)); }
       @media (hover:hover){
-        .kulto-flip-outer:hover .kulto-flip-inner{ transform:rotateY(180deg); }
+        .kulto-flip-outer:hover .kulto-float-img{ transform:translateY(-8px) scale(1.06); filter:drop-shadow(0 18px 16px rgba(0,0,0,.5)); }
       }
       @media (prefers-reduced-motion: reduce){
         .kulto-flip-inner{ transition:none !important; }
@@ -5218,7 +5278,7 @@ function TemplateProductCard({ product, onSelect, bg }) {
           style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}
         >
           <div className="w-full flex-1 overflow-hidden flex items-center justify-center" style={{ background: bg || product.colors?.[0]?.hex || "var(--ink-3)" }}>
-            {thumb ? <FastImg loading="lazy" src={thumb} className={`w-full h-full ${product.cardImage ? "object-cover" : "object-contain"}`} alt={product.name} /> : <Shirt size={32} style={{ color: "rgba(243,239,230,0.4)" }} />}
+            {thumb ? (product.cardImage ? <FastImg loading="lazy" src={thumb} className="kulto-float-img w-full h-full object-cover" alt={product.name} /> : <UniformGarmentImg src={thumb} className="kulto-float-img w-full h-full object-contain p-4" alt={product.name} />) : <Shirt size={32} style={{ color: "rgba(243,239,230,0.4)" }} />}
           </div>
           {product.audience && product.audience !== "unisex" && (
             <span
@@ -5298,7 +5358,8 @@ function TemplateProductCard({ product, onSelect, bg }) {
 function cardBgFor(settings, keys, fallback) {
   const map = settings?.personalizeCardBg || {};
   for (const k of keys) if (k && map[k]) return map[k];
-  return map.all || fallback;
+  // Sin color elegido: sin fondo (la prenda flota sobre la tarjeta).
+  return map.all || "transparent";
 }
 
 // Tarjeta genérica que se da vuelta (categoría o estilo de prenda en
@@ -5319,7 +5380,7 @@ function PickFlipCard({ title, thumb, thumbFill = false, bg, description, detail
           style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}
         >
           <div className="w-full flex-1 overflow-hidden flex items-center justify-center" style={{ background: bg || "var(--ink-3)" }}>
-            {thumb ? <FastImg loading="lazy" src={thumb} className={`w-full h-full ${thumbFill ? "object-cover" : "object-contain p-3"}`} alt={title} /> : <Shirt size={32} style={{ color: "rgba(243,239,230,0.4)" }} />}
+            {thumb ? (thumbFill ? <FastImg loading="lazy" src={thumb} className="kulto-float-img w-full h-full object-cover" alt={title} /> : <UniformGarmentImg src={thumb} className="kulto-float-img w-full h-full object-contain p-4" alt={title} />) : <Shirt size={32} style={{ color: "rgba(243,239,230,0.4)" }} />}
           </div>
           <span
             className="font-semibold text-sm py-2 px-2"
@@ -7341,7 +7402,10 @@ function CropModal({ source, onConfirm, onCancel, frameW = CROP_FRAME_W, frameH 
       url = URL.createObjectURL(source);
     } else {
       const m = source.match(/^data:(image\/[a-zA-Z+]+);base64,/);
-      setMimeType(m && m[1] === "image/png" ? "image/png" : "image/jpeg");
+      // Si es un link (foto ya subida), el tipo se deduce de la extensión, para
+      // no perder la transparencia de un PNG al reencuadrarlo.
+      const isPngLink = !m && /\.png(\?|#|$)/i.test(source);
+      setMimeType((m && m[1] === "image/png") || isPngLink ? "image/png" : "image/jpeg");
       url = source;
     }
     const image = new Image();
@@ -9113,7 +9177,7 @@ function AdminTemplateForm({ categories, templateProducts = [], onAddCategory, o
         <label className="text-xs mb-1 block" style={{ color: "var(--bone)" }}>Descripción (de qué está hecha, composición, etc.)</label>
         <textarea value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} rows={3} placeholder="Ej: 100% algodón peinado, 220 g/m², oversize. Sublimación de alta duración." className="w-full rounded-xl p-3 text-sm" style={inputStyle} />
         <p className="text-xs mt-1" style={{ color: "var(--slate)" }}>
-          Se muestra cuando el cliente pasa el mouse (o toca, en el celular) sobre esta prenda al elegirla en "Personalizar".
+          Se muestra cuando el cliente toca el ícono «i» de esta prenda al elegirla en "Personalizar".
         </p>
       </div>
 
@@ -9271,7 +9335,7 @@ function AdminTemplateForm({ categories, templateProducts = [], onAddCategory, o
             source={cardCropSource}
             frameW={300} frameH={345} outW={1000} outH={1150} maxZoom={4}
             title="Encuadrá la foto como se va a ver en la tarjeta: arrastrala y usá el zoom"
-            onConfirm={(b64) => { setDraft((d) => ({ ...d, cardImage: b64 })); setCardCropSource(null); }}
+            onConfirm={async (b64) => { setCardCropSource(null); const url = (await uploadDataUrlToStorage(b64)) || b64; setDraft((d) => ({ ...d, cardImage: url })); }}
             onCancel={() => setCardCropSource(null)}
           />
         )}
@@ -14043,7 +14107,8 @@ function AdminPersonalizeGroupImages({ templateProducts = [], settings, onSave }
   const confirmCrop = async (b64) => {
     const { settingKey, name } = cropJob;
     setCropJob(null);
-    await onSave({ [settingKey]: { ...(settings[settingKey] || {}), [name]: b64 } });
+    const url = (await uploadDataUrlToStorage(b64)) || b64;
+    await onSave({ [settingKey]: { ...(settings[settingKey] || {}), [name]: url } });
     setSavedKey(`${settingKey}:${name}`);
     setTimeout(() => setSavedKey(null), 1500);
   };
@@ -14179,7 +14244,7 @@ function AdminPersonalizeCardColors({ templateProducts = [], settings, onSave })
             className="kulto-btn text-[10px] px-2 py-1 rounded-full"
             style={{ background: current ? "var(--ink-3)" : "var(--sun)", color: current ? "var(--bone)" : "var(--ink)" }}
           >
-            Automático
+            Sin fondo
           </button>
           {saved === k && <span className="text-[10px]" style={{ color: "var(--sun)" }}>Guardado ✓</span>}
         </div>
@@ -14192,7 +14257,7 @@ function AdminPersonalizeCardColors({ templateProducts = [], settings, onSave })
       <div>
         <h4 className="font-semibold" style={{ color: "var(--bone)" }}>Color de fondo de las tarjetas en "Personalizar"</h4>
         <p className="text-xs mt-1" style={{ color: "var(--slate)" }}>
-          Elegí el color de fondo que se ve detrás de cada prenda en las tarjetas del paso 1. Podés poner uno para todas, o uno distinto para cada categoría y cada estilo (el de la categoría o estilo tiene prioridad sobre el general). "Automático" usa el color de la prenda, como antes.
+          Elegí el color de fondo que se ve detrás de cada prenda en las tarjetas del paso 1. Podés poner uno para todas, o uno distinto para cada categoría y cada estilo (el de la categoría o estilo tiene prioridad sobre el general). "Sin fondo" deja la prenda flotando sobre la tarjeta (es lo que se usa si no elegís ninguno).
         </p>
       </div>
       <div className="flex flex-col gap-3">
