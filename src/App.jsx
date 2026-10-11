@@ -1195,7 +1195,7 @@ function tintedMockupCanvas(src, prep, hex) {
 
 function activeMockup(product) {
   const m = product?.mockup;
-  return m && m.enabled && m.base ? m : null;
+  return m && m.enabled && m.base && (m.design || m.logoLight || m.logoDark) ? m : null;
 }
 
 function MockupComposite({ mockup, hex, innerRef, designProps }) {
@@ -1788,6 +1788,8 @@ function autoColorSource(product, imgIdx = 0) {
   const base = product?.baseImages?.frontImage;
   if (base) return { src: base, clean: true };
   const lum = (hex) => { const { r, g, b } = hexToRgb(hex); return 0.299 * r + 0.587 * g + 0.114 * b; };
+  // Repintar fotos que ya traen el diseño no es confiable (se confunde con el fondo): solo si el admin lo activó en el producto.
+  if (product?.autoRecolor !== true) return null;
   const withImg = (product?.colors || []).filter((c) => getColorImages(c).length > 0).sort((a, b) => lum(b.hex) - lum(a.hex));
   if (withImg.length) { const li = getColorImages(withImg[0]); return { src: li[imgIdx] || li[0], clean: false, refHex: withImg[0].hex }; }
   if (product?.photoPool?.length && product?.colors?.length) {
@@ -9622,8 +9624,12 @@ function AdminProductForm({ categories, groups, onAddCategory, onAddGroup, saved
 
           {draft.colors.length > 1 && draft.photoPool.length > 0 && !draft.colors.some((c) => (c.images || []).length > 0) && (
             <div className="rounded-2xl p-3" style={{ background: "var(--ink-3)", border: "1px dashed var(--line)" }}>
+              <label className="flex items-center gap-2 text-xs mb-2 font-semibold cursor-pointer" style={{ color: "var(--bone)" }}>
+                <input type="checkbox" checked={draft.autoRecolor === true} onChange={(e) => setDraft({ ...draft, autoRecolor: e.target.checked })} />
+                Probar a repintar las fotos para los demás colores (experimental)
+              </label>
+              <p className="text-xs mb-2" style={{ color: "var(--slate)" }}>Desactivado: al elegir un color sin fotos propias se ven las fotos del producto tal cual. Activado: se intenta repintar la prenda de la foto, pero con fondos complicados puede teñir también el fondo o dejar puntos. Para que el diseño no se toque, usá el Mockup con diseño.</p>
               <label className="text-xs mb-1 block font-semibold" style={{ color: "var(--bone)" }}>¿De qué color es la prenda en tus fotos?</label>
-              <p className="text-xs mb-2" style={{ color: "var(--slate)" }}>Los demás colores se generan solos repintando solo la prenda de esa foto, con el diseño tal cual. Elegí el color que se ve en la foto.</p>
               <select
                 value={Number.isInteger(draft.sourceColorIdx) ? draft.sourceColorIdx : 0}
                 onChange={(e) => setDraft({ ...draft, sourceColorIdx: Number(e.target.value) })}
