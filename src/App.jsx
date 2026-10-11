@@ -3536,6 +3536,7 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
       </div>
       <div className="p-2.5 sm:p-3 flex flex-col gap-1.5 flex-1 min-w-0">
         <span className="text-xs truncate" style={{ color: "var(--slate)" }}>{product.category}</span>
+        {!product.hideCardName && (
         <span
           className="font-semibold leading-snug text-sm sm:text-base"
           style={{
@@ -3549,6 +3550,7 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
         >
           {product.name}
         </span>
+        )}
         {colors.length > 0 && (
           <div className="flex items-center gap-1.5 mt-0.5">
             {colors.slice(0, 5).map((c, i) => (
@@ -16890,6 +16892,21 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                               <span className="text-[11px]" style={{ color: "var(--slate)" }}>{fItems.length}</span>
                             </button>
                             <HideListButton list={fItems} what="toda esta carpeta" />
+                            {(() => {
+                              const allHid = fItems.length > 0 && fItems.every((p) => p.hideCardName);
+                              return (
+                                <button
+                                  type="button"
+                                  disabled={movingSelected}
+                                  onClick={() => applyBulk(fItems.map((p) => ({ id: p.id, patch: { hideCardName: !allHid } })))}
+                                  className="kulto-btn text-[11px] font-semibold px-2.5 py-1 rounded-full shrink-0"
+                                  style={{ background: allHid ? "var(--sun)" : "var(--ink)", color: allHid ? "var(--ink)" : "var(--bone)", border: "1px solid var(--line)" }}
+                                  title={allHid ? "Volver a mostrar el nombre de todos los productos de esta carpeta" : "Ocultar el nombre de todos los productos de esta carpeta (se ve solo la prenda)"}
+                                >
+                                  {allHid ? "Mostrar nombres" : "Ocultar nombres"}
+                                </button>
+                              );
+                            })()}
                             <button
                               type="button"
                               onClick={() => openColorsFor(fItems)}
