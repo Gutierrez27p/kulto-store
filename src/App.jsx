@@ -9200,6 +9200,10 @@ function AdminProductForm({ categories, groups, onAddCategory, onAddGroup, saved
       )}
 
       <input placeholder="Nombre del producto" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} className="rounded-xl p-3 text-sm" style={inputStyle} />
+      <label className="flex items-center gap-2 text-xs cursor-pointer" style={{ color: "var(--bone)" }}>
+        <input type="checkbox" checked={!draft.hideCardName} onChange={(e) => setDraft({ ...draft, hideCardName: !e.target.checked })} />
+        Mostrar el nombre en la tienda (si lo desmarcás, se ve solo la prenda)
+      </label>
 
       <textarea
         placeholder="Descripción breve (opcional)"
@@ -16997,6 +17001,15 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                                 aria-label={p.hidden ? "Mostrar producto" : "Ocultar producto"}
                               >
                                 {p.hidden ? <><Eye size={13} /> Mostrar</> : <><EyeOff size={13} /> Ocultar</>}
+                              </button>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); applyBulk([{ id: p.id, patch: { hideCardName: !p.hideCardName } }]); }}
+                                disabled={movingSelected}
+                                className="kulto-btn text-[11px] font-semibold px-2.5 py-1 rounded-full"
+                                style={{ background: p.hideCardName ? "var(--sun)" : "var(--ink)", color: p.hideCardName ? "var(--ink)" : "var(--bone)", border: "1px solid var(--line)" }}
+                                title={p.hideCardName ? "El nombre está oculto en la tienda. Tocá para mostrarlo." : "Ocultar el nombre de este producto en la tienda"}
+                              >
+                                {p.hideCardName ? "Nombre oculto" : "Ocultar nombre"}
                               </button>
                               <button
                                 onClick={(e) => { e.stopPropagation(); moveOneToFolder(p); }}
