@@ -1818,6 +1818,9 @@ async function guessRefColorHex(src, colors) {
       let cnt = 0;
       for (let i = 0; i < w * h; i++) {
         if (d[i * 4 + 3] < 10) continue;
+        // solo el centro de la foto: ahí está la prenda; los costados suelen ser fondo
+        const px = (i % w) / w, py = Math.floor(i / w) / h;
+        if (px < 0.28 || px > 0.72 || py < 0.3 || py > 0.85) continue;
         const L = 0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2];
         if (L < 6) continue;
         const f = refL / L;
