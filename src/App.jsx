@@ -6642,27 +6642,53 @@ function Wizard({ products, categories, settings, designLibrary, designFolders, 
     setStep(4);
   };
 
+  // "Continuar": responde enseguida (se bloquea para que los toques repetidos
+  // no se pisen), muestra "Un momento…" y sube al inicio del paso nuevo para que
+  // se note que avanzó.
+  const finishingRef = useRef(false);
+  const [finishing, setFinishing] = useState(false);
+  const scrollToStepTop = () => {
+    setTimeout(() => {
+      try { document.getElementById("kulto-pers-top")?.scrollIntoView({ behavior: "smooth", block: "start" }); } catch { /* sin scroll */ }
+    }, 80);
+  };
   const finishSide = async (currentZone) => {
-    const idx = availableZones.indexOf(currentZone);
-    const next = availableZones[idx + 1];
-    if (next) {
-      setSide(next);
-    } else {
-      setSide("preview");
-      await renderPreview();
+    if (finishingRef.current) return;
+    finishingRef.current = true;
+    setFinishing(true);
+    try {
+      const idx = availableZones.indexOf(currentZone);
+      const next = availableZones[idx + 1];
+      if (next) {
+        setSide(next);
+      } else {
+        setSide("preview");
+        await renderPreview();
+      }
+      scrollToStepTop();
+    } catch {
+      setComposing(false);
+    } finally {
+      finishingRef.current = false;
+      setFinishing(false);
     }
   };
 
   const renderPreview = async () => {
     setComposing(true);
-    const [front, back, sleeveLeft, sleeveRight] = await Promise.all([
-      composeDesignImage(color?.frontImage, null, frontDesigns),
-      composeDesignImage(color?.backImage, null, backDesigns),
-      composeDesignImage(color?.sleeveLeftImage, null, sleeveLeftDesigns),
-      composeDesignImage(color?.sleeveRightImage, null, sleeveRightDesigns),
-    ]);
-    setComposed({ front, back, sleeveLeft, sleeveRight });
-    setComposing(false);
+    try {
+      // si alguna foto tarda demasiado, no se deja la vista previa cargando para siempre
+      const withTimeout = (p) => Promise.race([p, new Promise((resolve) => setTimeout(() => resolve(null), 15000))]);
+      const [front, back, sleeveLeft, sleeveRight] = await Promise.all([
+        withTimeout(composeDesignImage(color?.frontImage, null, frontDesigns)),
+        withTimeout(composeDesignImage(color?.backImage, null, backDesigns)),
+        withTimeout(composeDesignImage(color?.sleeveLeftImage, null, sleeveLeftDesigns)),
+        withTimeout(composeDesignImage(color?.sleeveRightImage, null, sleeveRightDesigns)),
+      ]);
+      setComposed({ front, back, sleeveLeft, sleeveRight });
+    } finally {
+      setComposing(false);
+    }
   };
 
   const confirmServiceRequest = async () => {
@@ -7045,25 +7071,25 @@ function Wizard({ products, categories, settings, designLibrary, designFolders, 
           )}
 
           {(source === "self" || source === "library") && side !== "preview" && zoneConfig[activeZone] && (
-            <div>
+            <div id="kulto-pers-top" style={{ scrollMarginTop: 80 }}>
               <p className="text-sm mb-1 text-center" style={{ color: "var(--slate)" }}>4. Diseño para {zoneConfig[activeZone].label} (opcional)</p>
               <PrintSizeGuide settings={settings} zone={activeZone} />
               <div className="mt-3">
                 <DesignPlacer garmentImage={zoneConfig[activeZone].image} designs={zoneConfig[activeZone].designs} setDesigns={zoneConfig[activeZone].setDesigns} sideLabel={zoneConfig[activeZone].sideLabel} mode={source} designLibrary={designLibrary} designFolders={designFolders} productCategory={prod?.category || null} product={prod} />
               </div>
               <div className="flex justify-center gap-3 mt-5">
-                <button onClick={() => { zoneConfig[activeZone].setDesigns([]); finishSide(activeZone); }} className="kulto-btn text-sm font-semibold px-4 py-2.5 rounded-full" style={{ border: "1px solid var(--line)", color: "var(--slate)" }}>
+                <button disabled={finishing} onClick={() => { zoneConfig[activeZone].setDesigns([]); finishSide(activeZone); }} className="kulto-btn text-sm font-semibold px-4 py-2.5 rounded-full" style={{ border: "1px solid var(--line)", color: "var(--slate)" }}>
                   Aquí no quiero nada
                 </button>
-                <button onClick={() => finishSide(activeZone)} className="kulto-btn text-sm font-semibold px-5 py-2.5 rounded-full flex items-center gap-1" style={{ background: "var(--signal)", color: "var(--bone)" }}>
-                  {availableZones.indexOf(activeZone) === availableZones.length - 1 ? "Ver mi prenda personalizada" : "Continuar"} <ChevronRight size={16} />
+                <button disabled={finishing} onClick={() => finishSide(activeZone)} className="kulto-btn text-sm font-semibold px-5 py-2.5 rounded-full flex items-center gap-1" style={{ background: "var(--signal)", color: "var(--bone)", opacity: finishing ? 0.7 : 1 }}>
+                  {finishing ? "Un momento…" : availableZones.indexOf(activeZone) === availableZones.length - 1 ? "Ver mi prenda personalizada" : "Continuar"} <ChevronRight size={16} />
                 </button>
               </div>
             </div>
           )}
 
           {side === "preview" && source && (
-            <div>
+            <div id="kulto-pers-top" style={{ scrollMarginTop: 80 }}>
               <p className="text-sm mb-4 text-center font-semibold" style={{ color: "var(--bone)" }}>Así quedaría tu prenda personalizada</p>
               {source === "service" && (
                 <p className="text-xs text-center mb-4" style={{ color: "var(--slate)" }}>
