@@ -16656,13 +16656,15 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
   const [pfGroup, setPfGroup] = useState("Todos"); // "Todos" | nombre | "__none__"
   const [pfFolder, setPfFolder] = useState("Todas");
   const [pfCat, setPfCat] = useState("Todas");
+  const [bulkType, setBulkType] = useState("");
+  const [pfType, setPfType] = useState(""); // tipo de prenda dentro de la categoría (Beagle, Oversize…)
   const [pfVis, setPfVis] = useState("todos"); // todos | visibles | ocultos
   const [pfQuery, setPfQuery] = useState("");
-  const pfActive = pfGroup !== "Todos" || pfFolder !== "Todas" || pfCat !== "Todas" || pfVis !== "todos" || !!pfQuery.trim();
-  const pfClear = () => { setPfGroup("Todos"); setPfFolder("Todas"); setPfCat("Todas"); setPfVis("todos"); setPfQuery(""); };
+  const pfActive = pfGroup !== "Todos" || pfFolder !== "Todas" || pfCat !== "Todas" || !!pfType || pfVis !== "todos" || !!pfQuery.trim();
+  const pfClear = () => { setPfGroup("Todos"); setPfFolder("Todas"); setPfCat("Todas"); setPfType(""); setPfVis("todos"); setPfQuery(""); };
   const pfMatchGroup = (p) => pfGroup === "Todos" || (pfGroup === "__none__" ? !p.group : p.group === pfGroup);
   const pfMatchFolder = (p) => pfFolder === "Todas" || (pfFolder === "__none__" ? !p.subcategory : p.subcategory === pfFolder);
-  const pfMatchCat = (p) => pfCat === "Todas" || p.category === pfCat;
+  const pfMatchCat = (p) => (pfCat === "Todas" || p.category === pfCat) && (pfCat === "Todas" || !pfType || (pfType === "__none__" ? !(p.garmentTypes || []).length : (p.garmentTypes || []).includes(pfType)));
   const pfMatchVis = (p) => pfVis === "todos" || (pfVis === "ocultos" ? !!p.hidden : !p.hidden);
   const pfMatchQuery = (p) => {
     const q = pfQuery.trim().toLowerCase();
@@ -16689,7 +16691,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
     setExpandedProductCats((prev) => Array.from(new Set([...prev, ...groupsOpen])));
     setExpandedFolders((prev) => Array.from(new Set([...prev, ...foldersOpen])));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pfGroup, pfFolder, pfCat, pfVis, pfQuery]);
+  }, [pfGroup, pfFolder, pfCat, pfType, pfVis, pfQuery]);
   useEffect(() => {
     if (!editingProduct) return;
     const g = editingProduct.group || "Sin grupo / temática";
@@ -17143,10 +17145,25 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                 </FilterAccordion>
               )}
               <FilterAccordion title="Categoría (prenda)" badge={pfCat !== "Todas" ? "1" : null}>
-                <FilterOption label="Todas" active={pfCat === "Todas"} onClick={() => setPfCat("Todas")} />
-                {pfCatNames.map((c) => (
-                  <FilterOption key={c} label={c} count={sellableProducts.filter((p) => pfMatchGroup(p) && pfMatchFolder(p) && p.category === c).length} active={pfCat === c} onClick={() => setPfCat(c)} />
-                ))}
+                <FilterOption label="Todas" active={pfCat === "Todas"} onClick={() => { setPfCat("Todas"); setPfType(""); }} />
+                {pfCatNames.map((c) => {
+                  const inCat = sellableProducts.filter((p) => pfMatchGroup(p) && pfMatchFolder(p) && p.category === c);
+                  const types = garmentTypesOf(c);
+                  const noType = inCat.filter((p) => !(p.garmentTypes || []).length).length;
+                  return (
+                    <div key={c}>
+                      <FilterOption label={c} count={inCat.length} active={pfCat === c && !pfType} onClick={() => { setPfCat(c); setPfType(""); }} />
+                      {pfCat === c && types.length > 0 && (
+                        <div className="pl-4">
+                          {types.map((t) => (
+                            <FilterOption key={t} label={t} count={inCat.filter((p) => (p.garmentTypes || []).includes(t)).length} active={pfType === t} onClick={() => setPfType(t)} />
+                          ))}
+                          <FilterOption label="Sin tipo marcado" count={noType} active={pfType === "__none__"} onClick={() => setPfType("__none__")} />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </FilterAccordion>
               <FilterAccordion title="Visibilidad" badge={pfVis !== "todos" ? "1" : null}>
                 <FilterOption label="Todos" active={pfVis === "todos"} onClick={() => setPfVis("todos")} />
@@ -17205,6 +17222,12 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                         </button>
                       </>
                     )}
+                    <select value={bulkType} onChange={(e) => setBulkType(e.target.value)} className="rounded-full text-xs px-3 py-1.5" style={{ background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)", maxWidth: 190 }}>
+                      <option value="">Tipo de prenda…</option>
+                      {Object.entries(GARMENT_TYPES).flatMap(([c, ts]) => ts.map((t) => <option key={c + t} value={t}>{c} · {t}</option>))}
+                    </select>
+                    <button type="button" disabled={!bulkType || movingSelected} onClick={() => applyBulk(selectedProductIds.map((id) => { const p = sellableProducts.find((x) => x.id === id); return { id, patch: { garmentTypes: Array.from(new Set([...(p?.garmentTypes || []), bulkType])) } }; }))} className="kulto-btn text-xs font-semibold px-3 py-1.5 rounded-full shrink-0" style={{ background: "var(--sun)", color: "var(--ink)", opacity: !bulkType || movingSelected ? 0.5 : 1 }}>Marcar tipo</button>
+                    <button type="button" disabled={!bulkType || movingSelected} onClick={() => applyBulk(selectedProductIds.map((id) => { const p = sellableProducts.find((x) => x.id === id); return { id, patch: { garmentTypes: (p?.garmentTypes || []).filter((t) => t !== bulkType) } }; }))} className="kulto-btn text-xs font-semibold px-3 py-1.5 rounded-full shrink-0" style={{ background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)", opacity: !bulkType || movingSelected ? 0.5 : 1 }}>Quitar tipo</button>
                     <input
                       list="kulto-folder-options"
                       value={bulkFolderTarget}
