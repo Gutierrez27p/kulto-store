@@ -14390,6 +14390,17 @@ function AdminProductsMenu({ items, categories, groups, onSave }) {
               {(it.type === "group" ? groups : categories).map((v) => <option key={v} value={v}>{v}</option>)}
             </select>
             <button onClick={() => removeItem(it.id)} className="kulto-btn p-2 rounded-full" style={{ color: "var(--signal)" }} aria-label="Quitar"><Trash2 size={16} /></button>
+            <div className="w-full flex items-center gap-3 pt-1" data-pmi="pmiImage">
+              <span className="block w-16 h-12 rounded-lg overflow-hidden shrink-0 flex items-center justify-center" style={{ background: "var(--ink)", border: "1px solid var(--line)" }}>
+                {it.image ? <img src={it.image} alt="" className="w-full h-full object-contain" /> : <Shirt size={18} color="rgba(243,239,230,0.35)" />}
+              </span>
+              <label className="kulto-btn text-xs font-semibold px-3 py-1.5 rounded-full cursor-pointer" style={{ background: "var(--sun)", color: "var(--ink)" }}>
+                {it.image ? "Cambiar imagen" : "Elegir imagen"}
+                <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => { const f = e.target.files[0]; e.target.value = ""; if (f) fileToBase64(f, (b64) => persist(list.map((x) => (x.id === it.id ? { ...x, image: b64 } : x))), 900, 0.85, "image/png"); }} />
+              </label>
+              {it.image && <button type="button" onClick={() => persist(list.map((x) => (x.id === it.id ? { ...x, image: "" } : x)))} className="text-xs underline" style={{ color: "var(--slate)" }}>Quitar imagen</button>}
+              {!it.image && <span className="text-xs" style={{ color: "var(--slate)" }}>Sin imagen: se muestran fotos de sus productos.</span>}
+            </div>
           </div>
         ))}
       </div>
@@ -18137,7 +18148,7 @@ function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, cus
             </button>
             {catalogMenuOpen && (() => {
               const activeItem = productsMenuItems.find((x) => x.id === megaItemId) || productsMenuItems[0] || null;
-              const tiles = activeItem ? megaTiles(activeItem) : [];
+              const tiles = activeItem ? [...(activeItem.image ? [{ key: "custom-img", label: activeItem.label || activeItem.value, img: activeItem.image, onClick: () => goCatalog(activeItem) }] : []), ...megaTiles(activeItem)] : [];
               return (
                 <div className="absolute left-0 right-0 top-full z-50" style={{ background: "var(--ink)", borderBottom: "1px solid var(--line)", boxShadow: "0 24px 40px rgba(0,0,0,0.25)" }}>
                   <div className="max-w-6xl mx-auto px-4 md:px-6 py-6 grid gap-8" style={{ gridTemplateColumns: "260px minmax(0, 1fr)" }}>
