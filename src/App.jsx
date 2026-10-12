@@ -12590,7 +12590,7 @@ const numOf = (v) => {
   return Number.isFinite(n) ? n : 0;
 };
 const eur = (n) => (Number.isFinite(n) ? n.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €" : "—");
-function AdminCostsPanel({ products }) {
+function AdminCostsPanel({ templates = [], settings }) {
   const [state, setState] = useState({ vat: 21, sellWithVat: true, deduct: true, items: [] });
   const [loaded, setLoaded] = useState(false);
   const [saved, setSaved] = useState("");
@@ -12646,6 +12646,23 @@ function AdminCostsPanel({ products }) {
     return acc;
   }, { invested: 0, revenue: 0, profit: 0 });
   const inputStyle = { background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" };
+  // Prendas de "Personalizar" (con el precio que tienen ahí): se ofrecen al escribir el nombre.
+  const tplOptions = [];
+  (templates || []).forEach((p) => {
+    const label = [p.category, p.subcategory].filter(Boolean).join(" · ") || p.name;
+    if (!label || tplOptions.some((o) => o.label === label)) return;
+    const styleKey = p.subcategory || p.name;
+    const sub = settings?.personalizeSubcategoryPrices?.[styleKey];
+    const price = p.price != null && p.price !== "" ? Number(p.price) : sub != null ? Number(sub) : Number(settings?.personalizedBasePrice) || 0;
+    tplOptions.push({ label, price: Number.isFinite(price) && price > 0 ? price : null });
+  });
+  const pickName = (id, value) => {
+    const opt = tplOptions.find((o) => o.label === value);
+    const cur = state.items.find((x) => x.id === id);
+    const patch = { name: value };
+    if (opt && opt.price != null && !String(cur?.price || "").trim()) patch.price = String(opt.price).replace(".", ",");
+    setItem(id, patch);
+  };
   const pill = (active) => ({ background: active ? "var(--signal)" : "var(--ink)", color: "var(--bone)", border: "1px solid var(--line)" });
   const field = (label, child) => (
     <label className="flex flex-col gap-1 text-[11px]" style={{ color: "var(--slate)" }}>{label}{child}</label>
@@ -12694,6 +12711,7 @@ function AdminCostsPanel({ products }) {
         <input placeholder="Buscar en mi lista…" value={query} onChange={(e) => setQuery(e.target.value)} className="rounded-xl p-2.5 text-sm flex-1 min-w-[160px]" style={inputStyle} />
       </div>
 
+      <datalist id="kulto-costs-names">{tplOptions.map((o) => <option key={o.label} value={o.label}>{o.price != null ? `${eur(o.price)} en tu tienda` : ""}</option>)}</datalist>
       {state.items.length === 0 && <p className="text-sm text-center py-8" style={{ color: "var(--slate)" }}>Todavía no anotaste nada. Tocá "Agregar producto".</p>}
       {shown.map((it) => {
         const c = calc(it);
@@ -12701,7 +12719,7 @@ function AdminCostsPanel({ products }) {
         return (
           <div key={it.id} className="rounded-2xl p-4 flex flex-col gap-3" style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}>
             <div className="flex items-center gap-2">
-              <input placeholder="Producto (ej: Camiseta oversize, Sudadera sin capucha…)" value={it.name} onChange={(e) => setItem(it.id, { name: e.target.value })} className="rounded-xl p-2.5 text-sm flex-1 min-w-0" style={inputStyle} />
+              <input list="kulto-costs-names" placeholder="Producto (elegí una prenda de Personalizar o escribí la tuya)" value={it.name} onChange={(e) => pickName(it.id, e.target.value)} className="rounded-xl p-2.5 text-sm flex-1 min-w-0" style={inputStyle} />
               <button onClick={() => removeItem(it.id)} className="kulto-btn p-2 rounded-full shrink-0" style={{ color: "var(--signal)" }} aria-label="Borrar fila"><Trash2 size={16} /></button>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -17409,7 +17427,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
       {tab === "pedidos" && <AdminOrders orders={orders} settings={settings} onSetPaymentStatus={onSetPaymentStatus} onSetLocalStatus={onSetLocalStatus} onSetLocalTracking={onSetLocalTracking} onToggleStatus={onToggleOrderStatus} onUpdateTracking={onUpdateTracking} onApplyDiscount={onApplyDiscount} onRequestReview={onRequestReview} onBulkComplete={onBulkComplete} onBulkArchive={onBulkArchive} onBulkDelete={onBulkDelete} />}
       {tab === "ventas" && <AdminSalesPanel products={sellableProducts} orders={orders} settings={settings} onSaveSettings={onSaveSettings} />}
       {tab === "estadisticas" && <AdminAnalyticsPanel settings={settings} onSaveSettings={onSaveSettings} />}
-      {tab === "costos" && isOwner && <AdminCostsPanel products={sellableProducts} />}
+      {tab === "costos" && isOwner && <AdminCostsPanel templates={templateProducts} settings={settings} />}
       {tab === "compras" && <AdminRestockPanel products={sellableProducts} onQuickRestock={onQuickRestock} settings={settings} onSaveSettings={onSaveSettings} />}
       {tab === "clientes" && <AdminCustomers customers={customers} onAdjustPoints={onAdjustCustomerPoints} loyaltyThreshold={settings?.loyaltyRewardThreshold} isOwner={isOwner} onSetAdminPermissions={onSetAdminPermissions} onDeleteCustomer={onDeleteCustomer} onCreateCustomer={onCreateCustomer} onUpdateCustomerInfo={onUpdateCustomerInfo} onSetInstagramStatus={onSetInstagramStatus} instagramOn={!!settings?.instagramDiscountEnabled} onSendPasswordHelp={onSendPasswordHelp} />}
       {tab === "resenas" && <AdminReviews reviews={reviews} onSave={onSaveReview} onDelete={onDeleteReview} onReorder={onReorderReview} />}
