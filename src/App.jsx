@@ -3502,6 +3502,7 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
   const [quickOpen, setQuickOpen] = useState(false);
   const [quickColorIdx, setQuickColorIdx] = useState(0);
   const [quickSizeIdx, setQuickSizeIdx] = useState(null);
+  const [quickAud, setQuickAud] = useState(() => audsOf(product)[0] || "h");
   const [quickQty, setQuickQty] = useState(1);
   const [quickJustAdded, setQuickJustAdded] = useState(false);
 
@@ -3518,6 +3519,7 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
     e.stopPropagation();
     setQuickColorIdx(activeColorIdx >= 0 ? activeColorIdx : 0);
     setQuickSizeIdx(null);
+    setQuickAud(audsOf(product)[0] || "h");
     setQuickQty(1);
     setQuickOpen(true);
   };
@@ -3690,11 +3692,16 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
               <p className="text-sm font-semibold pr-3" style={{ color: "var(--bone)" }}>{product.name}</p>
               <button onClick={() => setQuickOpen(false)} className="kulto-btn shrink-0" style={{ color: "var(--slate)" }}><X size={18} /></button>
             </div>
+            {audsOf(product).length > 1 && (
+              <div className="mb-4">
+                <AudiencePicker product={product} aud={quickAud} onPick={(a) => { setQuickAud(a); if (!colorOkForAud(product, colors[quickColorIdx], a)) setQuickColorIdx(firstColorIdxForAud(product, a)); setQuickSizeIdx(null); }} />
+              </div>
+            )}
             {colors.length > 0 && (
               <div className="mb-4">
                 <p className="text-xs mb-1.5" style={{ color: "var(--slate)" }}>Color</p>
                 <div className="flex flex-wrap gap-2">
-                  {colors.map((c, i) => (
+                  {colors.map((c, i) => !colorOkForAud(product, c, quickAud) ? null : (
                     <button
                       key={i}
                       type="button"
@@ -3713,7 +3720,7 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
                 <p className="text-xs mb-1.5" style={{ color: "var(--slate)" }}>Talle</p>
                 <div className="flex flex-wrap gap-2">
                   {product.sizes.map((s, i) => {
-                    const ok = sizeOkForColor(product, s, colors[quickColorIdx]);
+                    const ok = true; if (audsOf(product).length > 1 && audOf(s) !== quickAud) return null;
                     return (
                     <button
                       key={s}
@@ -3724,7 +3731,7 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
                       className="kulto-btn text-xs font-semibold rounded-full px-3 py-1.5"
                       style={{ background: quickSizeIdx === i && ok ? "var(--sun)" : "var(--ink-2)", color: quickSizeIdx === i && ok ? "var(--ink)" : "var(--bone)", border: "1px solid var(--line)", opacity: ok ? 1 : 0.35, textDecoration: ok ? "none" : "line-through", cursor: ok ? "pointer" : "not-allowed" }}
                     >
-                      {s}
+                      {audsOf(product).length > 1 ? sizeLabel(s) : s}
                     </button>
                     );
                   })}
@@ -3887,6 +3894,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
   const [colorIdx, setColorIdx] = useState(0);
   const [imgIdx, setImgIdx] = useState(0);
   const [sizeIdx, setSizeIdx] = useState(0);
+  const [aud, setAud] = useState(() => audsOf(product)[0] || "h");
   const [designMode, setDesignMode] = useState(product.designs && product.designs.length ? "design" : "custom");
   const [designIdx, setDesignIdx] = useState(0);
   const [customNote, setCustomNote] = useState("");
@@ -3907,6 +3915,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
     setColorIdx(0);
     setImgIdx(0);
     setSizeIdx(0);
+    setAud(audsOf(product)[0] || "h");
     setDesignMode(product.designs && product.designs.length ? "design" : "custom");
     setDesignIdx(0);
     setCustomNote("");
@@ -4150,12 +4159,14 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
           )}
         </div>
 
+        <AudiencePicker product={product} aud={aud} onPick={(a) => { setAud(a); setColorIdx(colorOkForAud(product, product.colors?.[colorIdx], a) ? colorIdx : firstColorIdxForAud(product, a)); setSizeIdx(firstSizeIdxForAud(product, a)); }} />
+
         {/* Step 1: color */}
         <div>
           <p className="text-sm font-semibold mb-2" style={{ color: "var(--bone)" }}>1. Elige el color</p>
           {product.colors && product.colors.length > 0 ? (
             <div className="flex flex-wrap gap-2">
-              {product.colors.map((c, i) => (
+              {product.colors.map((c, i) => !colorOkForAud(product, c, aud) ? null : (
                 <ColorSwatch key={i} hex={c.hex} title={c.name} selected={i === colorIdx} onClick={() => { setColorIdx(i); if (product.sizes && !sizeOkForColor(product, product.sizes[sizeIdx], product.colors[i])) setSizeIdx(firstOkSizeIdx(product, product.colors[i])); }} />
               ))}
             </div>
@@ -4170,7 +4181,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
             <p className="text-sm font-semibold mb-2" style={{ color: "var(--bone)" }}>2. Elige el talle</p>
             <div className="flex flex-wrap gap-2">
               {product.sizes.map((s, i) => {
-                const ok = sizeOkForColor(product, s, color);
+                const ok = true; if (audsOf(product).length > 1 && audOf(s) !== aud) return null;
                 return (
                 <button
                   key={s}
@@ -4186,7 +4197,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
                     opacity: ok ? 1 : 0.35, textDecoration: ok ? "none" : "line-through", cursor: ok ? "pointer" : "not-allowed",
                   }}
                 >
-                  {s}
+                  {audsOf(product).length > 1 ? sizeLabel(s) : s}
                 </button>
                 );
               })}
@@ -6589,6 +6600,7 @@ function Wizard({ products, categories, settings, designLibrary, designFolders, 
   const [colorIdx, setColorIdx] = useState(0);
   const [colorConfirm, setColorConfirm] = useState(null);
   const [sizeIdx, setSizeIdx] = useState(0);
+  const [persAud, setPersAud] = useState("h");
   // "source": null (eligiendo) | "self" (sube su foto) | "library" (elige un diseño de Kulto) | "service" (pide que se lo hagamos)
   const [source, setSource] = useState(null);
   const [consent, setConsent] = useState(false);
@@ -7060,8 +7072,15 @@ function Wizard({ products, categories, settings, designLibrary, designFolders, 
           <p className="text-sm mb-4" style={{ color: "var(--slate)" }}>3. Elegí el talle</p>
           {hasSizes ? (
             <>
+            {audsOf(prod).length > 1 && (
+              <div className="mb-4">
+                <AudiencePicker product={prod} aud={audsOf(prod).includes(persAud) ? persAud : audsOf(prod)[0]} color={color} onPick={(a) => setPersAud(a)} />
+              </div>
+            )}
             <div className="flex flex-wrap gap-2">
               {prod.sizes.map((s, i) => {
+                const curAud = audsOf(prod).includes(persAud) ? persAud : audsOf(prod)[0];
+                if (audsOf(prod).length > 1 && audOf(s) !== curAud) return null;
                 const ok = sizeOkForColor(prod, s, color);
                 return (
                 <button
@@ -7072,7 +7091,7 @@ function Wizard({ products, categories, settings, designLibrary, designFolders, 
                   className="kulto-btn text-sm font-semibold rounded-full px-5 py-2.5"
                   style={{ background: sizeIdx === i && ok ? "var(--sun)" : "var(--ink-2)", color: sizeIdx === i && ok ? "var(--ink)" : "var(--bone)", border: "1px solid var(--line)", opacity: ok ? 1 : 0.35, textDecoration: ok ? "none" : "line-through", cursor: ok ? "pointer" : "not-allowed" }}
                 >
-                  {s}
+                  {audsOf(prod).length > 1 ? sizeLabel(s) : s}
                 </button>
                 );
               })}
@@ -8616,18 +8635,48 @@ const isKidSize = (s) => /^niñ[oa]\s/i.test(String(s || ""));
 // Colores propios de los talles de niño: si el producto define kidColors (lista de
 // nombres), los "Niño N" solo están en esos colores. Vacío = en todos los colores.
 const kidColorList = (p) => (Array.isArray(p?.kidColors) ? p.kidColors : []);
-const sizeOkForColor = (p, size, color) => {
-  if (!isKidSize(size)) return true;
-  const kc = kidColorList(p);
-  if (!kc.length || !color) return true;
-  return kc.includes(color.name);
+const WOMAN_SIZE_PRESETS = ["XS", "S", "M", "L", "XL", "XXL"];
+const isWomanSize = (s) => /^mujer\s/i.test(String(s || ""));
+// Para quién es cada talle: "h" hombre/adulto (sin prefijo), "m" mujer ("Mujer S"), "k" niño ("Niño 8").
+const audOf = (s) => (isKidSize(s) ? "k" : isWomanSize(s) ? "m" : "h");
+const AUD_LABEL = { h: "Hombre", m: "Mujer", k: "Niño" };
+const sizeLabel = (s) => String(s || "").replace(/^(niñ[oa]|mujer)\s+/i, "");
+const womanColorList = (p) => (Array.isArray(p?.womanColors) ? p.womanColors : []);
+// Colores de cada público: vacío = todos los colores del producto.
+const colorOkForAud = (p, color, a) => {
+  const l = a === "k" ? kidColorList(p) : a === "m" ? womanColorList(p) : [];
+  return !l.length || !color || l.includes(color.name);
 };
-const firstOkSizeIdx = (p, color) => { const a = p?.sizes || []; const i = a.findIndex((x) => sizeOkForColor(p, x, color)); return i >= 0 ? i : 0; };
-const KidColorsNote = ({ product }) => { const kc = kidColorList(product); if (!kc.length || !(product.sizes || []).some(isKidSize)) return null; return <p className="text-xs mt-2" style={{ color: "var(--slate)" }}>Talles de niño solo en: {kc.join(", ")}</p>; };
+const sizeOkForColor = (p, size, color) => colorOkForAud(p, color, audOf(size));
+const audsOf = (p) => ["h", "m", "k"].filter((a) => (p?.sizes || []).some((s) => audOf(s) === a));
+const firstColorIdxForAud = (p, a) => { const i = (p?.colors || []).findIndex((c) => colorOkForAud(p, c, a)); return i >= 0 ? i : 0; };
+const firstSizeIdxForAud = (p, a) => { const i = (p?.sizes || []).findIndex((x) => audOf(x) === a); return i >= 0 ? i : 0; };
+const KidColorsNote = () => null;
+function AudiencePicker({ product, aud, onPick, color }) {
+  const list = audsOf(product);
+  if (list.length < 2) return null;
+  return (
+    <div>
+      <p className="text-sm font-semibold mb-2" style={{ color: "var(--bone)" }}>¿Para quién es?</p>
+      <div className="flex flex-wrap gap-2">
+        {list.map((a) => {
+          const ok = !color || colorOkForAud(product, color, a);
+          return (
+            <button key={a} type="button" disabled={!ok} title={ok ? undefined : "No disponible en este color"} onClick={() => ok && onPick(a)} className="kulto-btn text-sm font-semibold rounded-full px-5 py-2" style={{ background: aud === a ? "var(--signal)" : "var(--ink-3)", color: "var(--bone)", border: aud === a ? "1px solid var(--signal)" : "1px solid var(--line)", opacity: ok ? 1 : 0.35, cursor: ok ? "pointer" : "not-allowed" }}>
+              {AUD_LABEL[a]}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 const sortSizes = (arr) => {
-  const adults = arr.filter((x) => !isKidSize(x));
-  const kids = arr.filter(isKidSize).sort((a, b) => (parseFloat(String(a).replace(/\D+/g, "")) || 0) - (parseFloat(String(b).replace(/\D+/g, "")) || 0));
-  return [...adults, ...kids];
+  const num = (a, b) => (parseFloat(String(a).replace(/\D+/g, "")) || 0) - (parseFloat(String(b).replace(/\D+/g, "")) || 0);
+  const adults = arr.filter((x) => !isKidSize(x) && !isWomanSize(x));
+  const women = arr.filter(isWomanSize).sort((a, b) => { const ia = WOMAN_SIZE_PRESETS.indexOf(sizeLabel(a)), ib = WOMAN_SIZE_PRESETS.indexOf(sizeLabel(b)); return ia >= 0 && ib >= 0 ? ia - ib : ia >= 0 ? -1 : ib >= 0 ? 1 : num(a, b); });
+  const kids = arr.filter(isKidSize).sort(num);
+  return [...adults, ...women, ...kids];
 };
 function KidSizesPicker({ sizes, onChange, inputStyle, colors = [], kidColors = [], onChangeKidColors }) {
   const kids = sizes.filter(isKidSize);
@@ -8654,7 +8703,7 @@ function KidSizesPicker({ sizes, onChange, inputStyle, colors = [], kidColors = 
       </label>
       {open && (
         <div className="mt-2">
-          <p className="text-xs mb-2" style={{ color: "var(--slate)" }}>Tildá los talles de niños que hay. Se muestran después de los de adulto, como "Niño 8", "Niño 10"…</p>
+          <p className="text-xs mb-2" style={{ color: "var(--slate)" }}>Tildá los talles de niños que hay. En la tienda el cliente elige Hombre / Mujer / Niño y ve solo los talles (solo el número, ej. 8, 10) y colores de cada uno.</p>
           <div className="flex flex-wrap gap-2 mb-2">
             {[...KID_SIZE_PRESETS, ...kids.map((k) => k.replace(/^niñ[oa]\s+/i, "")).filter((n) => !KID_SIZE_PRESETS.includes(n))].map((n) => {
               const label = `Niño ${n}`;
@@ -8680,6 +8729,71 @@ function KidSizesPicker({ sizes, onChange, inputStyle, colors = [], kidColors = 
                   const active = kidColors.includes(nm);
                   return (
                     <button key={i} type="button" onClick={() => onChangeKidColors(active ? kidColors.filter((x) => x !== nm) : [...kidColors, nm])} className="kulto-btn text-xs font-semibold rounded-full px-3 py-1.5 flex items-center gap-1.5" style={{ background: active ? "var(--signal)" : "var(--ink)", color: "var(--bone)", border: active ? "1px solid var(--signal)" : "1px solid var(--line)" }}>
+                      <span style={{ width: 12, height: 12, borderRadius: 999, background: c.hex, border: "1px solid var(--line)", display: "inline-block" }} />
+                      {nm}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function WomanSizesPicker({ sizes, onChange, inputStyle, colors = [], womanColors = [], onChangeWomanColors }) {
+  const kids = sizes.filter(isWomanSize);
+  const [open, setOpen] = useState(kids.length > 0);
+  const [custom, setCustom] = useState("");
+  useEffect(() => { if (kids.length > 0) setOpen(true); }, [kids.length]);
+  const toggleOpen = (on) => {
+    setOpen(on);
+    if (!on) onChange(sizes.filter((x) => !isWomanSize(x)));
+  };
+  const toggle = (label) => onChange(sortSizes(sizes.includes(label) ? sizes.filter((x) => x !== label) : [...sizes, label]));
+  const addCustom = () => {
+    const v = custom.trim();
+    if (!v) return;
+    const label = isWomanSize(v) ? v : `Mujer ${v}`;
+    if (!sizes.includes(label)) onChange(sortSizes([...sizes, label]));
+    setCustom("");
+  };
+  return (
+    <div className="mt-3 rounded-xl p-3" style={{ background: "var(--ink-3)", border: "1px dashed var(--line)" }}>
+      <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer" style={{ color: "var(--bone)" }}>
+        <input type="checkbox" checked={open} onChange={(e) => toggleOpen(e.target.checked)} />
+        También disponible para mujer
+      </label>
+      {open && (
+        <div className="mt-2">
+          <p className="text-xs mb-2" style={{ color: "var(--slate)" }}>Tildá los talles de mujer que hay. En la tienda el cliente elige Hombre / Mujer / Niño y ve solo los talles de cada uno.</p>
+          <div className="flex flex-wrap gap-2 mb-2">
+            {[...WOMAN_SIZE_PRESETS, ...kids.map((k) => k.replace(/^mujer\s+/i, "")).filter((n) => !WOMAN_SIZE_PRESETS.includes(n))].map((n) => {
+              const label = `Mujer ${n}`;
+              const active = sizes.includes(label);
+              return (
+                <button key={n} type="button" onClick={() => toggle(label)} className="kulto-btn text-xs font-semibold rounded-full px-3 py-1.5" style={{ background: active ? "var(--signal)" : "var(--ink)", color: "var(--bone)", border: active ? "1px solid var(--signal)" : "1px solid var(--line)" }}>
+                  {n}
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex items-center gap-2">
+            <input placeholder="Otro talle de mujer (ej. 3XL)" value={custom} onChange={(e) => setCustom(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addCustom(); } }} className="rounded-xl p-2 text-sm flex-1" style={inputStyle} />
+            <button type="button" onClick={addCustom} className="kulto-btn text-xs font-semibold rounded-xl px-3 py-2" style={{ background: "var(--sun)", color: "var(--ink)" }}>Agregar</button>
+          </div>
+          {kids.length > 0 && onChangeWomanColors && colors.length > 0 && (
+            <div className="mt-3">
+              <p className="text-xs font-semibold mb-1" style={{ color: "var(--bone)" }}>Colores disponibles para mujer</p>
+              <p className="text-xs mb-2" style={{ color: "var(--slate)" }}>Tildá solo los colores en que hay talle de mujer. Si no tildás ninguno, se ofrecen en todos los colores.</p>
+              <div className="flex flex-wrap gap-2">
+                {colors.map((c, i) => {
+                  const nm = (c.name || "").trim() || "Único";
+                  const active = womanColors.includes(nm);
+                  return (
+                    <button key={i} type="button" onClick={() => onChangeWomanColors(active ? womanColors.filter((x) => x !== nm) : [...womanColors, nm])} className="kulto-btn text-xs font-semibold rounded-full px-3 py-1.5 flex items-center gap-1.5" style={{ background: active ? "var(--signal)" : "var(--ink)", color: "var(--bone)", border: active ? "1px solid var(--signal)" : "1px solid var(--line)" }}>
                       <span style={{ width: 12, height: 12, borderRadius: 999, background: c.hex, border: "1px solid var(--line)", display: "inline-block" }} />
                       {nm}
                     </button>
@@ -8882,7 +8996,7 @@ function CropModal({ source, onConfirm, onCancel, frameW = CROP_FRAME_W, frameH 
 const emptyDraft = {
   id: null, name: "", description: "", material: "", category: "", subcategory: "", group: "", price: "", salePrice: "", stock: "", points: "", sku: "",
   tags: { bestseller: false, oferta: false, tendencia: false, template: false, customDesign: false },
-  colors: [], designs: [], sizes: [], kidColors: [], garmentTypes: [], photoPool: [],
+  colors: [], designs: [], sizes: [], kidColors: [], womanColors: [], garmentTypes: [], photoPool: [],
   imageFit: "contain", imageBackground: null,
   sizeGuide: [], // [{ size, measurements }] — guía de talles opcional, por prenda
   sizeGuideImage: null, // alternativa (o complemento) a la tabla: una foto con las medidas
@@ -9739,9 +9853,9 @@ function AdminProductForm({ categories, groups, onAddCategory, onAddGroup, saved
                 );
               })}
             </div>
-            {draft.sizes.filter((s) => !SIZE_PRESETS.includes(s) && !isKidSize(s)).length > 0 && (
+            {draft.sizes.filter((s) => !SIZE_PRESETS.includes(s) && !isKidSize(s) && !isWomanSize(s)).length > 0 && (
               <div className="flex flex-wrap gap-2 mb-2">
-                {draft.sizes.filter((s) => !SIZE_PRESETS.includes(s) && !isKidSize(s)).map((s) => (
+                {draft.sizes.filter((s) => !SIZE_PRESETS.includes(s) && !isKidSize(s) && !isWomanSize(s)).map((s) => (
                   <div key={s} className="flex items-center gap-1 rounded-full pl-3 pr-2 py-1" style={{ background: "var(--ink-3)" }}>
                     <span className="text-xs" style={{ color: "var(--bone)" }}>{s}</span>
                     <button onClick={() => setDraft((d) => ({ ...d, sizes: d.sizes.filter((x) => x !== s) }))} style={{ color: "var(--slate)" }}><X size={12} /></button>
@@ -9765,6 +9879,7 @@ function AdminProductForm({ categories, groups, onAddCategory, onAddGroup, saved
                 Agregar
               </button>
             </div>
+            <WomanSizesPicker sizes={draft.sizes} onChange={(next) => setDraft((d) => ({ ...d, sizes: next }))} inputStyle={inputStyle} colors={draft.colors || []} womanColors={draft.womanColors || []} onChangeWomanColors={(kc) => setDraft((d) => ({ ...d, womanColors: kc }))} />
             <KidSizesPicker sizes={draft.sizes} onChange={(next) => setDraft((d) => ({ ...d, sizes: next }))} inputStyle={inputStyle} colors={draft.colors || []} kidColors={draft.kidColors || []} onChangeKidColors={(kc) => setDraft((d) => ({ ...d, kidColors: kc }))} />
           </div>
 
@@ -10252,6 +10367,7 @@ const emptyTemplateDraft = {
   sku: "",
   sizes: [],
   kidColors: [],
+  womanColors: [],
   sizeGuide: [],
   sizeGuideImage: null,
   colors: [],
@@ -10402,6 +10518,7 @@ function AdminTemplateForm({ categories, templateProducts = [], onAddCategory, o
         cardImage: editing.cardImage || null,
         hideCardName: !!editing.hideCardName,
         kidColors: Array.isArray(editing.kidColors) ? editing.kidColors : [],
+        womanColors: Array.isArray(editing.womanColors) ? editing.womanColors : [],
       });
       // La foto base queda guardada junto con la prenda, así no hay que
       // volver a subirla cada vez que se edita (y la carga masiva por
@@ -10548,6 +10665,7 @@ function AdminTemplateForm({ categories, templateProducts = [], onAddCategory, o
       designs: [],
       sizes: draft.sizes,
       kidColors: (draft.sizes || []).some(isKidSize) ? (draft.kidColors || []).filter((n) => draft.colors.some((c) => ((c.name || "").trim() || "Único") === n)) : [],
+      womanColors: (draft.sizes || []).some(isWomanSize) ? (draft.womanColors || []).filter((n) => draft.colors.some((c) => ((c.name || "").trim() || "Único") === n)) : [],
       photoPool: [],
       imageFit: draft.imageFit || "contain",
       imageBackground: draft.imageBackground ?? null,
@@ -10995,7 +11113,7 @@ function AdminTemplateForm({ categories, templateProducts = [], onAddCategory, o
               {s}
             </button>
           ))}
-          {draft.sizes.filter((s) => !SIZE_PRESETS.includes(s) && !isKidSize(s)).map((s) => (
+          {draft.sizes.filter((s) => !SIZE_PRESETS.includes(s) && !isKidSize(s) && !isWomanSize(s)).map((s) => (
             <button key={s} onClick={() => toggleSize(s)} className="kulto-btn text-xs font-semibold rounded-full px-3 py-1.5" style={{ background: "var(--sun)", color: "var(--ink)" }}>
               {s}
             </button>
@@ -11005,7 +11123,8 @@ function AdminTemplateForm({ categories, templateProducts = [], onAddCategory, o
           <input value={customSize} onChange={(e) => setCustomSize(e.target.value)} placeholder="Otro talle" className="flex-1 rounded-xl p-2 text-xs" style={inputStyle} />
           <button onClick={addCustomSize} className="kulto-btn text-xs font-semibold rounded-xl px-3" style={{ background: "var(--ink-3)", color: "var(--bone)" }}>Añadir</button>
         </div>
-        <KidSizesPicker sizes={draft.sizes} onChange={(next) => setDraft((d) => ({ ...d, sizes: next }))} inputStyle={inputStyle} colors={draft.colors || []} kidColors={draft.kidColors || []} onChangeKidColors={(kc) => setDraft((d) => ({ ...d, kidColors: kc }))} />
+        <WomanSizesPicker sizes={draft.sizes} onChange={(next) => setDraft((d) => ({ ...d, sizes: next }))} inputStyle={inputStyle} colors={draft.colors || []} womanColors={draft.womanColors || []} onChangeWomanColors={(kc) => setDraft((d) => ({ ...d, womanColors: kc }))} />
+            <KidSizesPicker sizes={draft.sizes} onChange={(next) => setDraft((d) => ({ ...d, sizes: next }))} inputStyle={inputStyle} colors={draft.colors || []} kidColors={draft.kidColors || []} onChangeKidColors={(kc) => setDraft((d) => ({ ...d, kidColors: kc }))} />
       </div>
 
       {draft.sizes.length > 0 && (
