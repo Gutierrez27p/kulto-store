@@ -16380,6 +16380,22 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
       </button>
     );
   };
+  // Oculta/muestra solo el NOMBRE en las tarjetas de la tienda (el producto sigue visible).
+  const HideNamesButton = ({ list, what }) => {
+    const allHid = list.length > 0 && list.every((p) => p.hideCardName);
+    return (
+      <button
+        type="button"
+        disabled={movingSelected}
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); applyBulk(list.map((p) => ({ id: p.id, patch: { hideCardName: !allHid } }))); }}
+        className="kulto-btn text-[11px] font-semibold px-2.5 py-1 rounded-full shrink-0"
+        style={{ background: allHid ? "var(--signal)" : "var(--ink)", color: "var(--bone)", border: "1px solid var(--line)", opacity: movingSelected ? 0.6 : 1 }}
+        title={allHid ? `Volver a mostrar el nombre de los productos ${what}` : `Ocultar el nombre de todos los productos ${what} (se ve solo la prenda)`}
+      >
+        {allHid ? "Mostrar nombres" : "Ocultar nombres"}
+      </button>
+    );
+  };
   // Atajo: tilda todos los productos de una carpeta/grupo y abre el panel.
   const openColorsFor = (list) => {
     setSelectedProductIds(list.map((p) => p.id));
@@ -16858,6 +16874,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                         <span className="text-xs" style={{ color: "var(--slate)" }}>{items.length} producto{items.length === 1 ? "" : "s"}</span>
                       </button>
                       <HideListButton list={items} what="todo este grupo" />
+                      <HideNamesButton list={items} what="de este grupo" />
                       <button
                         type="button"
                         onClick={() => openColorsFor(items)}
@@ -16922,21 +16939,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                               <span className="text-[11px]" style={{ color: "var(--slate)" }}>{fItems.length}</span>
                             </button>
                             <HideListButton list={fItems} what="toda esta carpeta" />
-                            {(() => {
-                              const allHid = fItems.length > 0 && fItems.every((p) => p.hideCardName);
-                              return (
-                                <button
-                                  type="button"
-                                  disabled={movingSelected}
-                                  onClick={() => applyBulk(fItems.map((p) => ({ id: p.id, patch: { hideCardName: !allHid } })))}
-                                  className="kulto-btn text-[11px] font-semibold px-2.5 py-1 rounded-full shrink-0"
-                                  style={{ background: allHid ? "var(--sun)" : "var(--ink)", color: allHid ? "var(--ink)" : "var(--bone)", border: "1px solid var(--line)" }}
-                                  title={allHid ? "Volver a mostrar el nombre de todos los productos de esta carpeta" : "Ocultar el nombre de todos los productos de esta carpeta (se ve solo la prenda)"}
-                                >
-                                  {allHid ? "Mostrar nombres" : "Ocultar nombres"}
-                                </button>
-                              );
-                            })()}
+                            <HideNamesButton list={fItems} what="de esta carpeta" />
                             <button
                               type="button"
                               onClick={() => openColorsFor(fItems)}
@@ -16992,6 +16995,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                                 {cat} · {catItems.length}{catItems.some((p) => p.hidden) ? ` · ${catItems.filter((p) => p.hidden).length} oculto${catItems.filter((p) => p.hidden).length === 1 ? "" : "s"}` : ""}
                               </p>
                               <HideListButton list={catItems} what={`todas las "${cat}"`} />
+                              <HideNamesButton list={catItems} what={`de "${cat}" en esta carpeta`} />
                             </label>
                             <div className="flex flex-col gap-2 p-2">
                         {catItems.map((p) => {
