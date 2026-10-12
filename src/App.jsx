@@ -4,7 +4,7 @@ import {
   MessageCircle, Lock, Check, Shirt, Upload, Package, Star, Sparkles, ArrowRight,
   LogOut, Loader2, ZoomIn, ZoomOut, ArrowUp, ArrowDown, Quote, Instagram, Search, Heart, GripVertical, Info,
   Sun, Moon, RotateCw, Facebook, Music2, Mail, Phone, MapPin, HelpCircle, SlidersHorizontal, RotateCcw,
-  LayoutGrid, Eye, EyeOff, TrendingUp, UserPlus, KeyRound, Boxes, FolderPlus, ArrowLeft, Move, WifiOff, Download, BarChart3, Gift, Copy, Zap
+  LayoutGrid, Eye, EyeOff, TrendingUp, UserPlus, KeyRound, Boxes, FolderPlus, ArrowLeft, Move, WifiOff, Download, BarChart3, Gift, Copy, Zap, Calculator
 } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
 
@@ -81,6 +81,7 @@ const ADMIN_TABS = [
   ["ventas", "Ventas"],
   ["estadisticas", "Estadísticas"],
   ["compras", "Compras"],
+  ["costos", "Mis costos"],
   ["clientes", "Clientes"],
   ["resenas", "Reseñas"],
   ["contacto", "Contacto"],
@@ -95,6 +96,7 @@ const ADMIN_TAB_META = {
   ventas: { icon: TrendingUp, hint: "Ofertas y ventas" },
   estadisticas: { icon: BarChart3, hint: "Visitas y números" },
   compras: { icon: ShoppingBag, hint: "Reponer mercadería" },
+  costos: { icon: Calculator, hint: "Lo que compro y mi ganancia (privado)" },
   clientes: { icon: UserPlus, hint: "Cuentas y puntos" },
   resenas: { icon: Star, hint: "Opiniones de clientes" },
   contacto: { icon: Mail, hint: "Mensajes recibidos" },
@@ -11548,7 +11550,7 @@ function AdminCustomers({ customers, onAdjustPoints, loyaltyThreshold, isOwner, 
                 <div className="mt-3 pt-3 flex flex-col gap-2" style={{ borderTop: "1px dashed var(--line)" }}>
                   <p className="text-xs" style={{ color: "var(--slate)" }}>Tildá a qué secciones del panel de administrador puede entrar esta cuenta:</p>
                   <div className="flex flex-wrap gap-2">
-                    {ADMIN_TABS.map(([key, label]) => (
+                    {ADMIN_TABS.filter(([key]) => key !== "costos").map(([key, label]) => (
                       <label
                         key={key}
                         className="kulto-btn flex items-center gap-1.5 text-xs rounded-full pl-2 pr-3 py-1.5"
@@ -12575,6 +12577,183 @@ function AdminAnalyticsPanel({ settings, onSaveSettings }) {
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+// Libreta privada del dueño: lo que compra, cuánto le sale (con o sin IVA) y qué
+// ganancia deja según el precio al que lo venda. Solo se ve en el panel del
+// dueño; no aparece en ninguna parte de la tienda.
+const COSTS_KEY = "kulto:private:costs";
+const numOf = (v) => {
+  const n = parseFloat(String(v ?? "").replace(",", "."));
+  return Number.isFinite(n) ? n : 0;
+};
+const eur = (n) => (Number.isFinite(n) ? n.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €" : "—");
+function AdminCostsPanel({ products }) {
+  const [state, setState] = useState({ vat: 21, sellWithVat: true, deduct: true, items: [] });
+  const [loaded, setLoaded] = useState(false);
+  const [saved, setSaved] = useState("");
+  const [query, setQuery] = useState("");
+  const saveTimer = useRef(null);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const raw = await storageGet(COSTS_KEY, true);
+      if (!alive) return;
+      try {
+        const d = raw ? JSON.parse(raw) : null;
+        if (d && Array.isArray(d.items)) setState({ vat: d.vat ?? 21, sellWithVat: d.sellWithVat !== false, deduct: d.deduct !== false, items: d.items });
+      } catch { /* libreta vacía */ }
+      setLoaded(true);
+    })();
+    return () => { alive = false; };
+  }, []);
+  const persist = (next) => {
+    setState(next);
+    setSaved("Guardando…");
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(async () => {
+      const ok = await storageSet(COSTS_KEY, JSON.stringify(next), true);
+      setSaved(ok ? "Guardado ✓" : "No se pudo guardar. Revisá tu conexión.");
+    }, 600);
+  };
+  const setItem = (id, patch) => persist({ ...state, items: state.items.map((it) => (it.id === id ? { ...it, ...patch } : it)) });
+  const addItem = () => persist({ ...state, items: [{ id: genId("cost"), name: "", qty: "1", cost: "", costVat: "sin", price: "", note: "" }, ...state.items] });
+  const removeItem = (id) => {
+    const it = state.items.find((x) => x.id === id);
+    if (window.confirm(`¿Borrar "${it?.name || "esta fila"}" de tu lista?`)) persist({ ...state, items: state.items.filter((x) => x.id !== id) });
+  };
+  const r = Math.max(0, numOf(state.vat)) / 100;
+  const calc = (it) => {
+    const cost = numOf(it.cost);
+    const costNet = it.costVat === "con" ? cost / (1 + r) : cost;
+    const costGross = costNet * (1 + r);
+    const usedCost = state.deduct ? costNet : costGross; // si no puede descontar el IVA, el IVA pagado es parte del costo
+    const price = numOf(it.price);
+    const priceGross = state.sellWithVat ? price : price * (1 + r);
+    const priceNet = priceGross / (1 + r);
+    const profit = priceNet - usedCost;
+    const margin = priceNet > 0 ? (profit / priceNet) * 100 : 0;
+    const qty = Math.max(0, numOf(it.qty));
+    return { costNet, costGross, priceGross, priceNet, profit, margin, qty, hasPrice: price > 0, hasCost: cost > 0 };
+  };
+  const shown = state.items.filter((it) => !query.trim() || (it.name + " " + (it.note || "")).toLowerCase().includes(query.trim().toLowerCase()));
+  const totals = state.items.reduce((acc, it) => {
+    const c = calc(it);
+    acc.invested += (state.deduct ? c.costNet : c.costGross) * c.qty;
+    if (c.hasPrice) { acc.revenue += c.priceNet * c.qty; acc.profit += c.profit * c.qty; }
+    return acc;
+  }, { invested: 0, revenue: 0, profit: 0 });
+  const inputStyle = { background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" };
+  const pill = (active) => ({ background: active ? "var(--signal)" : "var(--ink)", color: "var(--bone)", border: "1px solid var(--line)" });
+  const field = (label, child) => (
+    <label className="flex flex-col gap-1 text-[11px]" style={{ color: "var(--slate)" }}>{label}{child}</label>
+  );
+  const storeNames = (products || []).map((p) => p.name).filter(Boolean);
+
+  if (!loaded) return <p className="text-sm" style={{ color: "var(--slate)" }}>Cargando tu lista…</p>;
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="rounded-2xl p-5 flex flex-col gap-3" style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h4 className="font-semibold" style={{ color: "var(--bone)" }}>Mis costos y ganancias</h4>
+            <p className="text-xs mt-1" style={{ color: "var(--slate)" }}>Anotá lo que comprás, cuánto te sale y a cuánto lo vas a vender. Esta lista es solo tuya: no se muestra en la tienda.</p>
+          </div>
+          <span className="text-xs shrink-0" style={{ color: "var(--sun)" }}>{saved}</span>
+        </div>
+        <div className="flex flex-wrap items-center gap-3 text-xs" style={{ color: "var(--bone)" }}>
+          <label className="flex items-center gap-2">IVA %
+            <input inputMode="decimal" value={state.vat} onChange={(e) => persist({ ...state, vat: e.target.value })} className="rounded-lg p-1.5 w-16 text-sm" style={inputStyle} />
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" checked={state.sellWithVat} onChange={(e) => persist({ ...state, sellWithVat: e.target.checked })} />
+            Mis precios de venta ya incluyen IVA
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer" title="Si podés descontar el IVA que pagás en tus compras, el costo real es sin IVA.">
+            <input type="checkbox" checked={state.deduct} onChange={(e) => persist({ ...state, deduct: e.target.checked })} />
+            Puedo descontar el IVA de mis compras
+          </label>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-3">
+        {[["Invertido", eur(totals.invested), "var(--bone)"], ["Venta (sin IVA)", eur(totals.revenue), "var(--bone)"], ["Ganancia total", eur(totals.profit), totals.profit >= 0 ? "var(--sun)" : "var(--signal)"]].map(([l, v, c]) => (
+          <div key={l} className="rounded-xl p-3" style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}>
+            <p className="text-[11px]" style={{ color: "var(--slate)" }}>{l}</p>
+            <p className="text-sm sm:text-base font-semibold" style={{ color: c }}>{v}</p>
+          </div>
+        ))}
+      </div>
+      <p className="text-[11px] -mt-3" style={{ color: "var(--slate)" }}>Los totales multiplican por la cantidad de cada fila. La ganancia cuenta solo las filas que tienen precio de venta.</p>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <button onClick={addItem} className="kulto-btn text-sm font-semibold px-4 py-2.5 rounded-full flex items-center gap-2" style={{ background: "var(--signal)", color: "var(--bone)" }}>
+          <Plus size={16} /> Agregar producto
+        </button>
+        <input placeholder="Buscar en mi lista…" value={query} onChange={(e) => setQuery(e.target.value)} className="rounded-xl p-2.5 text-sm flex-1 min-w-[160px]" style={inputStyle} />
+      </div>
+      <datalist id="kulto-costs-names">{storeNames.map((n) => <option key={n} value={n} />)}</datalist>
+
+      {state.items.length === 0 && <p className="text-sm text-center py-8" style={{ color: "var(--slate)" }}>Todavía no anotaste nada. Tocá "Agregar producto".</p>}
+      {shown.map((it) => {
+        const c = calc(it);
+        const good = c.profit >= 0;
+        return (
+          <div key={it.id} className="rounded-2xl p-4 flex flex-col gap-3" style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}>
+            <div className="flex items-center gap-2">
+              <input list="kulto-costs-names" placeholder="Producto (ej: Camiseta oversize blanca)" value={it.name} onChange={(e) => setItem(it.id, { name: e.target.value })} className="rounded-xl p-2.5 text-sm flex-1 min-w-0" style={inputStyle} />
+              <button onClick={() => removeItem(it.id)} className="kulto-btn p-2 rounded-full shrink-0" style={{ color: "var(--signal)" }} aria-label="Borrar fila"><Trash2 size={16} /></button>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {field("Cantidad", <input inputMode="decimal" value={it.qty} onChange={(e) => setItem(it.id, { qty: e.target.value })} className="rounded-lg p-2 text-sm" style={inputStyle} />)}
+              {field("Me sale cada uno (€)", <input inputMode="decimal" placeholder="0,00" value={it.cost} onChange={(e) => setItem(it.id, { cost: e.target.value })} className="rounded-lg p-2 text-sm" style={inputStyle} />)}
+              {field("Ese precio es…", (
+                <div className="flex gap-1">
+                  {[["sin", "Sin IVA"], ["con", "Con IVA"]].map(([k, l]) => (
+                    <button key={k} type="button" onClick={() => setItem(it.id, { costVat: k })} className="kulto-btn text-[11px] font-semibold px-2.5 py-2 rounded-lg flex-1" style={pill(it.costVat === k)}>{l}</button>
+                  ))}
+                </div>
+              ))}
+              {field(`Lo vendo a (€${state.sellWithVat ? " con IVA" : " sin IVA"})`, (
+                <input inputMode="decimal" placeholder="0,00" value={it.price} onChange={(e) => setItem(it.id, { price: e.target.value })} className="rounded-lg p-2 text-sm" style={inputStyle} />
+              ))}
+            </div>
+            {c.hasCost && (
+              <div className="rounded-xl p-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs" style={{ background: "var(--ink)", border: "1px solid var(--line)", color: "var(--bone)" }}>
+                <p><span style={{ color: "var(--slate)" }}>Costo sin IVA</span><br /><b>{eur(c.costNet)}</b></p>
+                <p><span style={{ color: "var(--slate)" }}>Costo con IVA</span><br /><b>{eur(c.costGross)}</b></p>
+                {c.hasPrice ? (
+                  <>
+                    <p><span style={{ color: "var(--slate)" }}>Ganancia por unidad</span><br /><b style={{ color: good ? "var(--sun)" : "var(--signal)" }}>{eur(c.profit)}</b></p>
+                    <p><span style={{ color: "var(--slate)" }}>Margen</span><br /><b style={{ color: good ? "var(--sun)" : "var(--signal)" }}>{c.margin.toFixed(1)} %</b></p>
+                    <p className="col-span-2 sm:col-span-4" style={{ color: "var(--slate)" }}>
+                      Vendiendo a {eur(c.priceGross)} (IVA incluido) cobrás {eur(c.priceNet)} sin IVA. Con {c.qty} unidad{c.qty === 1 ? "" : "es"}: ganancia total <b style={{ color: good ? "var(--sun)" : "var(--signal)" }}>{eur(c.profit * c.qty)}</b>.
+                    </p>
+                  </>
+                ) : (
+                  <p className="col-span-2" style={{ color: "var(--slate)" }}>Poné el precio de venta para ver la ganancia.</p>
+                )}
+                <div className="col-span-2 sm:col-span-4 flex flex-wrap items-center gap-1.5">
+                  <span style={{ color: "var(--slate)" }}>Precio para ganar un…</span>
+                  {[20, 30, 40, 50].map((m) => {
+                    const base = state.deduct ? c.costNet : c.costGross;
+                    const netNeeded = base / (1 - m / 100);
+                    const suggested = state.sellWithVat ? netNeeded * (1 + r) : netNeeded;
+                    return (
+                      <button key={m} type="button" onClick={() => setItem(it.id, { price: String(Math.ceil(suggested * 100) / 100).replace(".", ",") })} className="kulto-btn text-[11px] font-semibold px-2.5 py-1 rounded-full" style={{ background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" }} title={`Poner como precio de venta ${eur(suggested)}`}>
+                        {m}% → {eur(suggested)}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            <input placeholder="Nota (proveedor, fecha, referencia…)" value={it.note || ""} onChange={(e) => setItem(it.id, { note: e.target.value })} className="rounded-lg p-2 text-xs" style={inputStyle} />
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -16460,7 +16639,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
       <div className="md:flex md:gap-6 md:items-start">
       <nav className="flex md:flex-col gap-2 mb-6 md:mb-0 overflow-x-auto md:overflow-visible kulto-scrollbar pb-1 -mx-4 px-4 md:mx-0 md:px-3 md:py-3 md:w-60 md:shrink-0 md:sticky md:top-4 md:rounded-2xl" style={{ background: "transparent", border: "none" }}>
         <p className="hidden md:block text-xs font-bold px-3 pb-1" style={{ color: "var(--slate)", letterSpacing: "0.08em" }}>MENÚ</p>
-        {ADMIN_TABS.filter(([key]) => allowedTabs.includes(key)).map(([key, label]) => {
+        {ADMIN_TABS.filter(([key]) => allowedTabs.includes(key) && (key !== "costos" || isOwner)).map(([key, label]) => {
           const meta = ADMIN_TAB_META[key] || {};
           const Icon = meta.icon || LayoutGrid;
           const active = tab === key;
@@ -17232,6 +17411,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
       {tab === "pedidos" && <AdminOrders orders={orders} settings={settings} onSetPaymentStatus={onSetPaymentStatus} onSetLocalStatus={onSetLocalStatus} onSetLocalTracking={onSetLocalTracking} onToggleStatus={onToggleOrderStatus} onUpdateTracking={onUpdateTracking} onApplyDiscount={onApplyDiscount} onRequestReview={onRequestReview} onBulkComplete={onBulkComplete} onBulkArchive={onBulkArchive} onBulkDelete={onBulkDelete} />}
       {tab === "ventas" && <AdminSalesPanel products={sellableProducts} orders={orders} settings={settings} onSaveSettings={onSaveSettings} />}
       {tab === "estadisticas" && <AdminAnalyticsPanel settings={settings} onSaveSettings={onSaveSettings} />}
+      {tab === "costos" && isOwner && <AdminCostsPanel products={sellableProducts} />}
       {tab === "compras" && <AdminRestockPanel products={sellableProducts} onQuickRestock={onQuickRestock} settings={settings} onSaveSettings={onSaveSettings} />}
       {tab === "clientes" && <AdminCustomers customers={customers} onAdjustPoints={onAdjustCustomerPoints} loyaltyThreshold={settings?.loyaltyRewardThreshold} isOwner={isOwner} onSetAdminPermissions={onSetAdminPermissions} onDeleteCustomer={onDeleteCustomer} onCreateCustomer={onCreateCustomer} onUpdateCustomerInfo={onUpdateCustomerInfo} onSetInstagramStatus={onSetInstagramStatus} instagramOn={!!settings?.instagramDiscountEnabled} onSendPasswordHelp={onSendPasswordHelp} />}
       {tab === "resenas" && <AdminReviews reviews={reviews} onSave={onSaveReview} onDelete={onDeleteReview} onReorder={onReorderReview} />}
