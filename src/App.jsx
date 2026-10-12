@@ -12650,7 +12650,6 @@ function AdminCostsPanel({ products }) {
   const field = (label, child) => (
     <label className="flex flex-col gap-1 text-[11px]" style={{ color: "var(--slate)" }}>{label}{child}</label>
   );
-  const storeNames = (products || []).map((p) => p.name).filter(Boolean);
 
   if (!loaded) return <p className="text-sm" style={{ color: "var(--slate)" }}>Cargando tu lista…</p>;
   return (
@@ -12694,7 +12693,6 @@ function AdminCostsPanel({ products }) {
         </button>
         <input placeholder="Buscar en mi lista…" value={query} onChange={(e) => setQuery(e.target.value)} className="rounded-xl p-2.5 text-sm flex-1 min-w-[160px]" style={inputStyle} />
       </div>
-      <datalist id="kulto-costs-names">{storeNames.map((n) => <option key={n} value={n} />)}</datalist>
 
       {state.items.length === 0 && <p className="text-sm text-center py-8" style={{ color: "var(--slate)" }}>Todavía no anotaste nada. Tocá "Agregar producto".</p>}
       {shown.map((it) => {
@@ -12703,7 +12701,7 @@ function AdminCostsPanel({ products }) {
         return (
           <div key={it.id} className="rounded-2xl p-4 flex flex-col gap-3" style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}>
             <div className="flex items-center gap-2">
-              <input list="kulto-costs-names" placeholder="Producto (ej: Camiseta oversize blanca)" value={it.name} onChange={(e) => setItem(it.id, { name: e.target.value })} className="rounded-xl p-2.5 text-sm flex-1 min-w-0" style={inputStyle} />
+              <input placeholder="Producto (ej: Camiseta oversize, Sudadera sin capucha…)" value={it.name} onChange={(e) => setItem(it.id, { name: e.target.value })} className="rounded-xl p-2.5 text-sm flex-1 min-w-0" style={inputStyle} />
               <button onClick={() => removeItem(it.id)} className="kulto-btn p-2 rounded-full shrink-0" style={{ color: "var(--signal)" }} aria-label="Borrar fila"><Trash2 size={16} /></button>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
