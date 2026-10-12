@@ -2018,7 +2018,12 @@ async function storageGetMany(keys, shared) {
     async function fetchChunk(chunk) {
       const { data, error } = await queueKvRead(() => supabase.from(KV_TABLE).select("key,value").in("key", chunk));
       if (!error && data) return data;
-      if (chunk.length <= 1) return [];
+      if (chunk.length <= 1) {
+        // Una sola fila que no se pudo leer (casi siempre por pesar demasiado): un reintento tras una pausa.
+        await new Promise((r) => setTimeout(r, 900));
+        const retry = await queueKvRead(() => supabase.from(KV_TABLE).select("key,value").in("key", chunk));
+        return !retry.error && retry.data ? retry.data : [];
+      }
       const mid = Math.ceil(chunk.length / 2);
       // De a una mitad por vez (no las dos juntas) — si el problema es que
       // varias consultas pesadas viajando a la vez se pisan entre sí, hacer
@@ -2048,13 +2053,41 @@ async function storageGetMany(keys, shared) {
 const PUB_PREFIX = "kulto:";
 const DRAFT_PREFIX = "kulto:draft:";
 
+// Productos que figuran en el índice pero cuya fila no se pudo leer (casi siempre
+// porque pesan demasiado). Antes desaparecían sin avisar; ahora se anotan para
+// avisarle al admin y dejarle borrarlos para volver a cargarlos.
+const UNREADABLE_PRODUCTS = {};
 async function loadProductsFromPrefix(prefix) {
   const idxRaw = await storageGet(`${prefix}product-index`, true);
   const ids = idxRaw ? JSON.parse(idxRaw) : [];
-  if (!ids.length) return [];
+  if (!ids.length) { UNREADABLE_PRODUCTS[prefix] = []; return []; }
   const keys = ids.map((id) => `${prefix}product:${id}`);
   const map = await storageGetMany(keys, true);
+  UNREADABLE_PRODUCTS[prefix] = ids.filter((id, i) => !map[keys[i]]);
   return keys.map((k) => map[k]).filter(Boolean).map((v) => JSON.parse(v));
+}
+// Borra del todo (borrador y publicado) los productos que no se pueden leer.
+async function purgeUnreadableProducts() {
+  const candidates = Array.from(new Set(Object.values(UNREADABLE_PRODUCTS).flat()));
+  // Antes de borrar se vuelve a intentar leer cada uno: si ahora se lee, fue un corte de conexión y NO se borra.
+  const ids = [];
+  for (const id of candidates) {
+    let readable = false;
+    for (const prefix of [DRAFT_PREFIX, PUB_PREFIX]) {
+      for (let t = 0; t < 2 && !readable; t++) {
+        const v = await storageGet(`${prefix}product:${id}`, true);
+        if (v) readable = true; else await new Promise((r) => setTimeout(r, 700));
+      }
+    }
+    if (!readable) ids.push(id);
+  }
+  for (const prefix of [DRAFT_PREFIX, PUB_PREFIX]) {
+    for (const id of ids) { try { await storageDelete(`${prefix}product:${id}`, true); } catch { /* ya no estaba */ } }
+    const idxRaw = await storageGet(`${prefix}product-index`, true);
+    const cur = idxRaw ? JSON.parse(idxRaw) : [];
+    await storageSet(`${prefix}product-index`, JSON.stringify(cur.filter((x) => !ids.includes(x))), true);
+  }
+  return ids.length;
 }
 // "updateIndex=false" solo guarda la fila del producto, sin tocar el índice
 // compartido — lo usan las operaciones en lote (publicar/descartar/inicializar
@@ -16828,6 +16861,29 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
 
       {tab === "productos" && (
         <>
+          {(() => {
+            const bad = Array.from(new Set(Object.values(UNREADABLE_PRODUCTS).flat()));
+            if (!bad.length) return null;
+            return (
+              <div className="rounded-2xl p-4 mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3" style={{ background: "var(--ink-2)", border: "1px solid var(--signal)" }}>
+                <div>
+                  <p className="text-sm font-semibold" style={{ color: "var(--signal)" }}>Hay {bad.length} producto{bad.length === 1 ? "" : "s"} guardado{bad.length === 1 ? "" : "s"} que no se pueden leer</p>
+                  <p className="text-xs mt-1" style={{ color: "var(--slate)" }}>Pesan demasiado (suele ser por fotos que quedaron pegadas dentro del producto en vez de subirse al almacenamiento), por eso no aparecen ni acá ni en la web. Hay que borrarlos y volver a cargarlos con menos fotos o más livianas.</p>
+                </div>
+                <button
+                  onClick={async () => {
+                    if (!window.confirm(`Se van a borrar ${bad.length} producto(s) que no se pueden leer (no se pueden recuperar). ¿Continuar?`)) return;
+                    await purgeUnreadableProducts();
+                    window.location.reload();
+                  }}
+                  className="kulto-btn text-xs font-semibold px-4 py-2.5 rounded-full shrink-0"
+                  style={{ background: "var(--signal)", color: "var(--bone)" }}
+                >
+                  Borrarlos para volver a cargarlos
+                </button>
+              </div>
+            );
+          })()}
           <AdminFabricPanel products={products} settings={settings} onSave={onSaveSettings} />
           <div
             className="rounded-2xl p-4 mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
@@ -16934,7 +16990,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
             </div>
           </aside>
             <div className="flex flex-col gap-6">
-              <AdminProductForm categories={categories} groups={groups} onAddCategory={onAddCategory} onAddGroup={onAddGroup} savedColors={savedColors} onSaveColorToLibrary={onSaveColorToLibrary} onRemoveColorFromLibrary={onRemoveColorFromLibrary} onSave={async (p) => { await onSaveProduct(p); setEditingProduct(null); }} editing={editingProduct} onCancelEdit={() => setEditingProduct(null)} allProducts={sellableProducts} />
+              <AdminProductForm categories={categories} groups={groups} onAddCategory={onAddCategory} onAddGroup={onAddGroup} savedColors={savedColors} onSaveColorToLibrary={onSaveColorToLibrary} onRemoveColorFromLibrary={onRemoveColorFromLibrary} onSave={async (p) => { const ok = await onSaveProduct(p); if (ok !== false) setEditingProduct(null); return ok; }} editing={editingProduct} onCancelEdit={() => setEditingProduct(null)} allProducts={sellableProducts} />
               <AdminGroupManager groups={groups} onRename={onRenameGroup} onDelete={onDeleteGroup} />
               <AdminCategoryManager categories={categories} onRename={onRenameCategory} onDelete={onDeleteCategory} />
             </div>
@@ -19123,6 +19179,11 @@ export default function App() {
   const handleSaveProduct = async (product) => {
     // Si el guardado falla (producto muy pesado, sin conexión…) se avisa en vez
     // de dejarlo "guardado" solo en pantalla, que después no sube a la web.
+    const approxMb = JSON.stringify(product).length / (1024 * 1024);
+    if (approxMb > 4) {
+      window.alert(`No se guardó "${product.name}": pesa unos ${approxMb.toFixed(1)} MB y la web no podría leerlo después (el producto desaparecería del catálogo).\n\nSuele pasar cuando las fotos no llegaron a subirse al almacenamiento y quedaron pegadas dentro del producto. Probá con menos fotos o más livianas, y volvé a intentar.`);
+      return false;
+    }
     const saveRes = await persistDraftProductVerbose(product);
     if (saveRes && saveRes.ok === false) {
       window.alert(`No se pudo guardar "${product.name}": ${saveRes.error || "error desconocido"}.\n\nSuele pasar cuando el producto pesa demasiado (muchas fotos o fotos muy grandes). Probá con menos fotos o más livianas.`);
