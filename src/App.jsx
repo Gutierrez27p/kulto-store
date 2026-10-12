@@ -12938,7 +12938,7 @@ function AdminCostsPanel({ templates = [], settings }) {
     }, 600);
   };
   const setItem = (id, patch) => persist({ ...state, items: state.items.map((it) => (it.id === id ? { ...it, ...patch } : it)) });
-  const addItem = () => persist({ ...state, items: [{ id: genId("cost"), name: "", qty: "1", cost: "", costVat: "sin", price: "", note: "" }, ...state.items] });
+  const addItem = () => persist({ ...state, items: [{ id: genId("cost"), name: "", qty: "1", cost: "", costVat: "con", price: "", note: "" }, ...state.items] });
   const removeItem = (id) => {
     const it = state.items.find((x) => x.id === id);
     if (window.confirm(`¿Borrar "${it?.name || "esta fila"}" de tu lista?`)) persist({ ...state, items: state.items.filter((x) => x.id !== id) });
@@ -12946,21 +12946,27 @@ function AdminCostsPanel({ templates = [], settings }) {
   const r = Math.max(0, numOf(state.vat)) / 100;
   const calc = (it) => {
     const cost = numOf(it.cost);
-    const costNet = it.costVat === "con" ? cost / (1 + r) : cost;
-    const costGross = costNet * (1 + r);
-    const usedCost = state.deduct ? costNet : costGross; // si no puede descontar el IVA, el IVA pagado es parte del costo
+    // Lo que pagás de verdad según cómo te cobran: IVA ya incluido en el precio,
+    // IVA que se suma aparte, o compra sin IVA (el proveedor no cobra).
+    const mode = it.costVat === "con" ? "con" : it.costVat === "no" ? "no" : "sin";
+    const paid = mode === "sin" ? cost * (1 + r) : cost;
+    const ivaPaid = mode === "con" ? cost - cost / (1 + r) : mode === "sin" ? cost * r : 0;
+    const ded = it.deduct === undefined || it.deduct === null ? state.deduct : !!it.deduct;
+    const usedCost = paid - (ded ? ivaPaid : 0); // si descontás el IVA, ese IVA no es costo
+    const costNet = paid - ivaPaid;
+    const costGross = paid;
     const price = numOf(it.price);
     const priceGross = state.sellWithVat ? price : price * (1 + r);
     const priceNet = priceGross / (1 + r);
     const profit = priceNet - usedCost;
     const margin = priceNet > 0 ? (profit / priceNet) * 100 : 0;
     const qty = Math.max(0, numOf(it.qty));
-    return { costNet, costGross, priceGross, priceNet, profit, margin, qty, hasPrice: price > 0, hasCost: cost > 0 };
+    return { ivaPaid, ded, usedCost, mode, ivaSold: priceGross - priceNet, costNet, costGross, priceGross, priceNet, profit, margin, qty, hasPrice: price > 0, hasCost: cost > 0 };
   };
   const shown = state.items.filter((it) => !query.trim() || (it.name + " " + (it.note || "")).toLowerCase().includes(query.trim().toLowerCase()));
   const totals = state.items.reduce((acc, it) => {
     const c = calc(it);
-    acc.invested += (state.deduct ? c.costNet : c.costGross) * c.qty;
+    acc.invested += c.costGross * c.qty;
     if (c.hasPrice) { acc.revenue += c.priceNet * c.qty; acc.profit += c.profit * c.qty; }
     return acc;
   }, { invested: 0, revenue: 0, profit: 0 });
@@ -13008,7 +13014,7 @@ function AdminCostsPanel({ templates = [], settings }) {
           </label>
           <label className="flex items-center gap-2 cursor-pointer" title="Si podés descontar el IVA que pagás en tus compras, el costo real es sin IVA.">
             <input type="checkbox" checked={state.deduct} onChange={(e) => persist({ ...state, deduct: e.target.checked })} />
-            Puedo descontar el IVA de mis compras
+            Por defecto, descuento el IVA de mis compras (se puede cambiar en cada fila)
           </label>
         </div>
       </div>
@@ -13044,9 +13050,9 @@ function AdminCostsPanel({ templates = [], settings }) {
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {field("Cantidad", <input inputMode="decimal" value={it.qty} onChange={(e) => setItem(it.id, { qty: e.target.value })} className="rounded-lg p-2 text-sm" style={inputStyle} />)}
               {field("Me sale cada uno (€)", <input inputMode="decimal" placeholder="0,00" value={it.cost} onChange={(e) => setItem(it.id, { cost: e.target.value })} className="rounded-lg p-2 text-sm" style={inputStyle} />)}
-              {field("Ese precio es…", (
+              {field("Lo que pagué…", (
                 <div className="flex gap-1">
-                  {[["sin", "Sin IVA"], ["con", "Con IVA"]].map(([k, l]) => (
+                  {[["con", "Ya incluye IVA"], ["sin", "Más IVA"], ["no", "Sin IVA"]].map(([k, l]) => (
                     <button key={k} type="button" onClick={() => setItem(it.id, { costVat: k })} className="kulto-btn text-[11px] font-semibold px-2.5 py-2 rounded-lg flex-1" style={pill(it.costVat === k)}>{l}</button>
                   ))}
                 </div>
@@ -13057,14 +13063,20 @@ function AdminCostsPanel({ templates = [], settings }) {
             </div>
             {c.hasCost && (
               <div className="rounded-xl p-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs" style={{ background: "var(--ink)", border: "1px solid var(--line)", color: "var(--bone)" }}>
-                <p><span style={{ color: "var(--slate)" }}>Costo sin IVA</span><br /><b>{eur(c.costNet)}</b></p>
-                <p><span style={{ color: "var(--slate)" }}>Costo con IVA</span><br /><b>{eur(c.costGross)}</b></p>
+                <p><span style={{ color: "var(--slate)" }}>Pagás en total</span><br /><b>{eur(c.costGross)}</b>{c.ivaPaid > 0 && <span style={{ color: "var(--slate)" }}> (IVA {eur(c.ivaPaid)})</span>}</p>
+                <p><span style={{ color: "var(--slate)" }}>Costo real para vos</span><br /><b>{eur(c.usedCost)}</b>
+                  {c.ivaPaid > 0 && (
+                    <label className="flex items-center gap-1 mt-1 cursor-pointer" style={{ color: "var(--slate)" }}>
+                      <input type="checkbox" checked={c.ded} onChange={(e) => setItem(it.id, { deduct: e.target.checked })} /> Descuento el IVA de esta compra
+                    </label>
+                  )}
+                </p>
                 {c.hasPrice ? (
                   <>
                     <p><span style={{ color: "var(--slate)" }}>Ganancia por unidad</span><br /><b style={{ color: good ? "var(--sun)" : "var(--signal)" }}>{eur(c.profit)}</b></p>
                     <p><span style={{ color: "var(--slate)" }}>Margen</span><br /><b style={{ color: good ? "var(--sun)" : "var(--signal)" }}>{c.margin.toFixed(1)} %</b></p>
                     <p className="col-span-2 sm:col-span-4" style={{ color: "var(--slate)" }}>
-                      Vendiendo a {eur(c.priceGross)} (IVA incluido) cobrás {eur(c.priceNet)} sin IVA. Con {c.qty} unidad{c.qty === 1 ? "" : "es"}: ganancia total <b style={{ color: good ? "var(--sun)" : "var(--signal)" }}>{eur(c.profit * c.qty)}</b>.
+                      Vendiendo a {eur(c.priceGross)} (IVA incluido) cobrás {eur(c.priceNet)} sin IVA ({eur(c.ivaSold)} son IVA de la venta). Con {c.qty} unidad{c.qty === 1 ? "" : "es"}: ganancia total <b style={{ color: good ? "var(--sun)" : "var(--signal)" }}>{eur(c.profit * c.qty)}</b>.
                     </p>
                   </>
                 ) : (
@@ -13073,7 +13085,7 @@ function AdminCostsPanel({ templates = [], settings }) {
                 <div className="col-span-2 sm:col-span-4 flex flex-wrap items-center gap-1.5">
                   <span style={{ color: "var(--slate)" }}>Precio para ganar un…</span>
                   {[20, 30, 40, 50].map((m) => {
-                    const base = state.deduct ? c.costNet : c.costGross;
+                    const base = c.usedCost;
                     const netNeeded = base / (1 - m / 100);
                     const suggested = state.sellWithVat ? netNeeded * (1 + r) : netNeeded;
                     return (
