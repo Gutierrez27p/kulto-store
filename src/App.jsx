@@ -11643,7 +11643,18 @@ function AdminBulkProductUpload({ categories, groups = [], allProducts = [], onS
   );
 }
 
-function AdminTagManager({ title, items, noun, onRename, onDelete }) {
+function AdminTagManager({ title, items, noun, onRename, onDelete, onMergeAsType }) {
+  const [mergeItem, setMergeItem] = useState(null);
+  const [mergeParent, setMergeParent] = useState("");
+  const [mergeLabel, setMergeLabel] = useState("");
+  const [mergeBusy, setMergeBusy] = useState(false);
+  const doMerge = async () => {
+    const parent = mergeParent.trim(), label = mergeLabel.trim();
+    if (!parent || !label || parent === mergeItem) return;
+    if (!window.confirm(`Todos los productos de "${mergeItem}" van a pasar a la categoría "${parent}", marcados con el tipo "${label}". "${mergeItem}" deja de existir como categoría. ¿Seguimos?`)) return;
+    setMergeBusy(true);
+    try { await onMergeAsType(mergeItem, parent, label); } finally { setMergeBusy(false); setMergeItem(null); }
+  };
   const [editingItem, setEditingItem] = useState(null);
   const [renameValue, setRenameValue] = useState("");
   const [warning, setWarning] = useState("");
@@ -11689,17 +11700,30 @@ function AdminTagManager({ title, items, noun, onRename, onDelete }) {
               ) : (
                 <button onClick={() => startEdit(c)} className="kulto-btn p-1.5 rounded-full" style={{ color: "var(--bone)" }}><Pencil size={15} /></button>
               )}
+              {onMergeAsType && <button onClick={() => { setMergeItem(c); setMergeParent(items.find((o) => o !== c && c.toLowerCase().startsWith(o.toLowerCase() + " ")) || ""); setMergeLabel(c); }} className="kulto-btn text-[11px] font-semibold px-2.5 py-1 rounded-full" style={{ background: "var(--ink)", color: "var(--bone)", border: "1px solid var(--line)" }} title="Convertir esta categoría en un tipo dentro de otra (ej: Oversize dentro de Camisetas)">Pasar a tipo de…</button>}
               <button onClick={() => handleDelete(c)} className="kulto-btn p-1.5 rounded-full" style={{ color: "var(--signal)" }}><Trash2 size={15} /></button>
             </div>
           ))}
+          {mergeItem && (
+            <div className="rounded-xl p-3 flex flex-col gap-2" style={{ background: "var(--ink)", border: "1px dashed var(--sun)" }}>
+              <p className="text-xs" style={{ color: "var(--bone)" }}>Convertir <b>{mergeItem}</b> en un tipo dentro de otra categoría:</p>
+              <input list="kulto-merge-parents" value={mergeParent} onChange={(e) => setMergeParent(e.target.value)} placeholder="Categoría principal (ej: Camisetas, Sudaderas)" className="rounded-lg px-2 py-1.5 text-sm" style={{ background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" }} />
+              <datalist id="kulto-merge-parents">{items.filter((o) => o !== mergeItem).map((o) => <option key={o} value={o} />)}</datalist>
+              <input value={mergeLabel} onChange={(e) => setMergeLabel(e.target.value)} placeholder="Nombre del tipo (ej: Oversize, Con capucha)" className="rounded-lg px-2 py-1.5 text-sm" style={{ background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" }} />
+              <div className="flex gap-2">
+                <button type="button" disabled={mergeBusy || !mergeParent.trim() || !mergeLabel.trim()} onClick={doMerge} className="kulto-btn text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: "var(--sun)", color: "var(--ink)", opacity: mergeBusy || !mergeParent.trim() || !mergeLabel.trim() ? 0.5 : 1 }}>{mergeBusy ? "Pasando…" : "Convertir"}</button>
+                <button type="button" onClick={() => setMergeItem(null)} className="kulto-btn text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: "var(--ink-3)", color: "var(--bone)" }}>Cancelar</button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-function AdminCategoryManager({ categories, onRename, onDelete }) {
-  return <AdminTagManager title="Categorías" items={categories} noun="categoría" onRename={onRename} onDelete={onDelete} />;
+function AdminCategoryManager({ categories, onRename, onDelete, onMergeAsType }) {
+  return <AdminTagManager title="Categorías" items={categories} noun="categoría" onRename={onRename} onDelete={onDelete} onMergeAsType={onMergeAsType} />;
 }
 
 function AdminGroupManager({ groups, onRename, onDelete }) {
@@ -16749,7 +16773,7 @@ function AdminCustomWorkGallery({ items, onAdd, onRemove, speed = 0.5, onSpeedCh
   );
 }
 
-function AdminPanel({ products, categories, groups, orders, customers, onAdjustCustomerPoints, onDeleteCustomer, onCreateCustomer, onUpdateCustomerInfo, onSetInstagramStatus, onSendPasswordHelp, reviews, settings, hasDraftChanges, publishing, onPublishChanges, onDiscardChanges, photoInbox, onAddToInbox, onCreateProductFromInbox, onAddInboxToExisting, onRemoveFromInbox, savedColors, onSaveColorToLibrary, onRemoveColorFromLibrary, designLibrary, onAddDesignToLibrary, onRemoveDesignFromLibrary, designFolders, onAddDesignFolder, onRenameDesignFolder, onRemoveDesignFolder, onToggleDesignFolderCover, onAssignDesignToFolder, onSetDesignFolderCategory, onSetDesignFolderGarments, customWorkGallery, onAddCustomWork, onRemoveCustomWork, onAddCategory, onRenameCategory, onDeleteCategory, onAddGroup, onRenameGroup, onDeleteGroup, onSaveProduct, onSaveProductVerbose, onSaveProductsBulk, onQuickRestock, onDeleteProduct, onToggleOrderStatus, onSetLocalStatus, onSetLocalTracking, onUpdateTracking, onApplyDiscount, onRequestReview, onBulkComplete, onBulkArchive, onBulkDelete, onSaveReview, onDeleteReview, onReorderReview, onSaveSettings, onSetPaymentStatus, onLogout, permissions, isOwner, onSetAdminPermissions, jumpTo }) {
+function AdminPanel({ products, categories, groups, orders, customers, onAdjustCustomerPoints, onDeleteCustomer, onCreateCustomer, onUpdateCustomerInfo, onSetInstagramStatus, onSendPasswordHelp, reviews, settings, hasDraftChanges, publishing, onPublishChanges, onDiscardChanges, photoInbox, onAddToInbox, onCreateProductFromInbox, onAddInboxToExisting, onRemoveFromInbox, savedColors, onSaveColorToLibrary, onRemoveColorFromLibrary, designLibrary, onAddDesignToLibrary, onRemoveDesignFromLibrary, designFolders, onAddDesignFolder, onRenameDesignFolder, onRemoveDesignFolder, onToggleDesignFolderCover, onAssignDesignToFolder, onSetDesignFolderCategory, onSetDesignFolderGarments, customWorkGallery, onAddCustomWork, onRemoveCustomWork, onAddCategory, onRenameCategory, onDeleteCategory, onMergeCategoryAsType, onAddGroup, onRenameGroup, onDeleteGroup, onSaveProduct, onSaveProductVerbose, onSaveProductsBulk, onQuickRestock, onDeleteProduct, onToggleOrderStatus, onSetLocalStatus, onSetLocalTracking, onUpdateTracking, onApplyDiscount, onRequestReview, onBulkComplete, onBulkArchive, onBulkDelete, onSaveReview, onDeleteReview, onReorderReview, onSaveSettings, onSetPaymentStatus, onLogout, permissions, isOwner, onSetAdminPermissions, jumpTo }) {
   // El dueño (isOwner) siempre ve todas las pestañas. Una cuenta de admin con
   // permisos limitados solo ve — y solo puede abrir — las que le dieron.
   const allowedTabs = isOwner ? ADMIN_TAB_KEYS : (permissions || []);
@@ -17322,7 +17346,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
             <div className="flex flex-col gap-6">
               <AdminProductForm categories={categories} groups={groups} onAddCategory={onAddCategory} onAddGroup={onAddGroup} savedColors={savedColors} onSaveColorToLibrary={onSaveColorToLibrary} onRemoveColorFromLibrary={onRemoveColorFromLibrary} onSave={async (p) => { const ok = await onSaveProduct(p); if (ok !== false) setEditingProduct(null); return ok; }} editing={editingProduct} onCancelEdit={() => setEditingProduct(null)} allProducts={sellableProducts} />
               <AdminGroupManager groups={groups} onRename={onRenameGroup} onDelete={onDeleteGroup} />
-              <AdminCategoryManager categories={categories} onRename={onRenameCategory} onDelete={onDeleteCategory} />
+              <AdminCategoryManager categories={categories} onRename={onRenameCategory} onDelete={onDeleteCategory} onMergeAsType={onMergeCategoryAsType} />
             </div>
             <div className="flex flex-col gap-3">
               {selectedProductIds.length === 0 && sellableProducts.length > 0 && (
@@ -19655,6 +19679,35 @@ export default function App() {
     setHasDraftChanges(true);
   };
 
+  // Convierte una categoría suelta (ej. "Camisetas Premium Oversize") en un TIPO
+  // dentro de otra (Camisetas → Premium Oversize): mueve sus productos a la
+  // categoría principal marcándolos con ese tipo, registra el tipo y borra la
+  // categoría vieja.
+  const handleMergeCategoryAsType = async (child, parent, label) => {
+    let cats = draftCategories.filter((c) => c !== child);
+    if (!cats.includes(parent)) cats = [...cats, parent];
+    setDraftCategories(cats);
+    await persistDraftCategories(cats);
+    const affected = draftProducts.filter((p) => p.category === child || (p.extraCategories || []).includes(child));
+    const updated = affected.map((p) => ({
+      ...p,
+      category: p.category === child ? parent : p.category,
+      garmentTypes: p.category === child ? Array.from(new Set([...(p.garmentTypes || []), label])) : (p.garmentTypes || []),
+      extraCategories: Array.from(new Set((p.extraCategories || []).map((c) => (c === child ? parent : c)))).filter((c) => c !== (p.category === child ? parent : p.category)),
+    }));
+    if (updated.length) {
+      await Promise.all(updated.map((p) => persistDraftProduct(p)));
+      setDraftProducts((prev) => prev.map((p) => updated.find((u) => u.id === p.id) || p));
+    }
+    const cur = settings?.garmentTypes || {};
+    const fab = { ...(settings?.fabricByType || {}) };
+    if (fab[`${child}|`] && !fab[`${parent}|${label}`]) { fab[`${parent}|${label}`] = fab[`${child}|`]; }
+    delete fab[`${child}|`];
+    await handleSaveSettings({ garmentTypes: { ...cur, [parent]: Array.from(new Set([...(cur[parent] || []), label])) }, fabricByType: fab });
+    await markDraftChanged();
+    setHasDraftChanges(true);
+  };
+
   const handleDeleteCategory = async (name) => {
     const inUse = draftProducts.some((p) => p.category === name);
     if (inUse) return { ok: false, reason: "en-uso" };
@@ -20513,6 +20566,7 @@ export default function App() {
               onAddCategory={handleAddCategory}
               onRenameCategory={handleRenameCategory}
               onDeleteCategory={handleDeleteCategory}
+              onMergeCategoryAsType={handleMergeCategoryAsType}
               onAddGroup={handleAddGroup}
               onRenameGroup={handleRenameGroup}
               onDeleteGroup={handleDeleteGroup}
