@@ -2177,6 +2177,7 @@ async function publishDraft() {
   ]);
   const draftIds = new Set(draftProducts.map((p) => p.id));
   const toDelete = pubProducts.filter((p) => !draftIds.has(p.id));
+  const publishFailures = [];
   await Promise.all([
     ...toDelete.map((p) => storageDelete(`${PUB_PREFIX}product:${p.id}`, true)),
     // Las ventas y vistas se suman directo sobre el producto publicado; el
@@ -2187,13 +2188,22 @@ async function publishDraft() {
       const merged = live
         ? { ...p, salesCount: Math.max(p.salesCount || 0, live.salesCount || 0), viewsCount: Math.max(p.viewsCount || 0, live.viewsCount || 0) }
         : p;
-      return persistProductToPrefix(PUB_PREFIX, merged, false);
+      // Antes un producto que no se podía guardar (por ejemplo, por pesar demasiado)
+      // fallaba en silencio y simplemente no aparecía en la web. Ahora se anota.
+      return storageSetVerbose(`${PUB_PREFIX}product:${merged.id}`, JSON.stringify(merged), true).then((res) => {
+        if (!res.ok) publishFailures.push({ id: merged.id, name: merged.name, error: res.error });
+      });
     }),
     persistCategories(draftCats),
     persistGroups(draftGroups),
   ]);
-  await storageSet(`${PUB_PREFIX}product-index`, JSON.stringify(draftProducts.map((p) => p.id)), true);
-  await storageSet("kulto:draft:has-changes", "false", true);
+  const failedIds = new Set(publishFailures.map((f) => f.id));
+  // Solo entran al índice los productos que de verdad se guardaron (o que ya estaban publicados).
+  const indexIds = draftProducts.filter((p) => !failedIds.has(p.id) || pubProducts.some((x) => x.id === p.id)).map((p) => p.id);
+  await storageSet(`${PUB_PREFIX}product-index`, JSON.stringify(indexIds), true);
+  // Si algo falló, se deja el aviso de "cambios sin publicar" para poder reintentar.
+  await storageSet("kulto:draft:has-changes", publishFailures.length ? "true" : "false", true);
+  return { failures: publishFailures };
 }
 
 // Throws away unpublished edits, resetting the draft back to what's live.
@@ -9092,8 +9102,9 @@ function AdminProductForm({ categories, groups, onAddCategory, onAddGroup, saved
     if (!draft.name || !draft.category || !draft.price) return;
     setSaving(true);
     const product = buildProductObject();
-    await onSave(product);
+    const savedOk = await onSave(product);
     setSaving(false);
+    if (savedOk === false) return; // no se pudo guardar: se conserva lo cargado para reintentar
     setDraft({ ...emptyDraft, tags: { ...emptyDraft.tags, template: defaultTemplate } });
     setStep(1);
   };
@@ -19110,13 +19121,20 @@ export default function App() {
   };
 
   const handleSaveProduct = async (product) => {
-    await persistDraftProduct(product);
+    // Si el guardado falla (producto muy pesado, sin conexión…) se avisa en vez
+    // de dejarlo "guardado" solo en pantalla, que después no sube a la web.
+    const saveRes = await persistDraftProductVerbose(product);
+    if (saveRes && saveRes.ok === false) {
+      window.alert(`No se pudo guardar "${product.name}": ${saveRes.error || "error desconocido"}.\n\nSuele pasar cuando el producto pesa demasiado (muchas fotos o fotos muy grandes). Probá con menos fotos o más livianas.`);
+      return false;
+    }
     await markDraftChanged();
     setHasDraftChanges(true);
     setDraftProducts((prev) => {
       const exists = prev.some((p) => p.id === product.id);
       return exists ? prev.map((p) => (p.id === product.id ? product : p)) : [...prev, product];
     });
+    return true;
   };
 
   // Guarda muchos productos de una vez (mover a un grupo, a una carpeta, etc.):
@@ -19286,7 +19304,7 @@ export default function App() {
   const handlePublishChanges = async () => {
     setPublishing(true);
     const previousProducts = products;
-    await publishDraft();
+    const pubResult = await publishDraft();
     const [freshProducts, freshCategories, freshGroups] = await Promise.all([loadProducts(), loadCategories(), loadGroups()]);
     // Si algún producto pasó de sin stock a con stock al publicar, les
     // avisamos por mail a todos los que pidieron que les avisen (ver
@@ -19300,8 +19318,12 @@ export default function App() {
     setProducts(freshProducts);
     setCategories(freshCategories);
     setGroups(freshGroups);
-    setHasDraftChanges(false);
+    setHasDraftChanges(!!(pubResult && pubResult.failures && pubResult.failures.length));
     setPublishing(false);
+    if (pubResult && pubResult.failures && pubResult.failures.length) {
+      const list = pubResult.failures.map((f) => `• ${f.name || f.id}: ${f.error || "error desconocido"}`).join("\n");
+      window.alert(`No se pudieron subir ${pubResult.failures.length} producto(s) a la web:\n\n${list}\n\nSuele pasar cuando el producto pesa demasiado (muchas fotos o fotos muy grandes) o falló la conexión. Probá con menos fotos o más livianas y volvé a tocar "Subir cambios".`);
+    }
   };
 
   // Sumar stock desde el apartado "Compras" es una operación chica y urgente
