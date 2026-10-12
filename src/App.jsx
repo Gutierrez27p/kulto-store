@@ -291,14 +291,24 @@ function dataUrlToBlob(dataUrl) {
 // no se puede (por ejemplo, si el bucket "kulto-photos" no existe) — en ese
 // caso quien llama sigue funcionando igual que antes, guardando la foto
 // completa en la base, para no romper nada mientras se configura Storage.
+let LAST_UPLOAD_ERROR = "";
 async function uploadDataUrlToStorage(dataUrl) {
   try {
     if (!dataUrl || !dataUrl.startsWith("data:")) return null;
     const blob = dataUrlToBlob(dataUrl);
-    const ext = blob.type === "image/png" ? "png" : "jpg";
+    const ext = blob.type === "image/png" ? "png" : blob.type === "image/webp" ? "webp" : "jpg";
     const path = `${genId("img")}.${ext}`;
-    const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(path, blob, { contentType: blob.type, upsert: false, cacheControl: "31536000" });
-    if (error) return null;
+    // Hasta 3 intentos: un corte de red momentáneo antes dejaba la foto pegada
+    // dentro del producto (y lo hacía pesadísimo).
+    let upErr = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const r = await supabase.storage.from(STORAGE_BUCKET).upload(path, blob, { contentType: blob.type, upsert: attempt > 0, cacheControl: "31536000" });
+      upErr = r.error;
+      if (!upErr) break;
+      await new Promise((res) => setTimeout(res, 600 * (attempt + 1)));
+    }
+    if (upErr) { LAST_UPLOAD_ERROR = String(upErr.message || upErr.error || upErr); return null; }
+    LAST_UPLOAD_ERROR = "";
     // Miniatura al lado de la foto (ver FastImg) — si falla no pasa nada,
     // las tarjetas simplemente muestran la original.
     if (dataUrl.length > 300) {
@@ -2851,6 +2861,33 @@ async function migrateImagesDeep(value) {
   }
   return value;
 }
+// Achica una foto embebida (máx. 1400 px, WebP que conserva transparencia).
+async function shrinkEmbeddedImage(dataUrl, maxDim = 1400, q = 0.82) {
+  try {
+    const img = await loadImageEl(dataUrl);
+    const w0 = img.naturalWidth || img.width, h0 = img.naturalHeight || img.height;
+    const k = Math.min(1, maxDim / Math.max(w0, h0));
+    const c = document.createElement("canvas");
+    c.width = Math.max(1, Math.round(w0 * k)); c.height = Math.max(1, Math.round(h0 * k));
+    c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+    const out = c.toDataURL("image/webp", q);
+    return out.startsWith("data:image/webp") && out.length < dataUrl.length ? out : dataUrl;
+  } catch { return dataUrl; }
+}
+// Antes de guardar un producto: sube a Storage toda foto que haya quedado
+// pegada adentro (reintentando; si no sube, la achica) para que no pese tanto.
+async function slimProductImages(value, depth = 0) {
+  if (Array.isArray(value)) { for (let i = 0; i < value.length; i++) value[i] = await slimProductImages(value[i], depth + 1); return value; }
+  if (value && typeof value === "object") { for (const k of Object.keys(value)) value[k] = await slimProductImages(value[k], depth + 1); return value; }
+  if (isEmbeddedImage(value)) {
+    let url = await uploadDataUrlToStorage(value);
+    if (url) return url;
+    const small = await shrinkEmbeddedImage(value);
+    url = await uploadDataUrlToStorage(small);
+    return url || small;
+  }
+  return value;
+}
 // Migra un ítem (producto, diseño, foto de trabajo personalizado) y lo
 // vuelve a guardar SOLO si de verdad tenía alguna foto vieja adentro —
 // para no reescribir de más lo que ya está liviano.
@@ -3661,7 +3698,7 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
                     <button
                       key={i}
                       type="button"
-                      onClick={() => setQuickColorIdx(i)}
+                      onClick={() => { setQuickColorIdx(i); if (quickSizeIdx !== null && !sizeOkForColor(product, product.sizes[quickSizeIdx], colors[i])) setQuickSizeIdx(null); }}
                       className="kulto-btn kulto-tip kulto-tip-l rounded-full shrink-0"
                       style={{ width: 26, height: 26, background: c.hex, border: i === quickColorIdx ? "2px solid var(--sun)" : "1px solid var(--line)" }}
                       data-tip={c.name}
@@ -3675,18 +3712,24 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
               <div className="mb-4">
                 <p className="text-xs mb-1.5" style={{ color: "var(--slate)" }}>Talle</p>
                 <div className="flex flex-wrap gap-2">
-                  {product.sizes.map((s, i) => (
+                  {product.sizes.map((s, i) => {
+                    const ok = sizeOkForColor(product, s, colors[quickColorIdx]);
+                    return (
                     <button
                       key={s}
                       type="button"
-                      onClick={() => setQuickSizeIdx(i)}
+                      disabled={!ok}
+                      title={ok ? undefined : "No disponible en este color"}
+                      onClick={() => ok && setQuickSizeIdx(i)}
                       className="kulto-btn text-xs font-semibold rounded-full px-3 py-1.5"
-                      style={{ background: quickSizeIdx === i ? "var(--sun)" : "var(--ink-2)", color: quickSizeIdx === i ? "var(--ink)" : "var(--bone)", border: "1px solid var(--line)" }}
+                      style={{ background: quickSizeIdx === i && ok ? "var(--sun)" : "var(--ink-2)", color: quickSizeIdx === i && ok ? "var(--ink)" : "var(--bone)", border: "1px solid var(--line)", opacity: ok ? 1 : 0.35, textDecoration: ok ? "none" : "line-through", cursor: ok ? "pointer" : "not-allowed" }}
                     >
                       {s}
                     </button>
-                  ))}
+                    );
+                  })}
                 </div>
+                <KidColorsNote product={product} />
               </div>
             )}
             <div className="flex items-center justify-between mb-5">
@@ -4113,7 +4156,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
           {product.colors && product.colors.length > 0 ? (
             <div className="flex flex-wrap gap-2">
               {product.colors.map((c, i) => (
-                <ColorSwatch key={i} hex={c.hex} title={c.name} selected={i === colorIdx} onClick={() => setColorIdx(i)} />
+                <ColorSwatch key={i} hex={c.hex} title={c.name} selected={i === colorIdx} onClick={() => { setColorIdx(i); if (product.sizes && !sizeOkForColor(product, product.sizes[sizeIdx], product.colors[i])) setSizeIdx(firstOkSizeIdx(product, product.colors[i])); }} />
               ))}
             </div>
           ) : (
@@ -4126,22 +4169,29 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
           <div>
             <p className="text-sm font-semibold mb-2" style={{ color: "var(--bone)" }}>2. Elige el talle</p>
             <div className="flex flex-wrap gap-2">
-              {product.sizes.map((s, i) => (
+              {product.sizes.map((s, i) => {
+                const ok = sizeOkForColor(product, s, color);
+                return (
                 <button
                   key={s}
-                  onClick={() => setSizeIdx(i)}
+                  disabled={!ok}
+                  title={ok ? undefined : "No disponible en este color"}
+                  onClick={() => ok && setSizeIdx(i)}
                   className="kulto-btn text-sm font-semibold rounded-full"
                   style={{
                     minWidth: 44, padding: "8px 12px",
-                    background: i === sizeIdx ? "var(--signal)" : "var(--ink-3)",
+                    background: i === sizeIdx && ok ? "var(--signal)" : "var(--ink-3)",
                     color: "var(--bone)",
-                    border: i === sizeIdx ? "1px solid var(--signal)" : "1px solid var(--line)",
+                    border: i === sizeIdx && ok ? "1px solid var(--signal)" : "1px solid var(--line)",
+                    opacity: ok ? 1 : 0.35, textDecoration: ok ? "none" : "line-through", cursor: ok ? "pointer" : "not-allowed",
                   }}
                 >
                   {s}
                 </button>
-              ))}
+                );
+              })}
             </div>
+            <KidColorsNote product={product} />
             <SizeGuideToggle sizeGuide={product.sizeGuide} sizeGuideImage={product.sizeGuideImage} />
           </div>
         )}
@@ -5424,8 +5474,7 @@ const fabricOf = (p) => {
   const own = (p.material || "").trim();
   if (own) return own;
   const cat = p.category || "";
-  const sub = p.subcategory || "";
-  return String((sub && FABRIC_MAP[`${cat}|${sub}`]) || FABRIC_MAP[`${cat}|`] || "").trim();
+  return String(FABRIC_MAP[`${cat}|`] || "").trim();
 };
 
 // Arma, en palabras simples, qué cambia entre los productos elegidos.
@@ -6990,18 +7039,26 @@ function Wizard({ products, categories, settings, designLibrary, designFolders, 
           </button>
           <p className="text-sm mb-4" style={{ color: "var(--slate)" }}>3. Elegí el talle</p>
           {hasSizes ? (
+            <>
             <div className="flex flex-wrap gap-2">
-              {prod.sizes.map((s, i) => (
+              {prod.sizes.map((s, i) => {
+                const ok = sizeOkForColor(prod, s, color);
+                return (
                 <button
                   key={s}
-                  onClick={() => { setSizeIdx(i); goToStep4(); }}
+                  disabled={!ok}
+                  title={ok ? undefined : "No disponible en este color"}
+                  onClick={() => { if (!ok) return; setSizeIdx(i); goToStep4(); }}
                   className="kulto-btn text-sm font-semibold rounded-full px-5 py-2.5"
-                  style={{ background: sizeIdx === i ? "var(--sun)" : "var(--ink-2)", color: sizeIdx === i ? "var(--ink)" : "var(--bone)", border: "1px solid var(--line)" }}
+                  style={{ background: sizeIdx === i && ok ? "var(--sun)" : "var(--ink-2)", color: sizeIdx === i && ok ? "var(--ink)" : "var(--bone)", border: "1px solid var(--line)", opacity: ok ? 1 : 0.35, textDecoration: ok ? "none" : "line-through", cursor: ok ? "pointer" : "not-allowed" }}
                 >
                   {s}
                 </button>
-              ))}
+                );
+              })}
             </div>
+            <KidColorsNote product={prod} />
+            </>
           ) : (
             <EmptyState text="Esta prenda no tiene talles configurados." />
           )}
@@ -8536,12 +8593,23 @@ const SIZE_PRESETS = ["XS", "S", "M", "L", "XL", "XXL", "3XL"];
 // siempre quedan al final de la lista, después de los de adulto.
 const KID_SIZE_PRESETS = ["4", "6", "8", "10", "12", "14", "16"];
 const isKidSize = (s) => /^niñ[oa]\s/i.test(String(s || ""));
+// Colores propios de los talles de niño: si el producto define kidColors (lista de
+// nombres), los "Niño N" solo están en esos colores. Vacío = en todos los colores.
+const kidColorList = (p) => (Array.isArray(p?.kidColors) ? p.kidColors : []);
+const sizeOkForColor = (p, size, color) => {
+  if (!isKidSize(size)) return true;
+  const kc = kidColorList(p);
+  if (!kc.length || !color) return true;
+  return kc.includes(color.name);
+};
+const firstOkSizeIdx = (p, color) => { const a = p?.sizes || []; const i = a.findIndex((x) => sizeOkForColor(p, x, color)); return i >= 0 ? i : 0; };
+const KidColorsNote = ({ product }) => { const kc = kidColorList(product); if (!kc.length || !(product.sizes || []).some(isKidSize)) return null; return <p className="text-xs mt-2" style={{ color: "var(--slate)" }}>Talles de niño solo en: {kc.join(", ")}</p>; };
 const sortSizes = (arr) => {
   const adults = arr.filter((x) => !isKidSize(x));
   const kids = arr.filter(isKidSize).sort((a, b) => (parseFloat(String(a).replace(/\D+/g, "")) || 0) - (parseFloat(String(b).replace(/\D+/g, "")) || 0));
   return [...adults, ...kids];
 };
-function KidSizesPicker({ sizes, onChange, inputStyle }) {
+function KidSizesPicker({ sizes, onChange, inputStyle, colors = [], kidColors = [], onChangeKidColors }) {
   const kids = sizes.filter(isKidSize);
   const [open, setOpen] = useState(kids.length > 0);
   const [custom, setCustom] = useState("");
@@ -8582,6 +8650,24 @@ function KidSizesPicker({ sizes, onChange, inputStyle }) {
             <input placeholder="Otro talle de niño (ej. 2, 18)" value={custom} onChange={(e) => setCustom(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addCustom(); } }} className="rounded-xl p-2 text-sm flex-1" style={inputStyle} />
             <button type="button" onClick={addCustom} className="kulto-btn text-xs font-semibold rounded-xl px-3 py-2" style={{ background: "var(--sun)", color: "var(--ink)" }}>Agregar</button>
           </div>
+          {kids.length > 0 && onChangeKidColors && colors.length > 0 && (
+            <div className="mt-3">
+              <p className="text-xs font-semibold mb-1" style={{ color: "var(--bone)" }}>Colores disponibles para niños</p>
+              <p className="text-xs mb-2" style={{ color: "var(--slate)" }}>Tildá solo los colores en que hay talle de niño. Si no tildás ninguno, se ofrecen en todos los colores.</p>
+              <div className="flex flex-wrap gap-2">
+                {colors.map((c, i) => {
+                  const nm = (c.name || "").trim() || "Único";
+                  const active = kidColors.includes(nm);
+                  return (
+                    <button key={i} type="button" onClick={() => onChangeKidColors(active ? kidColors.filter((x) => x !== nm) : [...kidColors, nm])} className="kulto-btn text-xs font-semibold rounded-full px-3 py-1.5 flex items-center gap-1.5" style={{ background: active ? "var(--signal)" : "var(--ink)", color: "var(--bone)", border: active ? "1px solid var(--signal)" : "1px solid var(--line)" }}>
+                      <span style={{ width: 12, height: 12, borderRadius: 999, background: c.hex, border: "1px solid var(--line)", display: "inline-block" }} />
+                      {nm}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -8776,7 +8862,7 @@ function CropModal({ source, onConfirm, onCancel, frameW = CROP_FRAME_W, frameH 
 const emptyDraft = {
   id: null, name: "", description: "", material: "", category: "", subcategory: "", group: "", price: "", salePrice: "", stock: "", points: "", sku: "",
   tags: { bestseller: false, oferta: false, tendencia: false, template: false, customDesign: false },
-  colors: [], designs: [], sizes: [], photoPool: [],
+  colors: [], designs: [], sizes: [], kidColors: [], photoPool: [],
   imageFit: "contain", imageBackground: null,
   sizeGuide: [], // [{ size, measurements }] — guía de talles opcional, por prenda
   sizeGuideImage: null, // alternativa (o complemento) a la tabla: una foto con las medidas
@@ -9359,7 +9445,7 @@ function AdminProductForm({ categories, groups, onAddCategory, onAddGroup, saved
           className="w-full rounded-xl p-3 text-sm"
           style={inputStyle}
         />
-        <p className="text-[11px] mt-1" style={{ color: "var(--slate)" }}>Opcional. Si lo dejás vacío, usa la tela de su tipo de prenda (Productos → "Telas por tipo de prenda"). Si lo escribís acá, esta tela gana. Se usa para que los clientes puedan comparar productos en el catálogo.</p>
+        <p className="text-[11px] mt-1" style={{ color: "var(--slate)" }}>Opcional. Si lo dejás vacío, usa la tela de su tipo de prenda (Productos → "Telas por categoría"). Si lo escribís acá, esta tela gana. Se usa para que los clientes puedan comparar productos en el catálogo.</p>
       </div>
 
       <div>
@@ -9644,7 +9730,7 @@ function AdminProductForm({ categories, groups, onAddCategory, onAddGroup, saved
                 Agregar
               </button>
             </div>
-            <KidSizesPicker sizes={draft.sizes} onChange={(next) => setDraft((d) => ({ ...d, sizes: next }))} inputStyle={inputStyle} />
+            <KidSizesPicker sizes={draft.sizes} onChange={(next) => setDraft((d) => ({ ...d, sizes: next }))} inputStyle={inputStyle} colors={draft.colors || []} kidColors={draft.kidColors || []} onChangeKidColors={(kc) => setDraft((d) => ({ ...d, kidColors: kc }))} />
           </div>
 
           {/* Size guide */}
@@ -10130,6 +10216,7 @@ const emptyTemplateDraft = {
   points: "",
   sku: "",
   sizes: [],
+  kidColors: [],
   sizeGuide: [],
   sizeGuideImage: null,
   colors: [],
@@ -10279,6 +10366,7 @@ function AdminTemplateForm({ categories, templateProducts = [], onAddCategory, o
         imageBackground: editing.imageBackground ?? null,
         cardImage: editing.cardImage || null,
         hideCardName: !!editing.hideCardName,
+        kidColors: Array.isArray(editing.kidColors) ? editing.kidColors : [],
       });
       // La foto base queda guardada junto con la prenda, así no hay que
       // volver a subirla cada vez que se edita (y la carga masiva por
@@ -10424,6 +10512,7 @@ function AdminTemplateForm({ categories, templateProducts = [], onAddCategory, o
       })),
       designs: [],
       sizes: draft.sizes,
+      kidColors: (draft.sizes || []).some(isKidSize) ? (draft.kidColors || []).filter((n) => draft.colors.some((c) => ((c.name || "").trim() || "Único") === n)) : [],
       photoPool: [],
       imageFit: draft.imageFit || "contain",
       imageBackground: draft.imageBackground ?? null,
@@ -10881,7 +10970,7 @@ function AdminTemplateForm({ categories, templateProducts = [], onAddCategory, o
           <input value={customSize} onChange={(e) => setCustomSize(e.target.value)} placeholder="Otro talle" className="flex-1 rounded-xl p-2 text-xs" style={inputStyle} />
           <button onClick={addCustomSize} className="kulto-btn text-xs font-semibold rounded-xl px-3" style={{ background: "var(--ink-3)", color: "var(--bone)" }}>Añadir</button>
         </div>
-        <KidSizesPicker sizes={draft.sizes} onChange={(next) => setDraft((d) => ({ ...d, sizes: next }))} inputStyle={inputStyle} />
+        <KidSizesPicker sizes={draft.sizes} onChange={(next) => setDraft((d) => ({ ...d, sizes: next }))} inputStyle={inputStyle} colors={draft.colors || []} kidColors={draft.kidColors || []} onChangeKidColors={(kc) => setDraft((d) => ({ ...d, kidColors: kc }))} />
       </div>
 
       {draft.sizes.length > 0 && (
@@ -12704,20 +12793,15 @@ const eur = (n) => (Number.isFinite(n) ? n.toLocaleString("es-ES", { minimumFrac
 // Una sola vez por tipo de prenda: la tela se aplica sola a todos los productos
 // de ese tipo (incluidos los mismos diseños vendidos en otras prendas), sin
 // cargarla producto por producto.
-function AdminFabricPanel({ products, settings, onSave }) {
+function AdminFabricPanel({ products, settings, onSave, categories = [] }) {
   const map = settings?.fabricByType || {};
   const [open, setOpen] = useState(false);
   const [drafts, setDrafts] = useState({});
   const [savedKey, setSavedKey] = useState("");
-  const cats = Array.from(new Set(products.map((p) => p.category).filter(Boolean))).sort((a, b) => a.localeCompare(b, "es"));
-  const rows = [];
-  cats.forEach((c) => {
-    const inCat = products.filter((p) => p.category === c);
-    rows.push({ key: `${c}|`, label: c, sub: false, items: inCat });
-    Array.from(new Set(inCat.map((p) => p.subcategory).filter(Boolean))).sort((a, b) => a.localeCompare(b, "es")).forEach((sg) => {
-      rows.push({ key: `${c}|${sg}`, label: sg, sub: true, items: inCat.filter((p) => p.subcategory === sg) });
-    });
-  });
+  // Una tela por CATEGORÍA (Camisetas, Sudaderas con capucha, Chaqueta…). Los estilos
+  // o carpetas de adentro (Beagle, Oversize, Naruto…) usan la tela de su categoría.
+  const fabricCats = Array.from(new Set([...(categories || []), ...products.map((p) => p.category).filter(Boolean)]));
+  const rows = fabricCats.map((c) => ({ key: `${c}|`, label: c, sub: false, items: products.filter((p) => p.category === c) }));
   const filled = rows.filter((r) => String(map[r.key] || "").trim()).length;
   const commit = async (key) => {
     if (drafts[key] === undefined) return;
@@ -12734,15 +12818,15 @@ function AdminFabricPanel({ products, settings, onSave }) {
     <div className="rounded-2xl p-4 mb-6" style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}>
       <button type="button" onClick={() => setOpen((o) => !o)} className="kulto-btn w-full flex items-center justify-between gap-3 text-left">
         <span>
-          <span className="block text-sm font-semibold" style={{ color: "var(--bone)" }}>Telas por tipo de prenda (para comparar)</span>
-          <span className="block text-xs mt-0.5" style={{ color: "var(--slate)" }}>Cargás la tela una vez por tipo y se aplica sola a todos sus productos. {filled ? `Cargadas: ${filled}.` : "Todavía no cargaste ninguna."}</span>
+          <span className="block text-sm font-semibold" style={{ color: "var(--bone)" }}>Telas por categoría (para comparar)</span>
+          <span className="block text-xs mt-0.5" style={{ color: "var(--slate)" }}>Cargás la tela una vez por categoría y se aplica sola a todos sus productos. {filled ? `Cargadas: ${filled}.` : "Todavía no cargaste ninguna."}</span>
         </span>
         {open ? <ChevronDown size={16} color="var(--slate)" /> : <ChevronRight size={16} color="var(--slate)" />}
       </button>
       {open && (
         <div className="mt-4 flex flex-col gap-3">
           <p className="text-xs" style={{ color: "var(--slate)" }}>
-            Cada producto usa la tela de su tipo de prenda ("Camisetas · Oversize"); si ese tipo no tiene, usa la de la categoría ("Camisetas"). Como un mismo diseño vendido en otra prenda es otro producto con su propia categoría, toma solo la tela de esa prenda. Si un producto necesita una tela distinta, la escribís en el producto mismo y esa gana.
+            Una tela por categoría: todos los productos de esa categoría la usan (incluidos sus estilos y carpetas, como Beagle u Oversize dentro de Camisetas). Un mismo diseño vendido en otra prenda es otro producto con su propia categoría, así que toma la tela de esa prenda. Si un producto necesita una tela distinta, la escribís en el producto mismo y esa gana.
           </p>
           {rows.map((r) => {
             const value = drafts[r.key] !== undefined ? drafts[r.key] : (map[r.key] || "");
@@ -12755,7 +12839,7 @@ function AdminFabricPanel({ products, settings, onSave }) {
                 </label>
                 <input
                   value={value}
-                  placeholder={r.sub ? "Vacío = usa la tela de la categoría" : "Ej: 100% algodón peinado, 220 g/m²"}
+                  placeholder="Ej: 100% algodón peinado, 220 g/m²"
                   onChange={(e) => setDrafts((d) => ({ ...d, [r.key]: e.target.value }))}
                   onBlur={() => commit(r.key)}
                   onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
@@ -14049,6 +14133,40 @@ function AdminProductsMenu({ items, categories, groups, onSave }) {
           Al lado de "Catálogo" en el menú flotante, agregá los accesos directos que quieras (ej: "Llaveros", "Lanyards"). Cada uno lleva al catálogo ya filtrado por la categoría o el grupo que elijas. Si un acceso es de tipo "Categoría" y esa categoría tiene productos con "Subcategoría" cargada (ver formulario de producto), automáticamente aparece una flechita para desplegar esas subcategorías debajo — no hace falta configurar nada más acá para eso.
         </p>
       </div>
+      {(categories.length > 0 || groups.length > 0) && (() => {
+        const has = (type, value) => list.some((x) => x.type === type && x.value === value);
+        const pmiToggle = (type, value) => {
+          if (has(type, value)) persist(list.filter((x) => !(x.type === type && x.value === value)));
+          else persist([...list, { id: genId("pmi"), label: value, type, value }]);
+        };
+        const addAll = () => {
+          const extra = [];
+          categories.forEach((c) => { if (!has("category", c)) extra.push({ id: genId("pmi"), label: c, type: "category", value: c }); });
+          if (extra.length) persist([...list, ...extra]);
+        };
+        const chip = (type, v) => {
+          const on = has(type, v);
+          return (
+            <button key={type + v} type="button" onClick={() => pmiToggle(type, v)} className="kulto-btn text-xs font-semibold rounded-full px-3 py-1.5" style={{ background: on ? "var(--signal)" : "var(--ink)", color: "var(--bone)", border: on ? "1px solid var(--signal)" : "1px solid var(--line)" }}>
+              {on ? "✓ " : ""}{v}
+            </button>
+          );
+        };
+        return (
+          <div className="rounded-2xl p-3" style={{ background: "var(--ink-3)", border: "1px solid var(--line)" }}>
+            <p className="text-sm font-semibold mb-1" style={{ color: "var(--bone)" }}>Elegí cuáles se ven en el menú</p>
+            <p className="text-xs mb-3" style={{ color: "var(--slate)" }}>Tocá para mostrar u ocultar. Las nuevas categorías que crees al subir productos aparecen acá para tildarlas.</p>
+            {categories.length > 0 && <p className="text-xs mb-1.5" style={{ color: "var(--slate)" }}>Categorías</p>}
+            <div className="flex flex-wrap gap-2 mb-3">{categories.map((c) => chip("category", c))}</div>
+            {groups.length > 0 && <p className="text-xs mb-1.5" style={{ color: "var(--slate)" }}>Grupos / temáticas</p>}
+            <div className="flex flex-wrap gap-2 mb-3">{groups.map((g) => chip("group", g))}</div>
+            <div className="flex gap-2">
+              <button type="button" onClick={addAll} className="kulto-btn text-xs font-semibold rounded-full px-3 py-1.5" style={{ background: "var(--sun)", color: "var(--ink)" }}>Mostrar todas las categorías</button>
+              <button type="button" onClick={() => persist([])} className="kulto-btn text-xs font-semibold rounded-full px-3 py-1.5" style={{ background: "var(--ink)", color: "var(--bone)", border: "1px solid var(--line)" }}>Quitar todas</button>
+            </div>
+          </div>
+        );
+      })()}
       {list.length === 0 && <EmptyState text="Por ahora el menú solo muestra 'Catálogo'." />}
       <div className="flex flex-col gap-3">
         {list.map((it, i) => (
@@ -16884,7 +17002,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
               </div>
             );
           })()}
-          <AdminFabricPanel products={products} settings={settings} onSave={onSaveSettings} />
+          <AdminFabricPanel products={products} settings={settings} onSave={onSaveSettings} categories={categories} />
           <div
             className="rounded-2xl p-4 mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
             style={{ background: hasDraftChanges ? "var(--ink-2)" : "transparent", border: hasDraftChanges ? "1px solid var(--sun)" : "1px dashed var(--line)" }}
@@ -19179,9 +19297,14 @@ export default function App() {
   const handleSaveProduct = async (product) => {
     // Si el guardado falla (producto muy pesado, sin conexión…) se avisa en vez
     // de dejarlo "guardado" solo en pantalla, que después no sube a la web.
-    const approxMb = JSON.stringify(product).length / (1024 * 1024);
+    let approxMb = JSON.stringify(product).length / (1024 * 1024);
+    if (approxMb > 1) {
+      // Reintenta subir/achicar las fotos pegadas dentro del producto.
+      try { product = await slimProductImages(JSON.parse(JSON.stringify(product))); } catch { /* sigue con el original */ }
+      approxMb = JSON.stringify(product).length / (1024 * 1024);
+    }
     if (approxMb > 4) {
-      window.alert(`No se guardó "${product.name}": pesa unos ${approxMb.toFixed(1)} MB y la web no podría leerlo después (el producto desaparecería del catálogo).\n\nSuele pasar cuando las fotos no llegaron a subirse al almacenamiento y quedaron pegadas dentro del producto. Probá con menos fotos o más livianas, y volvé a intentar.`);
+      window.alert(`No se guardó "${product.name}": pesa unos ${approxMb.toFixed(1)} MB y la web no podría leerlo después (el producto desaparecería del catálogo).\n\nLas fotos no se pudieron subir al almacenamiento${LAST_UPLOAD_ERROR ? ` (error: ${LAST_UPLOAD_ERROR})` : ""}. Mandame este mensaje completo y lo arreglo, o probá con menos fotos.`);
       return false;
     }
     const saveRes = await persistDraftProductVerbose(product);
