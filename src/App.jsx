@@ -5373,7 +5373,17 @@ function Paginator({ page, total, onChange }) {
 
 const productThumbSrc = (p) => (activeMockup(p) && p.mockup.cover) || p?.photoPool?.[0] || getColorImages(p?.colors?.[0])[0] || null;
 const effectivePrice = (p) => (p.tags?.oferta && p.salePrice ? p.salePrice : p.price);
-const fabricOf = (p) => (p.material || "").trim();
+// Telas por tipo de prenda (se cargan en Admin → Productos → "Telas por tipo de
+// prenda"). Un producto usa su tela propia si la tiene; si no, la de su tipo
+// ("Camisetas · Oversize") y, si tampoco, la de su categoría ("Camisetas").
+let FABRIC_MAP = {};
+const fabricOf = (p) => {
+  const own = (p.material || "").trim();
+  if (own) return own;
+  const cat = p.category || "";
+  const sub = p.subcategory || "";
+  return String((sub && FABRIC_MAP[`${cat}|${sub}`]) || FABRIC_MAP[`${cat}|`] || "").trim();
+};
 
 // Arma, en palabras simples, qué cambia entre los productos elegidos.
 function buildComparison(list) {
@@ -9305,7 +9315,7 @@ function AdminProductForm({ categories, groups, onAddCategory, onAddGroup, saved
           className="w-full rounded-xl p-3 text-sm"
           style={inputStyle}
         />
-        <p className="text-[11px] mt-1" style={{ color: "var(--slate)" }}>Opcional. Se usa para que los clientes puedan comparar productos en el catálogo.</p>
+        <p className="text-[11px] mt-1" style={{ color: "var(--slate)" }}>Opcional. Si lo dejás vacío, usa la tela de su tipo de prenda (Productos → "Telas por tipo de prenda"). Si lo escribís acá, esta tela gana. Se usa para que los clientes puedan comparar productos en el catálogo.</p>
       </div>
 
       <div>
@@ -12647,6 +12657,77 @@ const numOf = (v) => {
   return Number.isFinite(n) ? n : 0;
 };
 const eur = (n) => (Number.isFinite(n) ? n.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €" : "—");
+// Una sola vez por tipo de prenda: la tela se aplica sola a todos los productos
+// de ese tipo (incluidos los mismos diseños vendidos en otras prendas), sin
+// cargarla producto por producto.
+function AdminFabricPanel({ products, settings, onSave }) {
+  const map = settings?.fabricByType || {};
+  const [open, setOpen] = useState(false);
+  const [drafts, setDrafts] = useState({});
+  const [savedKey, setSavedKey] = useState("");
+  const cats = Array.from(new Set(products.map((p) => p.category).filter(Boolean))).sort((a, b) => a.localeCompare(b, "es"));
+  const rows = [];
+  cats.forEach((c) => {
+    const inCat = products.filter((p) => p.category === c);
+    rows.push({ key: `${c}|`, label: c, sub: false, items: inCat });
+    Array.from(new Set(inCat.map((p) => p.subcategory).filter(Boolean))).sort((a, b) => a.localeCompare(b, "es")).forEach((sg) => {
+      rows.push({ key: `${c}|${sg}`, label: sg, sub: true, items: inCat.filter((p) => p.subcategory === sg) });
+    });
+  });
+  const filled = rows.filter((r) => String(map[r.key] || "").trim()).length;
+  const commit = async (key) => {
+    if (drafts[key] === undefined) return;
+    const next = { ...map };
+    const v = String(drafts[key]).trim();
+    if (v) next[key] = v; else delete next[key];
+    await onSave({ fabricByType: next });
+    setDrafts((d) => { const c = { ...d }; delete c[key]; return c; });
+    setSavedKey(key);
+    setTimeout(() => setSavedKey(""), 1800);
+  };
+  const inputStyle = { background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" };
+  return (
+    <div className="rounded-2xl p-4 mb-6" style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}>
+      <button type="button" onClick={() => setOpen((o) => !o)} className="kulto-btn w-full flex items-center justify-between gap-3 text-left">
+        <span>
+          <span className="block text-sm font-semibold" style={{ color: "var(--bone)" }}>Telas por tipo de prenda (para comparar)</span>
+          <span className="block text-xs mt-0.5" style={{ color: "var(--slate)" }}>Cargás la tela una vez por tipo y se aplica sola a todos sus productos. {filled ? `Cargadas: ${filled}.` : "Todavía no cargaste ninguna."}</span>
+        </span>
+        {open ? <ChevronDown size={16} color="var(--slate)" /> : <ChevronRight size={16} color="var(--slate)" />}
+      </button>
+      {open && (
+        <div className="mt-4 flex flex-col gap-3">
+          <p className="text-xs" style={{ color: "var(--slate)" }}>
+            Cada producto usa la tela de su tipo de prenda ("Camisetas · Oversize"); si ese tipo no tiene, usa la de la categoría ("Camisetas"). Como un mismo diseño vendido en otra prenda es otro producto con su propia categoría, toma solo la tela de esa prenda. Si un producto necesita una tela distinta, la escribís en el producto mismo y esa gana.
+          </p>
+          {rows.map((r) => {
+            const value = drafts[r.key] !== undefined ? drafts[r.key] : (map[r.key] || "");
+            const own = r.items.filter((p) => (p.material || "").trim()).length;
+            return (
+              <div key={r.key} className={r.sub ? "pl-5" : ""}>
+                <label className="text-xs font-semibold block mb-1" style={{ color: "var(--bone)" }}>
+                  {r.sub ? "↳ " : ""}{r.label} <span className="font-normal" style={{ color: "var(--slate)" }}>· {r.items.length} producto{r.items.length === 1 ? "" : "s"}{own ? ` (${own} con tela propia)` : ""}</span>
+                  {savedKey === r.key && <span className="ml-2" style={{ color: "var(--sun)" }}>Guardado ✓</span>}
+                </label>
+                <input
+                  value={value}
+                  placeholder={r.sub ? "Vacío = usa la tela de la categoría" : "Ej: 100% algodón peinado, 220 g/m²"}
+                  onChange={(e) => setDrafts((d) => ({ ...d, [r.key]: e.target.value }))}
+                  onBlur={() => commit(r.key)}
+                  onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                  className="w-full rounded-xl p-2.5 text-sm"
+                  style={inputStyle}
+                />
+              </div>
+            );
+          })}
+          {rows.length === 0 && <p className="text-xs" style={{ color: "var(--slate)" }}>Todavía no hay productos con categoría.</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AdminCostsPanel({ templates = [], settings }) {
   const [state, setState] = useState({ vat: 21, sellWithVat: true, deduct: true, items: [] });
   const [loaded, setLoaded] = useState(false);
@@ -16736,6 +16817,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
 
       {tab === "productos" && (
         <>
+          <AdminFabricPanel products={products} settings={settings} onSave={onSaveSettings} />
           <div
             className="rounded-2xl p-4 mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
             style={{ background: hasDraftChanges ? "var(--ink-2)" : "transparent", border: hasDraftChanges ? "1px solid var(--sun)" : "1px dashed var(--line)" }}
@@ -18534,6 +18616,7 @@ export default function App() {
   const [publishing, setPublishing] = useState(false);
   const [reviews, setReviews] = useState([]);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  FABRIC_MAP = settings?.fabricByType || {};
 
   // Accesibilidad: modo claro/oscuro y tamaño de letra — elección de cada
   // visitante, guardada en su propio navegador (no es configuración de la
