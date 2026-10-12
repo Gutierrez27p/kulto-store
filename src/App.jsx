@@ -8479,6 +8479,61 @@ function OrderLookupPage({ initialOrderId = "", settings }) {
 /* ------------------------------------------------------------------ */
 
 const SIZE_PRESETS = ["XS", "S", "M", "L", "XL", "XXL", "3XL"];
+// Talles de niños: se guardan junto a los demás como "Niño 8", "Niño 10"… y
+// siempre quedan al final de la lista, después de los de adulto.
+const KID_SIZE_PRESETS = ["4", "6", "8", "10", "12", "14", "16"];
+const isKidSize = (s) => /^niñ[oa]\s/i.test(String(s || ""));
+const sortSizes = (arr) => {
+  const adults = arr.filter((x) => !isKidSize(x));
+  const kids = arr.filter(isKidSize).sort((a, b) => (parseFloat(String(a).replace(/\D+/g, "")) || 0) - (parseFloat(String(b).replace(/\D+/g, "")) || 0));
+  return [...adults, ...kids];
+};
+function KidSizesPicker({ sizes, onChange, inputStyle }) {
+  const kids = sizes.filter(isKidSize);
+  const [open, setOpen] = useState(kids.length > 0);
+  const [custom, setCustom] = useState("");
+  useEffect(() => { if (kids.length > 0) setOpen(true); }, [kids.length]);
+  const toggleOpen = (on) => {
+    setOpen(on);
+    if (!on) onChange(sizes.filter((x) => !isKidSize(x)));
+  };
+  const toggle = (label) => onChange(sortSizes(sizes.includes(label) ? sizes.filter((x) => x !== label) : [...sizes, label]));
+  const addCustom = () => {
+    const v = custom.trim();
+    if (!v) return;
+    const label = isKidSize(v) ? v : `Niño ${v}`;
+    if (!sizes.includes(label)) onChange(sortSizes([...sizes, label]));
+    setCustom("");
+  };
+  return (
+    <div className="mt-3 rounded-xl p-3" style={{ background: "var(--ink-3)", border: "1px dashed var(--line)" }}>
+      <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer" style={{ color: "var(--bone)" }}>
+        <input type="checkbox" checked={open} onChange={(e) => toggleOpen(e.target.checked)} />
+        También disponible para niños
+      </label>
+      {open && (
+        <div className="mt-2">
+          <p className="text-xs mb-2" style={{ color: "var(--slate)" }}>Tildá los talles de niños que hay. Se muestran después de los de adulto, como "Niño 8", "Niño 10"…</p>
+          <div className="flex flex-wrap gap-2 mb-2">
+            {[...KID_SIZE_PRESETS, ...kids.map((k) => k.replace(/^niñ[oa]\s+/i, "")).filter((n) => !KID_SIZE_PRESETS.includes(n))].map((n) => {
+              const label = `Niño ${n}`;
+              const active = sizes.includes(label);
+              return (
+                <button key={n} type="button" onClick={() => toggle(label)} className="kulto-btn text-xs font-semibold rounded-full px-3 py-1.5" style={{ background: active ? "var(--signal)" : "var(--ink)", color: "var(--bone)", border: active ? "1px solid var(--signal)" : "1px solid var(--line)" }}>
+                  {n}
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex items-center gap-2">
+            <input placeholder="Otro talle de niño (ej. 2, 18)" value={custom} onChange={(e) => setCustom(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addCustom(); } }} className="rounded-xl p-2 text-sm flex-1" style={inputStyle} />
+            <button type="button" onClick={addCustom} className="kulto-btn text-xs font-semibold rounded-xl px-3 py-2" style={{ background: "var(--sun)", color: "var(--ink)" }}>Agregar</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 /* ------------------------------------------------------------------ */
 /*  Crop tool — lets the admin choose exactly what part of a photo     */
@@ -9500,7 +9555,7 @@ function AdminProductForm({ categories, groups, onAddCategory, onAddGroup, saved
                 return (
                   <button
                     key={s}
-                    onClick={() => setDraft((d) => ({ ...d, sizes: active ? d.sizes.filter((x) => x !== s) : [...d.sizes, s] }))}
+                    onClick={() => setDraft((d) => ({ ...d, sizes: sortSizes(active ? d.sizes.filter((x) => x !== s) : [...d.sizes, s]) }))}
                     className="kulto-btn text-sm font-semibold rounded-full px-3 py-1.5"
                     style={{ background: active ? "var(--signal)" : "var(--ink-3)", color: "var(--bone)", border: active ? "1px solid var(--signal)" : "1px solid var(--line)" }}
                   >
@@ -9509,9 +9564,9 @@ function AdminProductForm({ categories, groups, onAddCategory, onAddGroup, saved
                 );
               })}
             </div>
-            {draft.sizes.filter((s) => !SIZE_PRESETS.includes(s)).length > 0 && (
+            {draft.sizes.filter((s) => !SIZE_PRESETS.includes(s) && !isKidSize(s)).length > 0 && (
               <div className="flex flex-wrap gap-2 mb-2">
-                {draft.sizes.filter((s) => !SIZE_PRESETS.includes(s)).map((s) => (
+                {draft.sizes.filter((s) => !SIZE_PRESETS.includes(s) && !isKidSize(s)).map((s) => (
                   <div key={s} className="flex items-center gap-1 rounded-full pl-3 pr-2 py-1" style={{ background: "var(--ink-3)" }}>
                     <span className="text-xs" style={{ color: "var(--bone)" }}>{s}</span>
                     <button onClick={() => setDraft((d) => ({ ...d, sizes: d.sizes.filter((x) => x !== s) }))} style={{ color: "var(--slate)" }}><X size={12} /></button>
@@ -9528,13 +9583,14 @@ function AdminProductForm({ categories, groups, onAddCategory, onAddGroup, saved
                 style={inputStyle}
               />
               <button
-                onClick={() => { const v = customSize.trim(); if (v && !draft.sizes.includes(v)) { setDraft((d) => ({ ...d, sizes: [...d.sizes, v] })); } setCustomSize(""); }}
+                onClick={() => { const v = customSize.trim(); if (v && !draft.sizes.includes(v)) { setDraft((d) => ({ ...d, sizes: sortSizes([...d.sizes, v]) })); } setCustomSize(""); }}
                 className="kulto-btn text-xs font-semibold rounded-xl px-3 py-2"
                 style={{ background: "var(--sun)", color: "var(--ink)" }}
               >
                 Agregar
               </button>
             </div>
+            <KidSizesPicker sizes={draft.sizes} onChange={(next) => setDraft((d) => ({ ...d, sizes: next }))} inputStyle={inputStyle} />
           </div>
 
           {/* Size guide */}
@@ -10263,11 +10319,11 @@ function AdminTemplateForm({ categories, templateProducts = [], onAddCategory, o
     if (editingColorIdx !== null) cancelColorEdit();
   };
 
-  const toggleSize = (s) => setDraft((d) => ({ ...d, sizes: d.sizes.includes(s) ? d.sizes.filter((x) => x !== s) : [...d.sizes, s] }));
+  const toggleSize = (s) => setDraft((d) => ({ ...d, sizes: sortSizes(d.sizes.includes(s) ? d.sizes.filter((x) => x !== s) : [...d.sizes, s]) }));
   const addCustomSize = () => {
     const s = customSize.trim().toUpperCase();
     if (!s || draft.sizes.includes(s)) return;
-    setDraft((d) => ({ ...d, sizes: [...d.sizes, s] }));
+    setDraft((d) => ({ ...d, sizes: sortSizes([...d.sizes, s]) }));
     setCustomSize("");
   };
 
@@ -10761,7 +10817,7 @@ function AdminTemplateForm({ categories, templateProducts = [], onAddCategory, o
               {s}
             </button>
           ))}
-          {draft.sizes.filter((s) => !SIZE_PRESETS.includes(s)).map((s) => (
+          {draft.sizes.filter((s) => !SIZE_PRESETS.includes(s) && !isKidSize(s)).map((s) => (
             <button key={s} onClick={() => toggleSize(s)} className="kulto-btn text-xs font-semibold rounded-full px-3 py-1.5" style={{ background: "var(--sun)", color: "var(--ink)" }}>
               {s}
             </button>
@@ -10771,6 +10827,7 @@ function AdminTemplateForm({ categories, templateProducts = [], onAddCategory, o
           <input value={customSize} onChange={(e) => setCustomSize(e.target.value)} placeholder="Otro talle" className="flex-1 rounded-xl p-2 text-xs" style={inputStyle} />
           <button onClick={addCustomSize} className="kulto-btn text-xs font-semibold rounded-xl px-3" style={{ background: "var(--ink-3)", color: "var(--bone)" }}>Añadir</button>
         </div>
+        <KidSizesPicker sizes={draft.sizes} onChange={(next) => setDraft((d) => ({ ...d, sizes: next }))} inputStyle={inputStyle} />
       </div>
 
       {draft.sizes.length > 0 && (
