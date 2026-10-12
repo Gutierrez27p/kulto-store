@@ -5470,11 +5470,31 @@ const effectivePrice = (p) => (p.tags?.oferta && p.salePrice ? p.salePrice : p.p
 // prenda"). Un producto usa su tela propia si la tiene; si no, la de su tipo
 // ("Camisetas · Oversize") y, si tampoco, la de su categoría ("Camisetas").
 let FABRIC_MAP = {};
+// Tipos de prenda dentro de una categoría (Camisetas → Beagle, Oversize, Joana…):
+// salen de las prendas de Personalizar + los que el admin agrega a mano en
+// "Telas por categoría". Se asigna en App.
+let GARMENT_TYPES = {};
+const garmentTypesOf = (cat) => GARMENT_TYPES[cat] || [];
 const fabricOf = (p) => {
   const own = (p.material || "").trim();
   if (own) return own;
   const cat = p.category || "";
-  return String(FABRIC_MAP[`${cat}|`] || "").trim();
+  // Tela del tipo de prenda en que se vende (ej. Camisetas · Oversize), si se marcó.
+  for (const t of Array.isArray(p.garmentTypes) ? p.garmentTypes : []) {
+    const tv = String(FABRIC_MAP[`${cat}|${t}`] || "").trim();
+    if (tv) return tv;
+  }
+  const exact = String(FABRIC_MAP[`${cat}|`] || "").trim();
+  if (exact) return exact;
+  // "Camisetas Premium Oversize" sin tela propia usa la de "Camisetas".
+  const lc = cat.toLowerCase();
+  let best = "", bestLen = 0;
+  for (const k of Object.keys(FABRIC_MAP)) {
+    const base = k.split("|")[0].trim();
+    const v = String(FABRIC_MAP[k] || "").trim();
+    if (v && base && base.length > bestLen && lc.startsWith(base.toLowerCase() + " ")) { best = v; bestLen = base.length; }
+  }
+  return best;
 };
 
 // Arma, en palabras simples, qué cambia entre los productos elegidos.
@@ -8862,7 +8882,7 @@ function CropModal({ source, onConfirm, onCancel, frameW = CROP_FRAME_W, frameH 
 const emptyDraft = {
   id: null, name: "", description: "", material: "", category: "", subcategory: "", group: "", price: "", salePrice: "", stock: "", points: "", sku: "",
   tags: { bestseller: false, oferta: false, tendencia: false, template: false, customDesign: false },
-  colors: [], designs: [], sizes: [], kidColors: [], photoPool: [],
+  colors: [], designs: [], sizes: [], kidColors: [], garmentTypes: [], photoPool: [],
   imageFit: "contain", imageBackground: null,
   sizeGuide: [], // [{ size, measurements }] — guía de talles opcional, por prenda
   sizeGuideImage: null, // alternativa (o complemento) a la tabla: una foto con las medidas
@@ -9505,6 +9525,21 @@ function AdminProductForm({ categories, groups, onAddCategory, onAddGroup, saved
         </div>
       )}
 
+      {draft.category && garmentTypesOf(draft.category).length > 0 && (
+        <div>
+          <label className="text-xs mb-1 block" style={{ color: "var(--slate)" }}>¿En qué tipo de {draft.category.toLowerCase()} se vende? (sirve para mostrar la tela correcta al comparar)</label>
+          <div className="flex flex-wrap gap-2">
+            {garmentTypesOf(draft.category).map((t) => {
+              const on = (draft.garmentTypes || []).includes(t);
+              return (
+                <button key={t} type="button" onClick={() => setDraft((d) => ({ ...d, garmentTypes: on ? (d.garmentTypes || []).filter((x) => x !== t) : [...(d.garmentTypes || []), t] }))} className="kulto-btn text-xs font-semibold rounded-full px-3 py-1.5" style={{ background: on ? "var(--signal)" : "var(--ink)", color: "var(--bone)", border: on ? "1px solid var(--signal)" : "1px solid var(--line)" }}>
+                  {on ? "✓ " : ""}{t}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
       <div>
         <label className="text-xs mb-1 block" style={{ color: "var(--slate)" }}>Vincular con otro estilo del mismo diseño (opcional)</label>
         <input
@@ -12801,7 +12836,19 @@ function AdminFabricPanel({ products, settings, onSave, categories = [] }) {
   // Una tela por CATEGORÍA (Camisetas, Sudaderas con capucha, Chaqueta…). Los estilos
   // o carpetas de adentro (Beagle, Oversize, Naruto…) usan la tela de su categoría.
   const fabricCats = Array.from(new Set([...(categories || []), ...products.map((p) => p.category).filter(Boolean)]));
-  const rows = fabricCats.map((c) => ({ key: `${c}|`, label: c, sub: false, items: products.filter((p) => p.category === c) }));
+  const rows = [];
+  fabricCats.forEach((c) => {
+    rows.push({ key: `${c}|`, label: c, sub: false, cat: c, items: products.filter((p) => p.category === c) });
+    garmentTypesOf(c).forEach((t) => rows.push({ key: `${c}|${t}`, label: t, sub: true, cat: c, items: products.filter((p) => p.category === c && (p.garmentTypes || []).includes(t)) }));
+  });
+  const [newType, setNewType] = useState({});
+  const addType = async (c) => {
+    const v = (newType[c] || "").trim();
+    if (!v) return;
+    const cur = settings?.garmentTypes || {};
+    await onSave({ garmentTypes: { ...cur, [c]: Array.from(new Set([...(cur[c] || []), v])) } });
+    setNewType((x) => ({ ...x, [c]: "" }));
+  };
   const filled = rows.filter((r) => String(map[r.key] || "").trim()).length;
   const commit = async (key) => {
     if (drafts[key] === undefined) return;
@@ -12834,18 +12881,24 @@ function AdminFabricPanel({ products, settings, onSave, categories = [] }) {
             return (
               <div key={r.key} className={r.sub ? "pl-5" : ""}>
                 <label className="text-xs font-semibold block mb-1" style={{ color: "var(--bone)" }}>
-                  {r.sub ? "↳ " : ""}{r.label} <span className="font-normal" style={{ color: "var(--slate)" }}>· {r.items.length} producto{r.items.length === 1 ? "" : "s"}{own ? ` (${own} con tela propia)` : ""}</span>
+                  {r.sub ? "↳ Tipo: " : ""}{r.label} <span className="font-normal" style={{ color: "var(--slate)" }}>· {r.items.length} producto{r.items.length === 1 ? "" : "s"}{own ? ` (${own} con tela propia)` : ""}</span>
                   {savedKey === r.key && <span className="ml-2" style={{ color: "var(--sun)" }}>Guardado ✓</span>}
                 </label>
                 <input
                   value={value}
-                  placeholder="Ej: 100% algodón peinado, 220 g/m²"
+                  placeholder={r.sub ? "Vacío = usa la tela de " + r.cat : fabricCats.find((o) => o !== r.label && r.label.toLowerCase().startsWith(o.toLowerCase() + " ")) ? "Vacío = usa la tela de " + fabricCats.find((o) => o !== r.label && r.label.toLowerCase().startsWith(o.toLowerCase() + " ")) : "Ej: 100% algodón peinado, 220 g/m²"}
                   onChange={(e) => setDrafts((d) => ({ ...d, [r.key]: e.target.value }))}
                   onBlur={() => commit(r.key)}
                   onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
                   className="w-full rounded-xl p-2.5 text-sm"
                   style={inputStyle}
                 />
+                {!r.sub && (
+                  <div className="flex gap-2 mt-2 pl-5">
+                    <input value={newType[r.cat] || ""} onChange={(e) => setNewType((x) => ({ ...x, [r.cat]: e.target.value }))} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addType(r.cat); } }} placeholder={`+ Agregar tipo de ${r.cat.toLowerCase()} (ej: Joana)`} className="flex-1 rounded-xl p-2 text-xs" style={inputStyle} />
+                    <button type="button" onClick={() => addType(r.cat)} className="kulto-btn text-xs font-semibold rounded-xl px-3" style={{ background: "var(--sun)", color: "var(--ink)" }}>Agregar</button>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -18802,6 +18855,13 @@ export default function App() {
   const [reviews, setReviews] = useState([]);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   FABRIC_MAP = settings?.fabricByType || {};
+  {
+    const gt = {};
+    (products || []).filter((p) => p.tags?.template && p.category && p.subcategory).forEach((p) => { (gt[p.category] = gt[p.category] || []).push(p.subcategory); });
+    Object.entries(settings?.garmentTypes || {}).forEach(([c, arr]) => { (arr || []).forEach((t) => { (gt[c] = gt[c] || []).push(t); }); });
+    Object.keys(gt).forEach((c) => { gt[c] = Array.from(new Set(gt[c])).sort((a, b) => a.localeCompare(b, "es")); });
+    GARMENT_TYPES = gt;
+  }
 
   // Accesibilidad: modo claro/oscuro y tamaño de letra — elección de cada
   // visitante, guardada en su propio navegador (no es configuración de la
