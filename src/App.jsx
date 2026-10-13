@@ -11723,7 +11723,47 @@ function AdminTagManager({ title, items, noun, onRename, onDelete, onMergeAsType
 }
 
 function AdminCategoryManager({ categories, onRename, onDelete, onMergeAsType }) {
-  return <AdminTagManager title="Categorías" items={categories} noun="categoría" onRename={onRename} onDelete={onDelete} onMergeAsType={onMergeAsType} />;
+  const [busy, setBusy] = useState(false);
+  const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+  // Propuestas para ordenar: "Camisetas Premium Oversize" → Camisetas · Oversize,
+  // "Sudaderas con capucha" → Sudaderas · Con capucha (la 1ª palabra es la categoría principal).
+  const mergeSuggestions = (() => {
+    const out = [];
+    const norm = (w) => w.toLowerCase();
+    const firstOf = (c) => c.trim().split(/\s+/)[0];
+    const byFirst = {};
+    categories.forEach((c) => { const w = c.trim().split(/\s+/); if (w.length > 1) (byFirst[norm(w[0])] = byFirst[norm(w[0])] || []).push(c); });
+    categories.forEach((c) => {
+      const w = c.trim().split(/\s+/);
+      if (w.length < 2) return;
+      const first = firstOf(c);
+      const parentExisting = categories.find((o) => norm(o) === norm(first));
+      const siblings = byFirst[norm(first)] || [];
+      if (!parentExisting && siblings.length < 2) return;
+      const parent = parentExisting || cap(first);
+      const rest = w.slice(1).join(" ");
+      const known = (GARMENT_TYPES[parent] || []).find((t) => rest.toLowerCase().includes(t.toLowerCase()));
+      out.push([c, parent, known || cap(rest)]);
+    });
+    return out;
+  })();
+  return (
+    <div className="flex flex-col gap-3">
+      {mergeSuggestions.length > 0 && onMergeAsType && (
+        <div className="rounded-2xl p-4 flex flex-col gap-2" style={{ background: "var(--ink-2)", border: "1px dashed var(--sun)" }}>
+          <p className="text-sm font-semibold" style={{ color: "var(--bone)" }}>Ordenar categorías en tipos</p>
+          <p className="text-xs" style={{ color: "var(--slate)" }}>Estas categorías sueltas se pueden meter como tipo dentro de una principal:</p>
+          <ul className="text-xs flex flex-col gap-1" style={{ color: "var(--bone)" }}>
+            {mergeSuggestions.map(([c, p, l]) => <li key={c}>• <b>{c}</b> → categoría <b>{p}</b>, tipo <b>{l}</b></li>)}
+          </ul>
+          <button type="button" disabled={busy} onClick={async () => { if (!window.confirm("Se mueven los productos de esas categorías a la principal con su tipo, y las categorías sueltas se borran. ¿Seguimos?")) return; setBusy(true); try { await onMergeAsType(mergeSuggestions); } finally { setBusy(false); } }} className="kulto-btn text-xs font-semibold px-4 py-2 rounded-full w-fit" style={{ background: "var(--sun)", color: "var(--ink)", opacity: busy ? 0.6 : 1 }}>
+            {busy ? "Ordenando…" : "Ordenar todo de una vez"}
+          </button>
+        </div>
+      )}
+      <AdminTagManager title="Categorías" items={categories} noun="categoría" onRename={onRename} onDelete={onDelete} onMergeAsType={onMergeAsType} />
+    </div>
+  );
 }
 
 function AdminGroupManager({ groups, onRename, onDelete }) {
@@ -19683,27 +19723,40 @@ export default function App() {
   // dentro de otra (Camisetas → Premium Oversize): mueve sus productos a la
   // categoría principal marcándolos con ese tipo, registra el tipo y borra la
   // categoría vieja.
-  const handleMergeCategoryAsType = async (child, parent, label) => {
-    let cats = draftCategories.filter((c) => c !== child);
-    if (!cats.includes(parent)) cats = [...cats, parent];
+  const handleMergeCategoryAsType = async (a0, b0, c0) => {
+    const list = Array.isArray(a0) ? a0 : [[a0, b0, c0]];
+    let cats = [...draftCategories];
+    let prods = [...draftProducts];
+    const gt = { ...(settings?.garmentTypes || {}) };
+    const fab = { ...(settings?.fabricByType || {}) };
+    const changed = new Map();
+    for (const [child, parent, label] of list) {
+      cats = cats.filter((c) => c !== child);
+      if (!cats.includes(parent)) cats.push(parent);
+      prods = prods.map((p) => {
+        if (!(p.category === child || (p.extraCategories || []).includes(child))) return p;
+        const cat = p.category === child ? parent : p.category;
+        const np = {
+          ...p,
+          category: cat,
+          garmentTypes: p.category === child ? Array.from(new Set([...(p.garmentTypes || []), label])) : (p.garmentTypes || []),
+          extraCategories: Array.from(new Set((p.extraCategories || []).map((c) => (c === child ? parent : c)))).filter((c) => c !== cat),
+        };
+        changed.set(p.id, np);
+        return np;
+      });
+      gt[parent] = Array.from(new Set([...(gt[parent] || []), label]));
+      if (fab[`${child}|`] && !fab[`${parent}|${label}`]) fab[`${parent}|${label}`] = fab[`${child}|`];
+      delete fab[`${child}|`];
+    }
     setDraftCategories(cats);
     await persistDraftCategories(cats);
-    const affected = draftProducts.filter((p) => p.category === child || (p.extraCategories || []).includes(child));
-    const updated = affected.map((p) => ({
-      ...p,
-      category: p.category === child ? parent : p.category,
-      garmentTypes: p.category === child ? Array.from(new Set([...(p.garmentTypes || []), label])) : (p.garmentTypes || []),
-      extraCategories: Array.from(new Set((p.extraCategories || []).map((c) => (c === child ? parent : c)))).filter((c) => c !== (p.category === child ? parent : p.category)),
-    }));
-    if (updated.length) {
-      await Promise.all(updated.map((p) => persistDraftProduct(p)));
-      setDraftProducts((prev) => prev.map((p) => updated.find((u) => u.id === p.id) || p));
+    const upd = [...changed.values()];
+    if (upd.length) {
+      await Promise.all(upd.map((p) => persistDraftProduct(p)));
+      setDraftProducts(prods);
     }
-    const cur = settings?.garmentTypes || {};
-    const fab = { ...(settings?.fabricByType || {}) };
-    if (fab[`${child}|`] && !fab[`${parent}|${label}`]) { fab[`${parent}|${label}`] = fab[`${child}|`]; }
-    delete fab[`${child}|`];
-    await handleSaveSettings({ garmentTypes: { ...cur, [parent]: Array.from(new Set([...(cur[parent] || []), label])) }, fabricByType: fab });
+    await handleSaveSettings({ garmentTypes: gt, fabricByType: fab });
     await markDraftChanged();
     setHasDraftChanges(true);
   };
