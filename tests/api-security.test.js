@@ -58,3 +58,54 @@ test("verify-email rejects invalid address without sending", async () => {
     else process.env.RESEND_API_KEY = originalKey;
   }
 });
+
+test("analyze-product rejects malformed image before contacting AI provider", async () => {
+  const oldKey = process.env.GEMINI_API_KEY;
+  const oldFetch = globalThis.fetch;
+  process.env.GEMINI_API_KEY = "test-only";
+  globalThis.fetch = () => { throw Error("Must not call AI"); };
+  try {
+    const res = response();
+    await analyzeHandler({ method: "POST", body: { image: "data:text/html;base64,SGVsbG8=", categories: [] } }, res);
+    assert.equal(res.statusCode, 400);
+  } finally {
+    globalThis.fetch = oldFetch;
+    if (oldKey === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = oldKey;
+  }
+});
+
+test("analyze-product rejects malformed base64 without contacting AI provider", async () => {
+  const oldKey = process.env.GEMINI_API_KEY;
+  const oldFetch = globalThis.fetch;
+  process.env.GEMINI_API_KEY = "test-only";
+  globalThis.fetch = () => { throw Error("Must not call AI"); };
+  try {
+    const res = response();
+    await analyzeHandler({ method: "POST", body: { image: "data:image/png;base64,AAAAA", categories: [] } }, res);
+    assert.equal(res.statusCode, 400);
+  } finally {
+    globalThis.fetch = oldFetch;
+    if (oldKey === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = oldKey;
+  }
+});
+
+test("verify-email rejects malformed signature without contacting provider", async () => {
+  const oldKey = process.env.RESEND_API_KEY;
+  const oldFetch = globalThis.fetch;
+  process.env.RESEND_API_KEY = "test-only";
+  globalThis.fetch = () => { throw Error("Must not send"); };
+  try {
+    const res = response();
+    await verifyHandler({ method: "POST", body: {
+      action: "check", email: "client@example.com", code: "123456",
+      token: String(Date.now() + 60_000) + ".bad-signature",
+    } }, res);
+    assert.equal(res.statusCode, 400);
+  } finally {
+    globalThis.fetch = oldFetch;
+    if (oldKey === undefined) delete process.env.RESEND_API_KEY;
+    else process.env.RESEND_API_KEY = oldKey;
+  }
+});
