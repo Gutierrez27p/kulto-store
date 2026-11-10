@@ -29,7 +29,7 @@ export default async function handler(req, res) {
       return;
     }
 
-    const match = image.match(/^data:(image\/[a-zA-Z+]+);base64,(.+)$/);
+    const match = image.match(/^data:(image\/(?:jpeg|png|webp|gif));base64,([A-Za-z0-9+/]+={0,2})$/);
     if (!match) {
       res.status(400).json({ error: "La imagen no tiene un formato válido." });
       return;
@@ -39,6 +39,10 @@ export default async function handler(req, res) {
       return;
     }
     const mediaType = match[1];
+    if (match[2].length % 4 !== 0) {
+      res.status(400).json({ error: "La imagen base64 no es válida." });
+      return;
+    }
     const base64Data = match[2];
 
     const categoryList = Array.isArray(categories)
