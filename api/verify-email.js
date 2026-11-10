@@ -35,6 +35,10 @@ export default async function handler(req, res) {
 
   try {
     const { action, name, storeName } = req.body || {};
+    if (typeof name === "string" && name.length > 120) {
+      res.status(400).json({ error: "El nombre es demasiado largo." });
+      return;
+    }
     const email = String((req.body || {}).email || "").trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 200) {
       res.status(400).json({ error: "El mail no es válido." });
@@ -93,6 +97,7 @@ export default async function handler(req, res) {
 
     res.status(400).json({ error: "Acción no válida." });
   } catch (err) {
-    res.status(500).json({ error: err?.message || "Error verificando el mail." });
+    console.error("Error verificando el mail:", err);
+    res.status(500).json({ error: "Error interno verificando el mail." });
   }
 }
