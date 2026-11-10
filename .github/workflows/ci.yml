@@ -25,5 +25,8 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Pruebas de API
         run: npm test
-      - name: Compilar aplicación
+      - name: Compilar aplicación (valores de prueba sin credenciales)
+        env:
+          VITE_SUPABASE_URL: https://example.supabase.co
+          VITE_SUPABASE_ANON_KEY: test-public-anon-key
         run: npm run build
