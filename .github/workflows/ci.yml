@@ -1,0 +1,29 @@
+name: CI gratuito — pruebas y compilación
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [security-hardening-stage-1]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Obtener código
+        uses: actions/checkout@v4
+      - name: Preparar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Instalar dependencias
+        run: npm install --no-audit --no-fund
+      - name: Pruebas de API
+        run: npm test
+      - name: Compilar aplicación
+        run: npm run build
