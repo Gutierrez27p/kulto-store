@@ -27,11 +27,11 @@ export default async function handler(req, res) {
 
   try {
     const { to, subject, html } = req.body || {};
-    if (!to || typeof to !== "string") {
+    if (typeof to !== "string" || to.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
       res.status(400).json({ error: "Falta el destinatario del mail." });
       return;
     }
-    if (!subject || !html) {
+    if (typeof subject !== "string" || !subject.trim() || subject.length > 200 || typeof html !== "string" || !html.trim() || html.length > 100000) {
       res.status(400).json({ error: "Falta el asunto o el contenido del mail." });
       return;
     }
@@ -56,6 +56,7 @@ export default async function handler(req, res) {
 
     res.status(200).json({ ok: true, id: data?.id || null });
   } catch (err) {
-    res.status(500).json({ error: err?.message || "Error enviando el mail." });
+    console.error("Error enviando el mail:", err);
+    res.status(500).json({ error: "Error interno enviando el mail." });
   }
 }

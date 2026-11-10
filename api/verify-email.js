@@ -35,6 +35,10 @@ export default async function handler(req, res) {
 
   try {
     const { action, name, storeName } = req.body || {};
+    if (typeof name === "string" && name.length > 120) {
+      res.status(400).json({ error: "El nombre es demasiado largo." });
+      return;
+    }
     const email = String((req.body || {}).email || "").trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 200) {
       res.status(400).json({ error: "El mail no es válido." });
@@ -45,7 +49,7 @@ export default async function handler(req, res) {
       const code = String(crypto.randomInt(0, 1000000)).padStart(6, "0");
       const exp = Date.now() + TTL_MS;
       const token = `${exp}.${sign(email, code, exp)}`;
-      const store = esc(storeName || "Kulto");
+      const store = esc(String(storeName || "Kulto").slice(0, 80));
       const html = `
         <div style="background:#15131a;color:#f3efe6;font-family:Arial,sans-serif;padding:24px;">
           <div style="max-width:480px;margin:0 auto;background:#1e1b25;border-radius:16px;padding:28px;">
@@ -75,7 +79,7 @@ export default async function handler(req, res) {
       const { code, token } = req.body || {};
       const [expStr, sig] = String(token || "").split(".");
       const exp = Number(expStr);
-      if (!exp || !sig || !/^\d{6}$/.test(String(code || "").trim())) {
+      if (!Number.isSafeInteger(exp) || exp > Date.now() + TTL_MS || !/^[a-f0-9]{64}$/.test(sig || "") || !/^\d{6}$/.test(String(code || "").trim())) {
         res.status(400).json({ ok: false, error: "Código inválido." });
         return;
       }
@@ -93,6 +97,7 @@ export default async function handler(req, res) {
 
     res.status(400).json({ error: "Acción no válida." });
   } catch (err) {
-    res.status(500).json({ error: err?.message || "Error verificando el mail." });
+    console.error("Error verificando el mail:", err);
+    res.status(500).json({ error: "Error interno verificando el mail." });
   }
 }

@@ -29,15 +29,25 @@ export default async function handler(req, res) {
       return;
     }
 
-    const match = image.match(/^data:(image\/[a-zA-Z+]+);base64,(.+)$/);
+    const match = image.match(/^data:(image\/(?:jpeg|png|webp|gif));base64,([A-Za-z0-9+/]+={0,2})$/);
     if (!match) {
       res.status(400).json({ error: "La imagen no tiene un formato válido." });
       return;
     }
+    if (image.length > 12_000_000) {
+      res.status(413).json({ error: "La imagen es demasiado grande." });
+      return;
+    }
     const mediaType = match[1];
+    if (match[2].length % 4 !== 0) {
+      res.status(400).json({ error: "La imagen base64 no es válida." });
+      return;
+    }
     const base64Data = match[2];
 
-    const categoryList = Array.isArray(categories) ? categories : [];
+    const categoryList = Array.isArray(categories)
+      ? categories.filter((c) => typeof c === "string").slice(0, 40).map((c) => c.slice(0, 80))
+      : [];
     const prompt =
       "Estás ayudando a cargar un producto en Kulto, una tienda online de ropa y accesorios estampados/sublimados. " +
       "Mirá la foto y respondé ÚNICAMENTE un objeto JSON (sin texto adicional, sin backticks, sin markdown) con esta forma exacta:\n" +
