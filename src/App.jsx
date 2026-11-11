@@ -19950,16 +19950,6 @@ export default function App() {
         html: emailShell(settings?.logoText || "Kulto", `<p style="margin:0 0 8px;">${record.name || record.email} se registró y dice que sigue la cuenta en Instagram como <strong>@${igHandle}</strong>.</p><p style="margin:0;color:#a9a2b0;font-size:13px;">Entrá al panel → Clientes y tocá «Confirmar que nos sigue» (o «No me sigue») para darle su descuento.</p>`),
       }).catch(() => { /* el aviso es un extra */ });
     }
-    // La cuenta de administrador (ADMIN_EMAIL) entra directo, sin confirmar
-    // mail — así el dueño de la tienda nunca queda afuera de su propio panel
-    // por no tener todavía el envío de mails configurado.
-    if (norm === normalizeEmail(ADMIN_EMAIL)) {
-      const adminRecord = { ...record, emailVerified: true };
-      await persistCustomer(adminRecord);
-      await storageSet("kulto:customer-session", norm, false);
-      setCustomer(adminRecord);
-      return { ok: true };
-    }
     const { emailSent, emailError } = await issueAndSendVerification(record);
     return {
       ok: true,
