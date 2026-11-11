@@ -48,3 +48,14 @@ test("email templates escape contact, customer, and product fields", () => {
     "escapeEmailHtml(formatAddress(order.address))",
   ]) assert.ok(emails.includes(expression), expression);
 });
+
+test("bulk order deletion has explicit confirmation, not a hardcoded admin PIN", () => {
+  const app = readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8");
+  assert.doesNotMatch(app, /ADMIN_PASSWORD/);
+  const start = app.indexOf("function AdminOrders(");
+  const end = app.indexOf("\nfunction ", start + 1);
+  assert.ok(start >= 0 && end > start);
+  const section = app.slice(start, end);
+  assert.match(section, /BORRAR \$\{selectedInView\.length\}/);
+  assert.match(section, /confirmación irreversible/);
+});
