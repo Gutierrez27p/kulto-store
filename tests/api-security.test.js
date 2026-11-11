@@ -336,3 +336,23 @@ test("outbound provider requests have a finite timeout", async () => {
     else process.env.GEMINI_API_KEY = oldGemini;
   }
 });
+
+test("AI analyzer rejects oversized payloads before contacting provider", async () => {
+  const oldKey = process.env.GEMINI_API_KEY;
+  const oldFetch = globalThis.fetch;
+  process.env.GEMINI_API_KEY = "test-only";
+  globalThis.fetch = () => { throw Error("Must not contact provider"); };
+  try {
+    const res = response();
+    await analyzeHandler({ method: "POST", body: {
+      image: "data:image/png;base64," + "A".repeat(12_000_000),
+      categories: [],
+    } }, res);
+    assert.equal(res.statusCode, 413);
+    assert.match(res.body.error, /demasiado grande/);
+  } finally {
+    globalThis.fetch = oldFetch;
+    if (oldKey === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = oldKey;
+  }
+});

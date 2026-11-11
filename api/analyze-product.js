@@ -30,13 +30,14 @@ export default async function handler(req, res) {
       return;
     }
 
+    // Reject oversized payloads before applying a regular expression to base64 data.
+    if (image.length > 12_000_000) {
+      res.status(413).json({ error: "La imagen es demasiado grande." });
+      return;
+    }
     const match = image.match(/^data:(image\/(?:jpeg|png|webp|gif));base64,([A-Za-z0-9+/]+={0,2})$/);
     if (!match) {
       res.status(400).json({ error: "La imagen no tiene un formato válido." });
-      return;
-    }
-    if (image.length > 12_000_000) {
-      res.status(413).json({ error: "La imagen es demasiado grande." });
       return;
     }
     const mediaType = match[1];
