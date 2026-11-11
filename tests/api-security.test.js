@@ -144,3 +144,23 @@ test("email endpoints explicitly prevent caching sensitive responses", async () 
     assert.equal(res.headers["cache-control"], "no-store, max-age=0");
   }
 });
+
+test("send-email rejects CRLF injection in subject without contacting provider", async () => {
+  const oldKey = process.env.RESEND_API_KEY;
+  const oldFetch = globalThis.fetch;
+  process.env.RESEND_API_KEY = "test-only";
+  globalThis.fetch = () => { throw Error("Must not send"); };
+  try {
+    const res = response();
+    await emailHandler({ method: "POST", body: {
+      to: "client@example.com",
+      subject: "Compra" + String.fromCharCode(13, 10) + "Bcc: attacker@example.com",
+      html: "<p>Pedido</p>",
+    } }, res);
+    assert.equal(res.statusCode, 400);
+  } finally {
+    globalThis.fetch = oldFetch;
+    if (oldKey === undefined) delete process.env.RESEND_API_KEY;
+    else process.env.RESEND_API_KEY = oldKey;
+  }
+});

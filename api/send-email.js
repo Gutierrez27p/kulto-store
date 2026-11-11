@@ -32,7 +32,7 @@ export default async function handler(req, res) {
       res.status(400).json({ error: "Falta el destinatario del mail." });
       return;
     }
-    if (typeof subject !== "string" || !subject.trim() || subject.length > 200 || typeof html !== "string" || !html.trim() || html.length > 100000) {
+    if (typeof subject !== "string" || !subject.trim() || subject.length > 200 || /[\x00-\x1f\x7f]/.test(subject) || typeof html !== "string" || !html.trim() || html.length > 100000) {
       res.status(400).json({ error: "Falta el asunto o el contenido del mail." });
       return;
     }
