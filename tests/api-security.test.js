@@ -231,3 +231,36 @@ test("analyze-product hides provider errors and keeps rate limit messaging", asy
     else process.env.ANTHROPIC_API_KEY = oldAnthropic;
   }
 });
+
+test("AI-generated product fields are trimmed and length-limited", async () => {
+  const oldGemini = process.env.GEMINI_API_KEY;
+  const oldAnthropic = process.env.ANTHROPIC_API_KEY;
+  const oldFetch = globalThis.fetch;
+  process.env.GEMINI_API_KEY = "test-only";
+  delete process.env.ANTHROPIC_API_KEY;
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify({
+      name: " " + "N".repeat(250),
+      category: " " + "C".repeat(150),
+      description: " " + "D".repeat(1200),
+    }) }] } }] }),
+  });
+  try {
+    const res = response();
+    await analyzeHandler({ method: "POST", body: {
+      image: "data:image/png;base64,aGVsbG8=", categories: [],
+    } }, res);
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.name.length, 120);
+    assert.equal(res.body.category.length, 80);
+    assert.equal(res.body.description.length, 600);
+    assert.equal(res.body.name.startsWith(" "), false);
+  } finally {
+    globalThis.fetch = oldFetch;
+    if (oldGemini === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = oldGemini;
+    if (oldAnthropic === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = oldAnthropic;
+  }
+});
