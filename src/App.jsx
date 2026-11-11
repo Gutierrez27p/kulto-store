@@ -19947,7 +19947,7 @@ export default function App() {
       sendEmail({
         to: ADMIN_EMAIL,
         subject: `Instagram para verificar: @${igHandle}`,
-        html: emailShell(settings?.logoText || "Kulto", `<p style="margin:0 0 8px;">${record.name || record.email} se registró y dice que sigue la cuenta en Instagram como <strong>@${igHandle}</strong>.</p><p style="margin:0;color:#a9a2b0;font-size:13px;">Entrá al panel → Clientes y tocá «Confirmar que nos sigue» (o «No me sigue») para darle su descuento.</p>`),
+        html: emailShell(settings?.logoText || "Kulto", `<p style="margin:0 0 8px;">${escapeEmailHtml(record.name || record.email)} se registró y dice que sigue la cuenta en Instagram como <strong>@${escapeEmailHtml(igHandle)}</strong>.</p><p style="margin:0;color:#a9a2b0;font-size:13px;">Entrá al panel → Clientes y tocá «Confirmar que nos sigue» (o «No me sigue») para darle su descuento.</p>`),
       }).catch(() => { /* el aviso es un extra */ });
     }
     const { emailSent, emailError } = await issueAndSendVerification(record);
@@ -20076,7 +20076,7 @@ export default function App() {
     sendEmail({
       to: ADMIN_EMAIL,
       subject: `Instagram para verificar: @${handle}`,
-      html: emailShell(settings?.logoText || "Kulto", `<p style="margin:0 0 8px;">${updated.name || updated.email} dice que sigue la cuenta en Instagram como <strong>@${handle}</strong>.</p><p style="margin:0;color:#a9a2b0;font-size:13px;">Entrá al panel → Clientes y tocá «Confirmar que nos sigue» (o «No me sigue») para darle su descuento.</p>`),
+      html: emailShell(settings?.logoText || "Kulto", `<p style="margin:0 0 8px;">${escapeEmailHtml(updated.name || updated.email)} dice que sigue la cuenta en Instagram como <strong>@${escapeEmailHtml(handle)}</strong>.</p><p style="margin:0;color:#a9a2b0;font-size:13px;">Entrá al panel → Clientes y tocá «Confirmar que nos sigue» (o «No me sigue») para darle su descuento.</p>`),
     }).catch(() => { /* el aviso es un extra */ });
     return { ok: true };
   };
