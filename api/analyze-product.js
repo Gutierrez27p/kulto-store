@@ -69,9 +69,9 @@ export default async function handler(req, res) {
         return;
       }
       res.status(200).json({
-        name: typeof parsed.name === "string" ? parsed.name : "",
-        category: typeof parsed.category === "string" ? parsed.category : "",
-        description: typeof parsed.description === "string" ? parsed.description : "",
+        name: typeof parsed.name === "string" ? parsed.name.trim().slice(0, 120) : "",
+        category: typeof parsed.category === "string" ? parsed.category.trim().slice(0, 80) : "",
+        description: typeof parsed.description === "string" ? parsed.description.trim().slice(0, 600) : "",
       });
     };
 
