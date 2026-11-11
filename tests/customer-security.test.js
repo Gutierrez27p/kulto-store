@@ -57,5 +57,5 @@ test("bulk order deletion has explicit confirmation, not a hardcoded admin PIN",
   assert.ok(start >= 0 && end > start);
   const section = app.slice(start, end);
   assert.match(section, /BORRAR \$\{selectedInView\.length\}/);
-  assert.match(section, /confirmación irreversible/);
+  assert.match(section, /eliminación irreversible/);
 });
