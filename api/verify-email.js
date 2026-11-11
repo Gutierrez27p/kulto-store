@@ -70,7 +70,8 @@ export default async function handler(req, res) {
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        res.status(response.status).json({ error: data?.message || "No se pudo enviar el mail." });
+        console.error("Resend rechazó verificación:", response.status);
+        res.status(502).json({ error: "No se pudo enviar el mail." });
         return;
       }
       res.status(200).json({ ok: true, token });
