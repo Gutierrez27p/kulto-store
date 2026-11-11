@@ -122,11 +122,12 @@ test("verify-email strips control characters from the store name in outgoing sub
   try {
     const res = response();
     await verifyHandler({ method: "POST", body: {
-      action: "send", email: "client@example.com", storeName: "Kulto\\r\\nBcc: attacker@example.com",
+      action: "send", email: "client@example.com", storeName: "Kulto" + String.fromCharCode(13, 10) + "Bcc: attacker@example.com",
     } }, res);
     assert.equal(res.statusCode, 200);
     assert.ok(outgoing);
-    assert.doesNotMatch(outgoing.subject, /[\\r\\n]/);
+    assert.equal(outgoing.subject.includes(String.fromCharCode(13)), false);
+    assert.equal(outgoing.subject.includes(String.fromCharCode(10)), false);
     assert.match(outgoing.html, /Bcc: attacker@example.com/);
   } finally {
     globalThis.fetch = oldFetch;
