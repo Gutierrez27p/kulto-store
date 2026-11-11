@@ -192,3 +192,42 @@ test("email APIs never expose provider error details to clients", async () => {
     else process.env.RESEND_API_KEY = oldKey;
   }
 });
+
+test("analyze-product response disables caching", async () => {
+  const res = response();
+  await analyzeHandler({ method: "GET" }, res);
+  assert.equal(res.headers["cache-control"], "no-store, max-age=0");
+});
+
+test("analyze-product hides provider errors and keeps rate limit messaging", async () => {
+  const oldGemini = process.env.GEMINI_API_KEY;
+  const oldAnthropic = process.env.ANTHROPIC_API_KEY;
+  const oldFetch = globalThis.fetch;
+  const oldError = console.error;
+  process.env.GEMINI_API_KEY = "test-only";
+  delete process.env.ANTHROPIC_API_KEY;
+  console.error = () => {};
+  try {
+    for (const status of [403, 429]) {
+      globalThis.fetch = async () => ({
+        ok: false, status,
+        json: async () => ({ error: { message: "provider secret diagnostic" } }),
+      });
+      const res = response();
+      await analyzeHandler({ method: "POST", body: {
+        image: "data:image/png;base64,aGVsbG8=",
+        categories: [],
+      } }, res);
+      assert.equal(res.statusCode, 502);
+      assert.equal(JSON.stringify(res.body).includes("provider secret diagnostic"), false);
+      if (status === 429) assert.match(res.body.error, /límite gratuito/);
+    }
+  } finally {
+    globalThis.fetch = oldFetch;
+    console.error = oldError;
+    if (oldGemini === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = oldGemini;
+    if (oldAnthropic === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = oldAnthropic;
+  }
+});
