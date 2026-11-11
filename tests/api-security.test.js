@@ -109,3 +109,28 @@ test("verify-email rejects malformed signature without contacting provider", asy
     else process.env.RESEND_API_KEY = oldKey;
   }
 });
+
+test("verify-email strips control characters from the store name in outgoing subject", async () => {
+  const oldKey = process.env.RESEND_API_KEY;
+  const oldFetch = globalThis.fetch;
+  process.env.RESEND_API_KEY = "test-only";
+  let outgoing;
+  globalThis.fetch = async (_url, opts) => {
+    outgoing = JSON.parse(opts.body);
+    return { ok: true, json: async () => ({ id: "test" }) };
+  };
+  try {
+    const res = response();
+    await verifyHandler({ method: "POST", body: {
+      action: "send", email: "client@example.com", storeName: "Kulto\\r\\nBcc: attacker@example.com",
+    } }, res);
+    assert.equal(res.statusCode, 200);
+    assert.ok(outgoing);
+    assert.doesNotMatch(outgoing.subject, /[\\r\\n]/);
+    assert.match(outgoing.html, /Bcc: attacker@example.com/);
+  } finally {
+    globalThis.fetch = oldFetch;
+    if (oldKey === undefined) delete process.env.RESEND_API_KEY;
+    else process.env.RESEND_API_KEY = oldKey;
+  }
+});
