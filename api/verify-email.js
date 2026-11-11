@@ -49,8 +49,8 @@ export default async function handler(req, res) {
       const code = String(crypto.randomInt(0, 1000000)).padStart(6, "0");
       const exp = Date.now() + TTL_MS;
       const token = `${exp}.${sign(email, code, exp)}`;
-      const storeLabel = String(storeName || "Kulto").replace(/[\r
-\t]/g, " ").slice(0, 80);\n      const store = esc(storeLabel);
+      const storeLabel = String(storeName || "Kulto").replace(/[\x00-\x1f\x7f]/g, " ").slice(0, 80);
+      const store = esc(storeLabel);
       const html = `
         <div style="background:#15131a;color:#f3efe6;font-family:Arial,sans-serif;padding:24px;">
           <div style="max-width:480px;margin:0 auto;background:#1e1b25;border-radius:16px;padding:28px;">
