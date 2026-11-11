@@ -1,5 +1,5 @@
 import { escapeEmailHtml, secureSixDigitCode } from "./email-safety.js";
-import { saveOrderWithIndex } from "./order-persistence.js";
+import { saveOrderWithIndex, generateOrderId } from "./order-persistence.js";
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import {
   ShoppingBag, X, Menu, Plus, Minus, Trash2, Pencil, ChevronRight, ChevronLeft, ChevronDown,
@@ -8565,7 +8565,7 @@ function OrderLookupPage({ initialOrderId = "", settings }) {
     <div className="max-w-lg mx-auto px-4 md:px-6 py-14">
       <SectionTitle eyebrow="¿Dónde está tu pedido?" title="Seguir mi pedido" />
       <p className="text-sm mb-4" style={{ color: "var(--slate)" }}>
-        Escribí el número de orden que te dimos por WhatsApp al confirmar la compra (por ejemplo, KULTO-260914-AB12).
+        Escribí el número de orden que te dimos por WhatsApp al confirmar la compra (por ejemplo, KULTO-261111-A1B2C3D4E5F6).
       </p>
       <div className="flex gap-2 mb-6">
         <input
@@ -19499,9 +19499,12 @@ export default function App() {
     if (cart.length === 0) return;
     // Nunca se registra un pedido con un mail sin confirmar (ver CartDrawer).
     if (!isCheckoutEmailVerified(customerEmail, customer)) return;
+    let orderId;
+    try { orderId = generateOrderId(); }
+    catch { window.alert("No pudimos crear una referencia segura para tu pedido. Probá desde un navegador actualizado."); return; }
     setSending(true);
     const order = {
-      id: `KULTO-${new Date().toISOString().slice(2, 10).replace(/-/g, "")}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
+      id: orderId,
       date: new Date().toISOString(),
       items: cart,
       customerName, customerPhone, customerEmail, comment,
