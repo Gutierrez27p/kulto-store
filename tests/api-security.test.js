@@ -6,7 +6,8 @@ import analyzeHandler from "../api/analyze-product.js";
 
 function response() {
   return {
-    statusCode: 200, body: null,
+    statusCode: 200, body: null, headers: {},
+    setHeader(key, value) { this.headers[key.toLowerCase()] = value; return this; },
     status(code) { this.statusCode = code; return this; },
     json(body) { this.body = body; return this; },
   };
@@ -133,5 +134,13 @@ test("verify-email strips control characters from the store name in outgoing sub
     globalThis.fetch = oldFetch;
     if (oldKey === undefined) delete process.env.RESEND_API_KEY;
     else process.env.RESEND_API_KEY = oldKey;
+  }
+});
+
+test("email endpoints explicitly prevent caching sensitive responses", async () => {
+  for (const handler of [emailHandler, verifyHandler]) {
+    const res = response();
+    await handler({ method: "GET" }, res);
+    assert.equal(res.headers["cache-control"], "no-store, max-age=0");
   }
 });

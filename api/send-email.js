@@ -12,6 +12,7 @@
 // RESEND_FROM_EMAIL="Kulto <pedidos@tudominio.com>".
 
 export default async function handler(req, res) {
+  res.setHeader("Cache-Control", "no-store, max-age=0");
   if (req.method !== "POST") {
     res.status(405).json({ error: "Método no permitido." });
     return;
