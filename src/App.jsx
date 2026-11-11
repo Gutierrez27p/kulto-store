@@ -19519,14 +19519,9 @@ export default function App() {
     };
     order.payment = buildOrderPayment(order, settings);
     order.paymentStatus = order.payment ? "pendiente" : "no_aplica";
-    // El pedido ya NO depende de que WhatsApp se abra bien en el celular del
-    // cliente (en varios navegadores, sobre todo Safari de iPhone, el popup
-    // se bloqueaba y el pedido se podía perder sin que nadie se enterara).
-    // Ahora el camino garantizado es: se guarda en el panel (Pedidos, vía
-    // persistOrder) y se le avisa al dueño por mail — eso pasa siempre, sin
-    // depender del navegador ni del celular de nadie. WhatsApp queda como una
-    // opción más para el cliente (ver botón en la pantalla de confirmación),
-    // nunca como un paso obligatorio para que el pedido quede registrado.
+    // Intentamos guardar el pedido y su índice en Supabase. Si falla, el correo
+    // al dueño es el respaldo; si ambos fallan no se confirma la compra y el
+    // carrito permanece intacto. WhatsApp nunca es obligatorio.
     // No confirmar una compra si fallan tanto el guardado como el aviso al dueño.
     // Reintentos con el MISMO ID: el índice nunca se duplica.
     let orderSaved = false;
