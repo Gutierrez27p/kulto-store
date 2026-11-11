@@ -416,3 +416,32 @@ test("AI providers with malformed response envelopes return controlled errors", 
     else process.env.ANTHROPIC_API_KEY = oldAnthropic;
   }
 });
+
+test("AI analyzer rejects incomplete suggestions rather than returning blank product fields", async () => {
+  const oldGemini = process.env.GEMINI_API_KEY;
+  const oldAnthropic = process.env.ANTHROPIC_API_KEY;
+  const oldFetch = globalThis.fetch;
+  process.env.GEMINI_API_KEY = "test-only";
+  delete process.env.ANTHROPIC_API_KEY;
+  try {
+    for (const suggestion of [{}, { name: "Camiseta" }, { name: "Camiseta", category: "Ropa", description: " " }]) {
+      globalThis.fetch = async () => ({
+        ok: true, json: async () => ({
+          candidates: [{ content: { parts: [{ text: JSON.stringify(suggestion) }] } }],
+        }),
+      });
+      const res = response();
+      await analyzeHandler({ method: "POST", body: {
+        image: "data:image/png;base64,aGVsbG8=", categories: [],
+      } }, res);
+      assert.equal(res.statusCode, 502);
+      assert.match(res.body.error, /incompleta/);
+    }
+  } finally {
+    globalThis.fetch = oldFetch;
+    if (oldGemini === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = oldGemini;
+    if (oldAnthropic === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = oldAnthropic;
+  }
+});

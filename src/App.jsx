@@ -1,3 +1,4 @@
+import { escapeEmailHtml, secureSixDigitCode } from "./email-safety.js";
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import {
   ShoppingBag, X, Menu, Plus, Minus, Trash2, Pencil, ChevronRight, ChevronLeft, ChevronDown,
@@ -68,9 +69,6 @@ const ADMIN_EMAIL = "admin@kulto.com";
 // dirección (código de verificación, recuperar contraseña, etc.) se manda en
 // realidad acá, a la casilla de verdad del dueño. Ver sendEmail() más abajo.
 const ADMIN_NOTIFICATION_EMAIL = "pablo.gutcha@gmail.com";
-// Usada solo como confirmación extra antes de borrar pedidos en el panel de
-// administrador — no tiene relación con el acceso al panel en sí.
-const ADMIN_PASSWORD = "kulto2024";
 // Secciones del panel de administrador que se le pueden dar (o no) a una
 // cuenta de "admin con permisos limitados" — ver AdminCustomers y
 // handleSetAdminPermissions. El dueño (ADMIN_EMAIL) siempre las tiene todas.
@@ -617,7 +615,7 @@ function paymentEmailHtml(order) {
   if (!lines.length) return "";
   return `<div style="margin:16px 0;padding:14px;border:1px solid ${order.payment.immediate ? "#E8452C" : "#2c2833"};border-radius:12px;background:#15131a;">
     <p style="margin:0 0 8px;font-weight:bold;">${order.payment.immediate ? "Pagá ahora para que lo preparemos" : "Seña para empezar a prepararlo"}</p>
-    ${lines.map((l) => `<p style="margin:0 0 4px;font-size:13px;">${l}</p>`).join("")}
+    ${lines.map((l) => `<p style="margin:0 0 4px;font-size:13px;">${escapeEmailHtml(l)}</p>`).join("")}
   </div>`;
 }
 
@@ -690,7 +688,7 @@ function emailShell(storeName, bodyHtml) {
   return `
     <div style="font-family: Arial, Helvetica, sans-serif; background:#15131a; padding:32px 16px;">
       <div style="max-width:520px;margin:0 auto;background:#1f1c26;border-radius:16px;padding:32px;color:#f3efe6;">
-        <p style="margin:0 0 20px;font-size:18px;font-weight:bold;letter-spacing:0.5px;">${storeName}</p>
+        <p style="margin:0 0 20px;font-size:18px;font-weight:bold;letter-spacing:0.5px;">${escapeEmailHtml(storeName)}</p>
         ${bodyHtml}
       </div>
     </div>
@@ -700,9 +698,9 @@ function emailShell(storeName, bodyHtml) {
 function buildVerificationEmailHtml(name, code, settings) {
   const storeName = settings?.logoText || "Kulto";
   return emailShell(storeName, `
-    <p style="margin:0 0 12px;">Hola${name ? " " + name : ""},</p>
+    <p style="margin:0 0 12px;">Hola${name ? " " + escapeEmailHtml(name) : ""},</p>
     <p style="margin:0 0 20px;">Usá este código para confirmar tu cuenta:</p>
-    <p style="font-size:32px;font-weight:bold;letter-spacing:8px;text-align:center;background:#15131a;border-radius:12px;padding:18px;margin:0 0 20px;">${code}</p>
+    <p style="font-size:32px;font-weight:bold;letter-spacing:8px;text-align:center;background:#15131a;border-radius:12px;padding:18px;margin:0 0 20px;">${escapeEmailHtml(code)}</p>
     <p style="margin:0;color:#a9a2b0;font-size:13px;">Vale por 15 minutos. Si no pediste esto, podés ignorar este mail.</p>
   `);
 }
@@ -712,12 +710,12 @@ function buildPasswordResetEmailHtml(name, code, settings, email) {
   let link = null;
   try { link = `${window.location.origin}/?resetEmail=${encodeURIComponent(email)}&resetCode=${encodeURIComponent(code)}`; } catch { /* sin window (no debería pasar, se llama desde el navegador) */ }
   return emailShell(storeName, `
-    <p style="margin:0 0 12px;">Hola${name ? " " + name : ""},</p>
+    <p style="margin:0 0 12px;">Hola${name ? " " + escapeEmailHtml(name) : ""},</p>
     <p style="margin:0 0 20px;">Usá este código para elegir una contraseña nueva:</p>
-    <p style="font-size:32px;font-weight:bold;letter-spacing:8px;text-align:center;background:#15131a;border-radius:12px;padding:18px;margin:0 0 20px;">${code}</p>
+    <p style="font-size:32px;font-weight:bold;letter-spacing:8px;text-align:center;background:#15131a;border-radius:12px;padding:18px;margin:0 0 20px;">${escapeEmailHtml(code)}</p>
     ${link ? `
     <p style="margin:0 0 20px;text-align:center;">
-      <a href="${link}" style="display:inline-block;background:#E8452C;color:#fff;text-decoration:none;padding:12px 24px;border-radius:999px;font-weight:bold;">Elegir contraseña nueva</a>
+      <a href="${escapeEmailHtml(link)}" style="display:inline-block;background:#E8452C;color:#fff;text-decoration:none;padding:12px 24px;border-radius:999px;font-weight:bold;">Elegir contraseña nueva</a>
     </p>
     ` : ""}
     <p style="margin:0;color:#a9a2b0;font-size:13px;">Vale por 15 minutos. Si no pediste esto, podés ignorar este mail — tu contraseña actual sigue funcionando igual.</p>
@@ -731,11 +729,11 @@ function buildContactEmailHtml(data, settings) {
   const storeName = settings?.logoText || "Kulto";
   return emailShell(storeName, `
     <p style="margin:0 0 16px;">Nuevo mensaje de contacto desde la web.</p>
-    <p style="margin:0 0 8px;"><strong>Nombre:</strong> ${data.name}</p>
-    <p style="margin:0 0 8px;"><strong>Email:</strong> ${data.email}</p>
-    <p style="margin:0 0 16px;"><strong>Asunto:</strong> ${data.subject}</p>
+    <p style="margin:0 0 8px;"><strong>Nombre:</strong> ${escapeEmailHtml(data.name)}</p>
+    <p style="margin:0 0 8px;"><strong>Email:</strong> ${escapeEmailHtml(data.email)}</p>
+    <p style="margin:0 0 16px;"><strong>Asunto:</strong> ${escapeEmailHtml(data.subject)}</p>
     <p style="margin:0 0 8px;"><strong>Mensaje:</strong></p>
-    <p style="margin:0;white-space:pre-line;background:#15131a;border-radius:12px;padding:16px;">${data.message}</p>
+    <p style="margin:0;white-space:pre-line;background:#15131a;border-radius:12px;padding:16px;">${escapeEmailHtml(data.message)}</p>
   `);
 }
 
@@ -750,12 +748,12 @@ function buildContactReplyEmailHtml(ticket, replyText, settings) {
     ticket.changeDecision === "rechazado" ? "No pudimos aprobar el cambio o devolución en este caso." :
     "";
   const discountText = ticket.discountPercent
-    ? `Como disculpa por la incidencia, te regalamos un <strong>${ticket.discountPercent}% de descuento</strong> para tu próxima compra. Mencioná este código cuando hagas tu próximo pedido: <strong style="letter-spacing:2px;">${ticket.discountCode}</strong>`
+    ? `Como disculpa por la incidencia, te regalamos un <strong>${escapeEmailHtml(ticket.discountPercent)}% de descuento</strong> para tu próxima compra. Mencioná este código cuando hagas tu próximo pedido: <strong style="letter-spacing:2px;">${escapeEmailHtml(ticket.discountCode)}</strong>`
     : "";
   return emailShell(storeName, `
-    <p style="margin:0 0 12px;">Hola${ticket.name ? " " + ticket.name : ""},</p>
-    <p style="margin:0 0 16px;">Te escribimos por tu consulta ("${ticket.subject}"):</p>
-    <p style="margin:0 0 20px;white-space:pre-line;background:#15131a;border-radius:12px;padding:16px;">${replyText}</p>
+    <p style="margin:0 0 12px;">Hola${ticket.name ? " " + escapeEmailHtml(ticket.name) : ""},</p>
+    <p style="margin:0 0 16px;">Te escribimos por tu consulta ("${escapeEmailHtml(ticket.subject)}"):</p>
+    <p style="margin:0 0 20px;white-space:pre-line;background:#15131a;border-radius:12px;padding:16px;">${escapeEmailHtml(replyText)}</p>
     ${decisionText ? `<p style="margin:0 0 12px;">${decisionText}</p>` : ""}
     ${discountText ? `<p style="margin:0 0 12px;background:#15131a;border-radius:12px;padding:16px;">${discountText}</p>` : ""}
     <p style="margin:0;color:#a9a2b0;font-size:13px;">Si te queda alguna duda, respondé este mail o escribinos por WhatsApp.</p>
@@ -766,7 +764,7 @@ function buildRestockEmailHtml(productName, settings) {
   const storeName = settings?.logoText || "Kulto";
   return emailShell(storeName, `
     <p style="margin:0 0 12px;">¡Buenas noticias!</p>
-    <p style="margin:0 0 20px;">Ya volvió el stock de <strong>${productName}</strong> — pedite el tuyo antes de que se agote de nuevo.</p>
+    <p style="margin:0 0 20px;">Ya volvió el stock de <strong>${escapeEmailHtml(productName)}</strong> — pedite el tuyo antes de que se agote de nuevo.</p>
   `);
 }
 
@@ -778,14 +776,14 @@ function buildReviewRequestEmailHtml(order, settings) {
   let link = null;
   try { link = `${window.location.origin}/?review=${encodeURIComponent(order.id)}`; } catch { /* sin window (no debería pasar, se llama desde el navegador) */ }
   return emailShell(storeName, `
-    <p style="margin:0 0 12px;">¡Hola${order.customerName ? " " + order.customerName : ""}!</p>
-    <p style="margin:0 0 20px;">Esperamos que estés disfrutando tu pedido <strong>${order.id}</strong>. Si tenés un minuto, nos encantaría que nos cuentes cómo te fue — ayuda un montón a otros clientes a elegir.</p>
+    <p style="margin:0 0 12px;">¡Hola${order.customerName ? " " + escapeEmailHtml(order.customerName) : ""}!</p>
+    <p style="margin:0 0 20px;">Esperamos que estés disfrutando tu pedido <strong>${escapeEmailHtml(order.id)}</strong>. Si tenés un minuto, nos encantaría que nos cuentes cómo te fue — ayuda un montón a otros clientes a elegir.</p>
     ${link ? `
     <p style="margin:0 0 20px;text-align:center;">
-      <a href="${link}" style="display:inline-block;background:#E8452C;color:#fff;text-decoration:none;padding:12px 24px;border-radius:999px;font-weight:bold;">Dejar mi reseña</a>
+      <a href="${escapeEmailHtml(link)}" style="display:inline-block;background:#E8452C;color:#fff;text-decoration:none;padding:12px 24px;border-radius:999px;font-weight:bold;">Dejar mi reseña</a>
     </p>
     ` : ""}
-    <p style="margin:0;color:#a9a2b0;font-size:13px;">Si el botón no funciona, entrá a la web y buscá tu pedido con el número ${order.id} en "Mi pedido".</p>
+    <p style="margin:0;color:#a9a2b0;font-size:13px;">Si el botón no funciona, entrá a la web y buscá tu pedido con el número ${escapeEmailHtml(order.id)} en "Mi pedido".</p>
   `);
 }
 
@@ -797,13 +795,13 @@ function buildOrderEmailHtml(order, settings) {
   const itemsHtml = order.items.map((it) => `
     <tr>
       <td style="padding:8px 0;border-bottom:1px solid #2c2833;">
-        <p style="margin:0 0 4px;font-weight:bold;">${it.name} ${it.qty > 1 ? `× ${it.qty}` : ""}</p>
+        <p style="margin:0 0 4px;font-weight:bold;">${escapeEmailHtml(it.name)} ${it.qty > 1 ? `× ${escapeEmailHtml(it.qty)}` : ""}</p>
         <table style="font-size:13px;color:#a9a2b0;border-collapse:collapse;">
-          <tr><td style="padding:1px 6px 1px 0;">Ítem:</td><td>${it.category || "—"}</td></tr>
-          ${it.subcategory ? `<tr><td style="padding:1px 6px 1px 0;">Modelo:</td><td>${it.subcategory}</td></tr>` : ""}
-          ${it.size ? `<tr><td style="padding:1px 6px 1px 0;">Talla:</td><td>${it.size}</td></tr>` : ""}
-          <tr><td style="padding:1px 6px 1px 0;">Color:</td><td>${it.colorName || "—"}</td></tr>
-          ${it.designName ? `<tr><td style="padding:1px 6px 1px 0;vertical-align:top;">Diseño:</td><td>${it.designName}</td></tr>` : ""}
+          <tr><td style="padding:1px 6px 1px 0;">Ítem:</td><td>${escapeEmailHtml(it.category || "—")}</td></tr>
+          ${it.subcategory ? `<tr><td style="padding:1px 6px 1px 0;">Modelo:</td><td>${escapeEmailHtml(it.subcategory)}</td></tr>` : ""}
+          ${it.size ? `<tr><td style="padding:1px 6px 1px 0;">Talla:</td><td>${escapeEmailHtml(it.size)}</td></tr>` : ""}
+          <tr><td style="padding:1px 6px 1px 0;">Color:</td><td>${escapeEmailHtml(it.colorName || "—")}</td></tr>
+          ${it.designName ? `<tr><td style="padding:1px 6px 1px 0;vertical-align:top;">Diseño:</td><td>${escapeEmailHtml(it.designName)}</td></tr>` : ""}
         </table>
       </td>
       <td style="padding:8px 0;border-bottom:1px solid #2c2833;text-align:right;white-space:nowrap;">${formatPrice(it.unitPrice * it.qty)}</td>
@@ -811,19 +809,19 @@ function buildOrderEmailHtml(order, settings) {
   `).join("");
 
   const deliveryHtml = order.deliveryMethod === "envio"
-    ? `<p style="margin:0 0 4px;">Envío a domicilio: ${order.shippingCost > 0 ? formatPrice(order.shippingCost) : "Gratis"}</p><p style="margin:0 0 16px;color:#a9a2b0;font-size:13px;">${formatAddress(order.address)}</p>`
+    ? `<p style="margin:0 0 4px;">Envío a domicilio: ${order.shippingCost > 0 ? formatPrice(order.shippingCost) : "Gratis"}</p><p style="margin:0 0 16px;color:#a9a2b0;font-size:13px;">${escapeEmailHtml(formatAddress(order.address))}</p>`
     : `<p style="margin:0 0 16px;">Retiro en persona (sin costo de envío)</p>`;
 
   return emailShell(storeName, `
-    <p style="margin:0 0 4px;">¡Gracias por tu compra${order.customerName ? ", " + order.customerName : ""}!</p>
-    <p style="margin:0 0 20px;color:#a9a2b0;font-size:13px;">Pedido N° ${order.id} · ${formatDate(order.date)}</p>
+    <p style="margin:0 0 4px;">¡Gracias por tu compra${order.customerName ? ", " + escapeEmailHtml(order.customerName) : ""}!</p>
+    <p style="margin:0 0 20px;color:#a9a2b0;font-size:13px;">Pedido N° ${escapeEmailHtml(order.id)} · ${formatDate(order.date)}</p>
     <table style="width:100%;border-collapse:collapse;margin-bottom:16px;">${itemsHtml}</table>
     ${deliveryHtml}
     ${order.discountAmount > 0 ? `<p style="margin:0 0 4px;">Descuento: -${formatPrice(order.discountAmount)}</p>` : ""}
-    ${order.promoCode ? `<p style="margin:0 0 4px;">${promoOrderSummary(order)}</p>` : ""}
+    ${order.promoCode ? `<p style="margin:0 0 4px;">${escapeEmailHtml(promoOrderSummary(order))}</p>` : ""}
     <p style="margin:0 0 4px;font-size:18px;font-weight:bold;">Total: ${formatPrice(order.total)}</p>
     ${paymentEmailHtml(order)}
-    <p style="margin:20px 0 0;color:#a9a2b0;font-size:13px;">Gracias por su compra. Su pedido se está procesando.${order.payment ? "" : " Nos pondremos en contacto con usted para coordinar el pago por Bizum o transferencia."}${isLocalOrder(order, settings) ? ` Podrá seguir cada etapa de su pedido en \"Mi pedido\" de nuestra web con su número de orden (${order.id}).` : ""} Cualquier duda, responda este mismo mail o escríbanos por WhatsApp.</p>
+    <p style="margin:20px 0 0;color:#a9a2b0;font-size:13px;">Gracias por su compra. Su pedido se está procesando.${order.payment ? "" : " Nos pondremos en contacto con usted para coordinar el pago por Bizum o transferencia."}${isLocalOrder(order, settings) ? ` Podrá seguir cada etapa de su pedido en \"Mi pedido\" de nuestra web con su número de orden (${escapeEmailHtml(order.id)}).` : ""} Cualquier duda, responda este mismo mail o escríbanos por WhatsApp.</p>
   `);
 }
 
@@ -843,15 +841,15 @@ function buildAdminOrderEmailHtml(order, settings) {
   const itemsHtml = order.items.map((it) => `
     <tr>
       <td style="padding:8px 0;border-bottom:1px solid #2c2833;">
-        <p style="margin:0 0 4px;font-weight:bold;">${it.name} ${it.qty > 1 ? `× ${it.qty}` : ""}</p>
+        <p style="margin:0 0 4px;font-weight:bold;">${escapeEmailHtml(it.name)} ${it.qty > 1 ? `× ${escapeEmailHtml(it.qty)}` : ""}</p>
         <table style="font-size:13px;color:#a9a2b0;border-collapse:collapse;">
-          <tr><td style="padding:1px 6px 1px 0;">Ítem:</td><td>${it.category || "—"}</td></tr>
-          ${it.subcategory ? `<tr><td style="padding:1px 6px 1px 0;">Modelo:</td><td>${it.subcategory}</td></tr>` : ""}
-          ${it.size ? `<tr><td style="padding:1px 6px 1px 0;">Talla:</td><td>${it.size}</td></tr>` : ""}
-          <tr><td style="padding:1px 6px 1px 0;">Color:</td><td>${it.colorName || "—"}</td></tr>
-          ${it.designName ? `<tr><td style="padding:1px 6px 1px 0;vertical-align:top;">Diseño:</td><td>${it.designName}</td></tr>` : ""}
+          <tr><td style="padding:1px 6px 1px 0;">Ítem:</td><td>${escapeEmailHtml(it.category || "—")}</td></tr>
+          ${it.subcategory ? `<tr><td style="padding:1px 6px 1px 0;">Modelo:</td><td>${escapeEmailHtml(it.subcategory)}</td></tr>` : ""}
+          ${it.size ? `<tr><td style="padding:1px 6px 1px 0;">Talla:</td><td>${escapeEmailHtml(it.size)}</td></tr>` : ""}
+          <tr><td style="padding:1px 6px 1px 0;">Color:</td><td>${escapeEmailHtml(it.colorName || "—")}</td></tr>
+          ${it.designName ? `<tr><td style="padding:1px 6px 1px 0;vertical-align:top;">Diseño:</td><td>${escapeEmailHtml(it.designName)}</td></tr>` : ""}
         </table>
-        <p style="margin:4px 0 0;font-size:11px;color:#6f6878;">ref. ${it.sku}</p>
+        <p style="margin:4px 0 0;font-size:11px;color:#6f6878;">ref. ${escapeEmailHtml(it.sku)}</p>
         ${(it.designImage || it.previewImageFront || it.previewImageBack || it.previewImageSleeveLeft || it.previewImageSleeveRight) ? `<p style="margin:2px 0 0;font-size:12px;color:#E8452C;">(tiene imagen de diseño o vista previa — se ve en el panel, pestaña Pedidos)</p>` : ""}
       </td>
       <td style="padding:8px 0;border-bottom:1px solid #2c2833;text-align:right;white-space:nowrap;">${formatPrice(it.unitPrice * it.qty)}</td>
@@ -859,27 +857,27 @@ function buildAdminOrderEmailHtml(order, settings) {
   `).join("");
 
   const deliveryHtml = order.deliveryMethod === "envio"
-    ? `<p style="margin:0 0 4px;">Envío a domicilio: ${order.shippingCost > 0 ? formatPrice(order.shippingCost) : "Gratis"}</p><p style="margin:0 0 16px;color:#a9a2b0;font-size:13px;">${formatAddress(order.address)}</p>`
+    ? `<p style="margin:0 0 4px;">Envío a domicilio: ${order.shippingCost > 0 ? formatPrice(order.shippingCost) : "Gratis"}</p><p style="margin:0 0 16px;color:#a9a2b0;font-size:13px;">${escapeEmailHtml(formatAddress(order.address))}</p>`
     : `<p style="margin:0 0 16px;">Retiro en persona (sin costo de envío)</p>`;
 
   const hasCustom = order.items.some((it) => it.designName?.startsWith("Personalizado"));
   const depositHtml = hasCustom && settings?.depositEnabled && !order.payment
-    ? `<p style="margin:0 0 12px;color:#a9a2b0;font-size:13px;">Lleva seña del ${settings.depositPercent}% (${formatPrice(order.subtotal * ((settings.depositPercent || 0) / 100))}) por ${settings.depositInfo || "el medio que corresponda"}.</p>`
+    ? `<p style="margin:0 0 12px;color:#a9a2b0;font-size:13px;">Lleva seña del ${settings.depositPercent}% (${formatPrice(order.subtotal * ((settings.depositPercent || 0) / 100))}) por ${escapeEmailHtml(settings.depositInfo || "el medio que corresponda")}.</p>`
     : "";
 
   return emailShell(storeName, `
     <p style="margin:0 0 4px;font-weight:bold;">Pedido nuevo</p>
-    <p style="margin:0 0 20px;color:#a9a2b0;font-size:13px;">Pedido N° ${order.id} · ${formatDate(order.date)}</p>
-    <p style="margin:0 0 4px;"><strong>Cliente:</strong> ${order.customerName || "(sin nombre)"}</p>
-    ${order.customerPhone ? `<p style="margin:0 0 4px;"><strong>Teléfono:</strong> ${order.customerPhone}</p>` : ""}
-    ${order.customerEmail ? `<p style="margin:0 0 16px;"><strong>Email:</strong> ${order.customerEmail}</p>` : ""}
+    <p style="margin:0 0 20px;color:#a9a2b0;font-size:13px;">Pedido N° ${escapeEmailHtml(order.id)} · ${formatDate(order.date)}</p>
+    <p style="margin:0 0 4px;"><strong>Cliente:</strong> ${escapeEmailHtml(order.customerName || "(sin nombre)")}</p>
+    ${order.customerPhone ? `<p style="margin:0 0 4px;"><strong>Teléfono:</strong> ${escapeEmailHtml(order.customerPhone)}</p>` : ""}
+    ${order.customerEmail ? `<p style="margin:0 0 16px;"><strong>Email:</strong> ${escapeEmailHtml(order.customerEmail)}</p>` : ""}
     <table style="width:100%;border-collapse:collapse;margin-bottom:16px;">${itemsHtml}</table>
     ${deliveryHtml}
     ${order.discountAmount > 0 ? `<p style="margin:0 0 4px;">Descuento: -${formatPrice(order.discountAmount)}</p>` : ""}
-    ${order.promoCode ? `<p style="margin:0 0 4px;">${promoOrderSummary(order)}</p>` : ""}
+    ${order.promoCode ? `<p style="margin:0 0 4px;">${escapeEmailHtml(promoOrderSummary(order))}</p>` : ""}
     <p style="margin:0 0 4px;font-size:18px;font-weight:bold;">Total: ${formatPrice(order.total)}</p>
-    ${order.comment ? `<p style="margin:16px 0 4px;"><strong>Comentario del cliente:</strong></p><p style="margin:0 0 12px;white-space:pre-line;background:#15131a;border-radius:12px;padding:12px;">${order.comment}</p>` : ""}
-    ${order.payment ? paymentEmailHtml(order) + `<p style="margin:0 0 12px;font-size:13px;">Estado del pago: pendiente — cuando llegue, buscá el código ${order.id} en el concepto y marcalo en el panel.</p>` : ""}
+    ${order.comment ? `<p style="margin:16px 0 4px;"><strong>Comentario del cliente:</strong></p><p style="margin:0 0 12px;white-space:pre-line;background:#15131a;border-radius:12px;padding:12px;">${escapeEmailHtml(order.comment)}</p>` : ""}
+    ${order.payment ? paymentEmailHtml(order) + `<p style="margin:0 0 12px;font-size:13px;">Estado del pago: pendiente — cuando llegue, buscá el código ${escapeEmailHtml(order.id)} en el concepto y marcalo en el panel.</p>` : ""}
     ${depositHtml}
     <p style="margin:20px 0 0;color:#a9a2b0;font-size:13px;">También lo vas a ver en el panel, pestaña "Pedidos".</p>
   `);
@@ -12008,8 +12006,8 @@ function AdminOrders({ orders, settings, onSetPaymentStatus, onSetLocalStatus, o
   const [selected, setSelected] = useState([]);
   const [showArchived, setShowArchived] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [password, setPassword] = useState("");
-  const [passwordError, setPasswordError] = useState(false);
+  const [confirmationText, setConfirmationText] = useState("");
+  const [confirmationError, setConfirmationError] = useState(false);
   const [discountDrafts, setDiscountDrafts] = useState({});
   const [discountSavedId, setDiscountSavedId] = useState(null);
   const [reviewRequestState, setReviewRequestState] = useState({}); // { [orderId]: "sending" | "ok" | "error" }
@@ -12060,10 +12058,10 @@ function AdminOrders({ orders, settings, onSetPaymentStatus, onSetLocalStatus, o
   };
 
   const toggleSelect = (id) => setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
-  const clearSelection = () => { setSelected([]); setConfirmingDelete(false); setPassword(""); setPasswordError(false); };
+  const clearSelection = () => { setSelected([]); setConfirmingDelete(false); setConfirmationText(""); setConfirmationError(false); };
 
   const confirmDelete = () => {
-    if (password !== ADMIN_PASSWORD) { setPasswordError(true); return; }
+    if (confirmationText.trim().toUpperCase() !== `BORRAR ${selectedInView.length}`) { setConfirmationError(true); return; }
     onBulkDelete(selectedInView);
     clearSelection();
   };
@@ -12107,20 +12105,21 @@ function AdminOrders({ orders, settings, onSetPaymentStatus, onSetLocalStatus, o
             </>
           ) : (
             <>
-              <span className="text-xs" style={{ color: "var(--bone)" }}>Escribí la contraseña de administrador para confirmar:</span>
+              <span className="text-xs" style={{ color: "var(--bone)" }}>Para confirmar esta eliminación irreversible, escribí BORRAR {selectedInView.length}:</span>
               <input
-                type="password"
-                value={password}
-                onChange={(e) => { setPassword(e.target.value); setPasswordError(false); }}
+                type="text"
+                autoComplete="off"
+                value={confirmationText}
+                onChange={(e) => { setConfirmationText(e.target.value); setConfirmationError(false); }}
                 onKeyDown={(e) => e.key === "Enter" && confirmDelete()}
                 className="rounded-lg p-1.5 text-xs w-32"
-                style={{ background: "var(--ink-3)", color: "var(--bone)", border: passwordError ? "1px solid var(--signal)" : "1px solid var(--line)" }}
+                style={{ background: "var(--ink-3)", color: "var(--bone)", border: confirmationError ? "1px solid var(--signal)" : "1px solid var(--line)" }}
               />
               <button onClick={confirmDelete} className="kulto-btn text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: "var(--signal)", color: "var(--bone)" }}>
                 Confirmar eliminación
               </button>
-              <button onClick={() => { setConfirmingDelete(false); setPassword(""); setPasswordError(false); }} className="kulto-btn text-xs px-2" style={{ color: "var(--slate)" }}>Cancelar</button>
-              {passwordError && <span className="text-xs w-full" style={{ color: "var(--signal)" }}>Contraseña incorrecta.</span>}
+              <button onClick={() => { setConfirmingDelete(false); setConfirmationText(""); setConfirmationError(false); }} className="kulto-btn text-xs px-2" style={{ color: "var(--slate)" }}>Cancelar</button>
+              {confirmationError && <span className="text-xs w-full" style={{ color: "var(--signal)" }}>La frase de confirmación no coincide.</span>}
             </>
           )}
         </div>
@@ -19915,7 +19914,7 @@ export default function App() {
   // Genera un código de 6 dígitos, lo guarda en la cuenta (vence en 15 min) y
   // manda el mail. Se usa tanto al registrarse como para "reenviar código".
   const issueAndSendVerification = async (customerRecord) => {
-    const code = String(Math.floor(100000 + Math.random() * 900000));
+    const code = secureSixDigitCode();
     const updated = { ...customerRecord, emailVerified: false, verificationCode: code, verificationExpires: Date.now() + 15 * 60 * 1000 };
     await persistCustomer(updated);
     const emailResult = await sendEmail({
@@ -19928,6 +19927,9 @@ export default function App() {
 
   const handleRegisterCustomer = async ({ name, email, password, instagram = "" }) => {
     const norm = normalizeEmail(email);
+    if (norm === normalizeEmail(ADMIN_EMAIL)) {
+      return { ok: false, error: "Esta dirección está reservada. Si ya tenés una cuenta de administrador, iniciá sesión." };
+    }
     const existing = await loadCustomer(norm);
     if (existing) return { ok: false, error: "Ya existe una cuenta con ese email — probá iniciar sesión." };
     const passwordHash = await hashPassword(password);
@@ -19943,18 +19945,8 @@ export default function App() {
       sendEmail({
         to: ADMIN_EMAIL,
         subject: `Instagram para verificar: @${igHandle}`,
-        html: emailShell(settings?.logoText || "Kulto", `<p style="margin:0 0 8px;">${record.name || record.email} se registró y dice que sigue la cuenta en Instagram como <strong>@${igHandle}</strong>.</p><p style="margin:0;color:#a9a2b0;font-size:13px;">Entrá al panel → Clientes y tocá «Confirmar que nos sigue» (o «No me sigue») para darle su descuento.</p>`),
+        html: emailShell(settings?.logoText || "Kulto", `<p style="margin:0 0 8px;">${escapeEmailHtml(record.name || record.email)} se registró y dice que sigue la cuenta en Instagram como <strong>@${escapeEmailHtml(igHandle)}</strong>.</p><p style="margin:0;color:#a9a2b0;font-size:13px;">Entrá al panel → Clientes y tocá «Confirmar que nos sigue» (o «No me sigue») para darle su descuento.</p>`),
       }).catch(() => { /* el aviso es un extra */ });
-    }
-    // La cuenta de administrador (ADMIN_EMAIL) entra directo, sin confirmar
-    // mail — así el dueño de la tienda nunca queda afuera de su propio panel
-    // por no tener todavía el envío de mails configurado.
-    if (norm === normalizeEmail(ADMIN_EMAIL)) {
-      const adminRecord = { ...record, emailVerified: true };
-      await persistCustomer(adminRecord);
-      await storageSet("kulto:customer-session", norm, false);
-      setCustomer(adminRecord);
-      return { ok: true };
     }
     const { emailSent, emailError } = await issueAndSendVerification(record);
     return {
@@ -20003,7 +19995,7 @@ export default function App() {
     const norm = normalizeEmail(email);
     const existing = await loadCustomer(norm);
     if (!existing) return { ok: false, error: "No encontramos una cuenta con ese email." };
-    const code = String(Math.floor(100000 + Math.random() * 900000));
+    const code = secureSixDigitCode();
     const updated = { ...existing, resetCode: code, resetExpires: Date.now() + 15 * 60 * 1000 };
     await persistCustomer(updated);
     const emailResult = await sendEmail({
@@ -20082,7 +20074,7 @@ export default function App() {
     sendEmail({
       to: ADMIN_EMAIL,
       subject: `Instagram para verificar: @${handle}`,
-      html: emailShell(settings?.logoText || "Kulto", `<p style="margin:0 0 8px;">${updated.name || updated.email} dice que sigue la cuenta en Instagram como <strong>@${handle}</strong>.</p><p style="margin:0;color:#a9a2b0;font-size:13px;">Entrá al panel → Clientes y tocá «Confirmar que nos sigue» (o «No me sigue») para darle su descuento.</p>`),
+      html: emailShell(settings?.logoText || "Kulto", `<p style="margin:0 0 8px;">${escapeEmailHtml(updated.name || updated.email)} dice que sigue la cuenta en Instagram como <strong>@${escapeEmailHtml(handle)}</strong>.</p><p style="margin:0;color:#a9a2b0;font-size:13px;">Entrá al panel → Clientes y tocá «Confirmar que nos sigue» (o «No me sigue») para darle su descuento.</p>`),
     }).catch(() => { /* el aviso es un extra */ });
     return { ok: true };
   };
