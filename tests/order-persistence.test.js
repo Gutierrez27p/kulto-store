@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { saveOrderWithIndex } from "../src/order-persistence.js";
+import { saveOrderWithIndex, generateOrderId } from "../src/order-persistence.js";
 
 const order = { id: "KULTO-261111-ABCD", total: 32.5, items: [{ sku: "ABC", qty: 1 }] };
 
@@ -73,4 +73,20 @@ test("checkout cannot silently succeed if both database and backup notification 
   assert.match(checkout, /if \(!backup\.ok\)/);
   assert.match(checkout, /Tu carrito sigue intacto/);
   assert.ok(checkout.indexOf("if (!backup.ok)") < checkout.indexOf("setCart([])"));
+});
+
+test("new order IDs use unpredictable 48-bit hexadecimal suffixes", () => {
+  const when = new Date("2026-11-11T12:00:00Z");
+  const ids = new Set(Array.from({ length: 50 }, () => generateOrderId(when)));
+  assert.equal(ids.size, 50);
+  for (const id of ids) assert.match(id, /^KULTO-261111-[A-F0-9]{12}$/);
+});
+
+test("checkout does not use Math.random to create order references", () => {
+  const app = readFileSync(new URL("../src/App.jsx", import.meta.url), "utf8");
+  const begin = app.indexOf("const handleCheckout = async");
+  const end = app.indexOf("const handleSaveProduct =", begin);
+  const checkout = app.slice(begin, end);
+  assert.match(checkout, /generateOrderId\(\)/);
+  assert.doesNotMatch(checkout, /Math\.random/);
 });
