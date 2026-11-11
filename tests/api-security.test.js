@@ -164,3 +164,31 @@ test("send-email rejects CRLF injection in subject without contacting provider",
     else process.env.RESEND_API_KEY = oldKey;
   }
 });
+
+test("email APIs never expose provider error details to clients", async () => {
+  const oldKey = process.env.RESEND_API_KEY;
+  const oldFetch = globalThis.fetch;
+  const oldError = console.error;
+  process.env.RESEND_API_KEY = "test-only";
+  globalThis.fetch = async () => ({
+    ok: false, status: 403,
+    json: async () => ({ message: "sensitive provider detail" }),
+  });
+  console.error = () => {};
+  try {
+    for (const [handler, body] of [
+      [emailHandler, { to: "client@example.com", subject: "Pedido", html: "<p>Pedido</p>" }],
+      [verifyHandler, { action: "send", email: "client@example.com" }],
+    ]) {
+      const res = response();
+      await handler({ method: "POST", body }, res);
+      assert.equal(res.statusCode, 502);
+      assert.equal(JSON.stringify(res.body).includes("sensitive provider detail"), false);
+    }
+  } finally {
+    console.error = oldError;
+    globalThis.fetch = oldFetch;
+    if (oldKey === undefined) delete process.env.RESEND_API_KEY;
+    else process.env.RESEND_API_KEY = oldKey;
+  }
+});
