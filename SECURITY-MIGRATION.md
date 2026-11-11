@@ -6,6 +6,10 @@ El frontend actual usa `kulto_kv` para catálogo, cuentas, sesiones y pedidos. N
 
 ## 1. Inspección de solo lectura (SQL Editor de Supabase)
 
+**Script reproducible:** `security/supabase-readonly-audit.sql`. Incluye estado de RLS, políticas, privilegios de roles API, configuración del bucket y recuentos agregados. Ejecutarlo manualmente en el proyecto correcto y revisar los resultados antes de diseñar cambios. El script no modifica datos ni permisos.
+
+**Atención:** las políticas actuales de producción no han sido inspeccionadas desde este repositorio. No publicar migraciones basadas en supuestos.
+
 ```sql
 select schemaname, tablename, policyname, roles, cmd, qual, with_check
 from pg_policies
