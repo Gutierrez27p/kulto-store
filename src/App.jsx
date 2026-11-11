@@ -69,9 +69,6 @@ const ADMIN_EMAIL = "admin@kulto.com";
 // dirección (código de verificación, recuperar contraseña, etc.) se manda en
 // realidad acá, a la casilla de verdad del dueño. Ver sendEmail() más abajo.
 const ADMIN_NOTIFICATION_EMAIL = "pablo.gutcha@gmail.com";
-// Usada solo como confirmación extra antes de borrar pedidos en el panel de
-// administrador — no tiene relación con el acceso al panel en sí.
-const ADMIN_PASSWORD = "kulto2024";
 // Secciones del panel de administrador que se le pueden dar (o no) a una
 // cuenta de "admin con permisos limitados" — ver AdminCustomers y
 // handleSetAdminPermissions. El dueño (ADMIN_EMAIL) siempre las tiene todas.
@@ -12009,8 +12006,8 @@ function AdminOrders({ orders, settings, onSetPaymentStatus, onSetLocalStatus, o
   const [selected, setSelected] = useState([]);
   const [showArchived, setShowArchived] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [password, setPassword] = useState("");
-  const [passwordError, setPasswordError] = useState(false);
+  const [confirmationText, setConfirmationText] = useState("");
+  const [confirmationError, setConfirmationError] = useState(false);
   const [discountDrafts, setDiscountDrafts] = useState({});
   const [discountSavedId, setDiscountSavedId] = useState(null);
   const [reviewRequestState, setReviewRequestState] = useState({}); // { [orderId]: "sending" | "ok" | "error" }
@@ -12061,10 +12058,10 @@ function AdminOrders({ orders, settings, onSetPaymentStatus, onSetLocalStatus, o
   };
 
   const toggleSelect = (id) => setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
-  const clearSelection = () => { setSelected([]); setConfirmingDelete(false); setPassword(""); setPasswordError(false); };
+  const clearSelection = () => { setSelected([]); setConfirmingDelete(false); setConfirmationText(""); setConfirmationError(false); };
 
   const confirmDelete = () => {
-    if (password !== ADMIN_PASSWORD) { setPasswordError(true); return; }
+    if (confirmationText.trim().toUpperCase() !== `BORRAR ${selectedInView.length}`) { setConfirmationError(true); return; }
     onBulkDelete(selectedInView);
     clearSelection();
   };
@@ -12108,20 +12105,21 @@ function AdminOrders({ orders, settings, onSetPaymentStatus, onSetLocalStatus, o
             </>
           ) : (
             <>
-              <span className="text-xs" style={{ color: "var(--bone)" }}>Escribí la contraseña de administrador para confirmar:</span>
+              <span className="text-xs" style={{ color: "var(--bone)" }}>Para confirmar esta eliminación irreversible, escribí BORRAR {selectedInView.length}:</span>
               <input
-                type="password"
-                value={password}
-                onChange={(e) => { setPassword(e.target.value); setPasswordError(false); }}
+                type="text"
+                autoComplete="off"
+                value={confirmationText}
+                onChange={(e) => { setConfirmationText(e.target.value); setConfirmationError(false); }}
                 onKeyDown={(e) => e.key === "Enter" && confirmDelete()}
                 className="rounded-lg p-1.5 text-xs w-32"
-                style={{ background: "var(--ink-3)", color: "var(--bone)", border: passwordError ? "1px solid var(--signal)" : "1px solid var(--line)" }}
+                style={{ background: "var(--ink-3)", color: "var(--bone)", border: confirmationError ? "1px solid var(--signal)" : "1px solid var(--line)" }}
               />
               <button onClick={confirmDelete} className="kulto-btn text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: "var(--signal)", color: "var(--bone)" }}>
                 Confirmar eliminación
               </button>
-              <button onClick={() => { setConfirmingDelete(false); setPassword(""); setPasswordError(false); }} className="kulto-btn text-xs px-2" style={{ color: "var(--slate)" }}>Cancelar</button>
-              {passwordError && <span className="text-xs w-full" style={{ color: "var(--signal)" }}>Contraseña incorrecta.</span>}
+              <button onClick={() => { setConfirmingDelete(false); setConfirmationText(""); setConfirmationError(false); }} className="kulto-btn text-xs px-2" style={{ color: "var(--slate)" }}>Cancelar</button>
+              {confirmationError && <span className="text-xs w-full" style={{ color: "var(--signal)" }}>La frase de confirmación no coincide.</span>}
             </>
           )}
         </div>
