@@ -64,6 +64,7 @@ export default async function handler(req, res) {
         </div>`;
       const from = process.env.RESEND_FROM_EMAIL || "Kulto <onboarding@resend.dev>";
       const response = await fetch("https://api.resend.com/emails", {
+        signal: AbortSignal.timeout(15_000),
         method: "POST",
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({ from, to: email, subject: `Código para confirmar su pedido en ${storeLabel}`, html }),
