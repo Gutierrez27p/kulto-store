@@ -97,7 +97,8 @@ export default async function handler(req, res) {
         res.status(502).json({ error: gRes.status === 429 ? "Se alcanzó el límite gratuito por ahora. Probá en un minuto." : "La IA no pudo procesar la imagen." });
         return;
       }
-      const gText = (gData.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join("");
+      const parts = gData?.candidates?.[0]?.content?.parts;
+      const gText = Array.isArray(parts) ? parts.map((p) => typeof p?.text === "string" ? p.text : "").join("") : "";
       parseAndReply(gText);
       return;
     }
@@ -125,7 +126,7 @@ export default async function handler(req, res) {
       }),
     });
 
-    const data = await response.json();
+    const data = await response.json().catch(() => ({}));
 
     if (!response.ok) {
       console.error("Error del proveedor de IA:", response.status);
@@ -133,7 +134,8 @@ export default async function handler(req, res) {
       return;
     }
 
-    const text = (data.content || []).map((c) => c.text || "").join("");
+    const content = data?.content;
+    const text = Array.isArray(content) ? content.map((c) => typeof c?.text === "string" ? c.text : "").join("") : "";
     parseAndReply(text);
   } catch (err) {
     res.status(500).json({ error: "Error inesperado analizando la imagen." });
