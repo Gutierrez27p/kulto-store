@@ -292,3 +292,47 @@ test("AI analyzer rejects JSON null and array results gracefully", async () => {
     else process.env.ANTHROPIC_API_KEY = oldAnthropic;
   }
 });
+
+test("outbound provider requests have a finite timeout", async () => {
+  const oldResend = process.env.RESEND_API_KEY;
+  const oldGemini = process.env.GEMINI_API_KEY;
+  const oldFetch = globalThis.fetch;
+  process.env.RESEND_API_KEY = "test-only";
+  process.env.GEMINI_API_KEY = "test-only";
+  const observed = [];
+  globalThis.fetch = async (_url, options) => {
+    observed.push(options.signal);
+    return { ok: true, json: async () => ({
+      id: "test",
+      candidates: [{ content: { parts: [{ text: '{"name":"Camiseta","category":"Ropa","description":"Descripción"}' }] } }],
+    }) };
+  };
+  try {
+    const emailRes = response();
+    await emailHandler({ method: "POST", body: {
+      to: "client@example.com", subject: "Pedido", html: "<p>Pedido</p>",
+    } }, emailRes);
+    assert.equal(emailRes.statusCode, 200);
+    const verifyRes = response();
+    await verifyHandler({ method: "POST", body: {
+      action: "send", email: "client@example.com",
+    } }, verifyRes);
+    assert.equal(verifyRes.statusCode, 200);
+    const aiRes = response();
+    await analyzeHandler({ method: "POST", body: {
+      image: "data:image/png;base64,aGVsbG8=", categories: [],
+    } }, aiRes);
+    assert.equal(aiRes.statusCode, 200);
+    assert.equal(observed.length, 3);
+    for (const signal of observed) {
+      assert.ok(signal instanceof AbortSignal);
+      assert.equal(signal.aborted, false);
+    }
+  } finally {
+    globalThis.fetch = oldFetch;
+    if (oldResend === undefined) delete process.env.RESEND_API_KEY;
+    else process.env.RESEND_API_KEY = oldResend;
+    if (oldGemini === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = oldGemini;
+  }
+});
