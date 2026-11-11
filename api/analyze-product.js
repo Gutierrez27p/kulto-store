@@ -82,6 +82,7 @@ export default async function handler(req, res) {
     if (geminiKey) {
       const model = process.env.GEMINI_MODEL || "gemini-3.8-flash";
       const gRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+        signal: AbortSignal.timeout(25_000),
         method: "POST",
         headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey },
         body: JSON.stringify({
@@ -101,6 +102,7 @@ export default async function handler(req, res) {
     }
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
+      signal: AbortSignal.timeout(25_000),
       method: "POST",
       headers: {
         "Content-Type": "application/json",
