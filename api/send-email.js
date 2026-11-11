@@ -51,7 +51,8 @@ export default async function handler(req, res) {
     const data = await response.json().catch(() => ({}));
 
     if (!response.ok) {
-      res.status(response.status).json({ error: data?.message || "No se pudo enviar el mail." });
+      console.error("Resend rechazó envío:", response.status);
+      res.status(response.status >= 400 && response.status < 500 ? 502 : response.status).json({ error: "No se pudo enviar el mail." });
       return;
     }
 
