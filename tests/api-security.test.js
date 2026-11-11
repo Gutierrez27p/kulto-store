@@ -128,7 +128,7 @@ test("verify-email strips control characters from the store name in outgoing sub
     assert.ok(outgoing);
     assert.equal(outgoing.subject.includes(String.fromCharCode(13)), false);
     assert.equal(outgoing.subject.includes(String.fromCharCode(10)), false);
-    assert.match(outgoing.html, /Bcc: attacker@example.com/);
+    assert.match(outgoing.html, /Bcc: attacker@example.com/i);
   } finally {
     globalThis.fetch = oldFetch;
     if (oldKey === undefined) delete process.env.RESEND_API_KEY;
