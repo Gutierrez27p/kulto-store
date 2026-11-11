@@ -35,12 +35,17 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { action, name, storeName } = req.body || {};
-    if (typeof name === "string" && name.length > 120) {
-      res.status(400).json({ error: "El nombre es demasiado largo." });
+    const { action, name, storeName, email: rawEmail } = req.body || {};
+    if ((name !== undefined && (typeof name !== "string" || name.length > 120)) ||
+        (storeName !== undefined && (typeof storeName !== "string" || storeName.length > 80))) {
+      res.status(400).json({ error: "Los datos del pedido no son válidos." });
       return;
     }
-    const email = String((req.body || {}).email || "").trim().toLowerCase();
+    if (typeof rawEmail !== "string") {
+      res.status(400).json({ error: "El mail no es válido." });
+      return;
+    }
+    const email = rawEmail.trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 200) {
       res.status(400).json({ error: "El mail no es válido." });
       return;

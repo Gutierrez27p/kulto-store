@@ -356,3 +356,29 @@ test("AI analyzer rejects oversized payloads before contacting provider", async 
     else process.env.GEMINI_API_KEY = oldKey;
   }
 });
+
+test("verify-email rejects non-string or oversized inputs without sending mail", async () => {
+  const oldKey = process.env.RESEND_API_KEY;
+  const oldFetch = globalThis.fetch;
+  process.env.RESEND_API_KEY = "test-only";
+  globalThis.fetch = () => { throw Error("Must not send verification"); };
+  try {
+    for (const overrides of [
+      { email: { address: "client@example.com" } },
+      { email: ["client@example.com"] },
+      { name: { first: "Cliente" } },
+      { storeName: { label: "Kulto" } },
+      { storeName: "X".repeat(81) },
+    ]) {
+      const res = response();
+      await verifyHandler({ method: "POST", body: {
+        action: "send", email: "client@example.com", ...overrides,
+      } }, res);
+      assert.equal(res.statusCode, 400);
+    }
+  } finally {
+    globalThis.fetch = oldFetch;
+    if (oldKey === undefined) delete process.env.RESEND_API_KEY;
+    else process.env.RESEND_API_KEY = oldKey;
+  }
+});
