@@ -2580,7 +2580,7 @@ async function hashPassword(pw) {
     const buf = await crypto.subtle.digest("SHA-256", enc);
     return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
   } catch {
-    return pw; // entorno sin Web Crypto disponible — degradación mínima, no debería pasar en un navegador real
+    throw new Error("No se puede proteger la contraseña en este navegador. Actualizá el navegador e intentá de nuevo.");
   }
 }
 
