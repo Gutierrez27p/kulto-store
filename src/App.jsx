@@ -1,4 +1,5 @@
 import { escapeEmailHtml, secureSixDigitCode } from "./email-safety.js";
+import { saveOrderWithIndex, generateOrderId } from "./order-persistence.js";
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import {
   ShoppingBag, X, Menu, Plus, Minus, Trash2, Pencil, ChevronRight, ChevronLeft, ChevronDown,
@@ -2924,11 +2925,19 @@ async function loadOrders() {
 }
 
 async function persistOrder(order) {
-  await storageSet(`kulto:order:${order.id}`, JSON.stringify(order), true);
-  const idxRaw = await storageGet("kulto:order-index", true);
-  let ids = idxRaw ? JSON.parse(idxRaw) : [];
-  ids.unshift(order.id);
-  await storageSet("kulto:order-index", JSON.stringify(ids), true);
+  return saveOrderWithIndex(order, {
+    writeValue: (key, value) => storageSet(key, value, true),
+    readIndex: async () => {
+      try {
+        const { data, error } = await queueKvRead(() =>
+          supabase.from(KV_TABLE).select("value").eq("key", "kulto:order-index").maybeSingle()
+        );
+        return error ? { ok: false, value: null } : { ok: true, value: data?.value ?? null };
+      } catch {
+        return { ok: false, value: null };
+      }
+    },
+  });
 }
 
 async function updateOrder(order) {
@@ -8556,7 +8565,7 @@ function OrderLookupPage({ initialOrderId = "", settings }) {
     <div className="max-w-lg mx-auto px-4 md:px-6 py-14">
       <SectionTitle eyebrow="¿Dónde está tu pedido?" title="Seguir mi pedido" />
       <p className="text-sm mb-4" style={{ color: "var(--slate)" }}>
-        Escribí el número de orden que te dimos por WhatsApp al confirmar la compra (por ejemplo, KULTO-260914-AB12).
+        Escribí el número de orden que te dimos por WhatsApp al confirmar la compra (por ejemplo, KULTO-261111-A1B2C3D4E5F6).
       </p>
       <div className="flex gap-2 mb-6">
         <input
@@ -19490,9 +19499,12 @@ export default function App() {
     if (cart.length === 0) return;
     // Nunca se registra un pedido con un mail sin confirmar (ver CartDrawer).
     if (!isCheckoutEmailVerified(customerEmail, customer)) return;
+    let orderId;
+    try { orderId = generateOrderId(); }
+    catch { window.alert("No pudimos crear una referencia segura para tu pedido. Probá desde un navegador actualizado."); return; }
     setSending(true);
     const order = {
-      id: `KULTO-${new Date().toISOString().slice(2, 10).replace(/-/g, "")}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
+      id: orderId,
       date: new Date().toISOString(),
       items: cart,
       customerName, customerPhone, customerEmail, comment,
@@ -19510,24 +19522,37 @@ export default function App() {
     };
     order.payment = buildOrderPayment(order, settings);
     order.paymentStatus = order.payment ? "pendiente" : "no_aplica";
-    // El pedido ya NO depende de que WhatsApp se abra bien en el celular del
-    // cliente (en varios navegadores, sobre todo Safari de iPhone, el popup
-    // se bloqueaba y el pedido se podía perder sin que nadie se enterara).
-    // Ahora el camino garantizado es: se guarda en el panel (Pedidos, vía
-    // persistOrder) y se le avisa al dueño por mail — eso pasa siempre, sin
-    // depender del navegador ni del celular de nadie. WhatsApp queda como una
-    // opción más para el cliente (ver botón en la pantalla de confirmación),
-    // nunca como un paso obligatorio para que el pedido quede registrado.
-    try {
-      await persistOrder(order);
-    } catch {
-      try { await persistOrder(order); } catch { /* seguimos igual — el mail de aviso de abajo es el otro respaldo */ }
+    // Intentamos guardar el pedido y su índice en Supabase. Si falla, el correo
+    // al dueño es el respaldo; si ambos fallan no se confirma la compra y el
+    // carrito permanece intacto. WhatsApp nunca es obligatorio.
+    // No confirmar una compra si fallan tanto el guardado como el aviso al dueño.
+    // Reintentos con el MISMO ID: el índice nunca se duplica.
+    let orderSaved = false;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        await persistOrder(order);
+        orderSaved = true;
+        break;
+      } catch (error) {
+        console.error("[Kulto] No se pudo guardar el pedido:", error);
+      }
     }
-    sendEmail({
+    const adminNotification = {
       to: ADMIN_EMAIL,
       subject: `Nuevo pedido ${order.id}`,
       html: buildAdminOrderEmailHtml(order, settings),
-    }).catch(() => { /* nunca bloquear el checkout por esto */ });
+    };
+    if (orderSaved) {
+      sendEmail(adminNotification).catch(() => { /* el pedido ya está guardado */ });
+    } else {
+      const backup = await sendEmail(adminNotification);
+      if (!backup.ok) {
+        setSending(false);
+        window.alert("No pudimos confirmar tu pedido ni avisar a la tienda. Tu carrito sigue intacto. Probá nuevamente o contactanos antes de realizar ningún pago.");
+        return;
+      }
+      window.alert(`Recibimos el pedido ${order.id} por correo, pero hubo un problema al guardarlo en el panel. Conservá este número y contactanos antes de pagar.`);
+    }
     if (order.customerEmail) {
       sendEmail({
         to: order.customerEmail,
