@@ -35,3 +35,16 @@ export async function saveOrderWithIndex(order, { writeValue, readIndex }) {
   if (!indexed) throw new Error("No se pudo actualizar el índice de pedidos.");
   return true;
 }
+
+// Generate harder-to-guess references for new orders. Old references
+// continue to work because lookup treats IDs as opaque strings.
+export function generateOrderId(now = new Date()) {
+  if (!globalThis.crypto?.getRandomValues) {
+    throw new Error("Este navegador no permite crear referencias de pedido seguras.");
+  }
+  const day = now.toISOString().slice(2, 10).replace(/-/g, "");
+  const random = new Uint8Array(6);
+  globalThis.crypto.getRandomValues(random);
+  const suffix = Array.from(random, (b) => b.toString(16).padStart(2, "0")).join("").toUpperCase();
+  return `KULTO-${day}-${suffix}`;
+}
