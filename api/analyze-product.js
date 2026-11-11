@@ -8,6 +8,7 @@
 // cambiar el modelo si Google renombra el actual.
 
 export default async function handler(req, res) {
+  res.setHeader("Cache-Control", "no-store, max-age=0");
   if (req.method !== "POST") {
     res.status(405).json({ error: "Método no permitido." });
     return;
@@ -86,8 +87,8 @@ export default async function handler(req, res) {
       });
       const gData = await gRes.json().catch(() => ({}));
       if (!gRes.ok) {
-        const msg = gData?.error?.message || "La IA no pudo procesar la imagen.";
-        res.status(502).json({ error: gRes.status === 429 ? "Se alcanzó el límite gratuito por ahora. Probá en un minuto." : msg });
+        console.error("Error de Gemini:", gRes.status);
+        res.status(502).json({ error: gRes.status === 429 ? "Se alcanzó el límite gratuito por ahora. Probá en un minuto." : "La IA no pudo procesar la imagen." });
         return;
       }
       const gText = (gData.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join("");
@@ -120,7 +121,8 @@ export default async function handler(req, res) {
     const data = await response.json();
 
     if (!response.ok) {
-      res.status(502).json({ error: data?.error?.message || "La IA no pudo procesar la imagen." });
+      console.error("Error del proveedor de IA:", response.status);
+      res.status(502).json({ error: "La IA no pudo procesar la imagen." });
       return;
     }
 
