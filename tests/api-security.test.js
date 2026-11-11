@@ -264,3 +264,31 @@ test("AI-generated product fields are trimmed and length-limited", async () => {
     else process.env.ANTHROPIC_API_KEY = oldAnthropic;
   }
 });
+
+test("AI analyzer rejects JSON null and array results gracefully", async () => {
+  const oldGemini = process.env.GEMINI_API_KEY;
+  const oldAnthropic = process.env.ANTHROPIC_API_KEY;
+  const oldFetch = globalThis.fetch;
+  process.env.GEMINI_API_KEY = "test-only";
+  delete process.env.ANTHROPIC_API_KEY;
+  try {
+    for (const payload of ["null", "[]", '"hello"']) {
+      globalThis.fetch = async () => ({
+        ok: true,
+        json: async () => ({ candidates: [{ content: { parts: [{ text: payload }] } }] }),
+      });
+      const res = response();
+      await analyzeHandler({ method: "POST", body: {
+        image: "data:image/png;base64,aGVsbG8=", categories: [],
+      } }, res);
+      assert.equal(res.statusCode, 502);
+      assert.match(res.body.error, /interpretar/);
+    }
+  } finally {
+    globalThis.fetch = oldFetch;
+    if (oldGemini === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = oldGemini;
+    if (oldAnthropic === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = oldAnthropic;
+  }
+});
