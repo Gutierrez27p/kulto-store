@@ -382,3 +382,37 @@ test("verify-email rejects non-string or oversized inputs without sending mail",
     else process.env.RESEND_API_KEY = oldKey;
   }
 });
+
+test("AI providers with malformed response envelopes return controlled errors", async () => {
+  const oldGemini = process.env.GEMINI_API_KEY;
+  const oldAnthropic = process.env.ANTHROPIC_API_KEY;
+  const oldFetch = globalThis.fetch;
+  try {
+    for (const provider of ["gemini", "anthropic"]) {
+      if (provider === "gemini") {
+        process.env.GEMINI_API_KEY = "test-only";
+        delete process.env.ANTHROPIC_API_KEY;
+      } else {
+        delete process.env.GEMINI_API_KEY;
+        process.env.ANTHROPIC_API_KEY = "test-only";
+      }
+      for (const payload of [null, {}, { candidates: [{ content: { parts: {} } }] }, { content: {} }]) {
+        globalThis.fetch = async () => ({
+          ok: true, status: 200, json: async () => payload,
+        });
+        const res = response();
+        await analyzeHandler({ method: "POST", body: {
+          image: "data:image/png;base64,aGVsbG8=", categories: [],
+        } }, res);
+        assert.equal(res.statusCode, 502, provider);
+        assert.match(res.body.error, /interpretar/);
+      }
+    }
+  } finally {
+    globalThis.fetch = oldFetch;
+    if (oldGemini === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = oldGemini;
+    if (oldAnthropic === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = oldAnthropic;
+  }
+});
