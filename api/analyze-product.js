@@ -68,6 +68,10 @@ export default async function handler(req, res) {
         res.status(502).json({ error: "No se pudo interpretar la respuesta de la IA." });
         return;
       }
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        res.status(502).json({ error: "No se pudo interpretar la respuesta de la IA." });
+        return;
+      }
       res.status(200).json({
         name: typeof parsed.name === "string" ? parsed.name.trim().slice(0, 120) : "",
         category: typeof parsed.category === "string" ? parsed.category.trim().slice(0, 80) : "",
