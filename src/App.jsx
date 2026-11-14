@@ -1215,7 +1215,7 @@ function readGarmentTemplates() {
 }
 function useGarmentTemplates() {
   const [templates, setTemplates] = useState({});
-  useEffect(() => { let live = true; readGarmentTemplates().then((v) => { if (live) setTemplates(v); }); return () => { live = false; }; }, []);
+  useEffect(() => { let live = true; const update = (e) => { if (live) setTemplates(e.detail); }; readGarmentTemplates().then((v) => { if (live) setTemplates(v); }); window.addEventListener("kulto-garment-templates", update); return () => { live = false; window.removeEventListener("kulto-garment-templates", update); }; }, []);
   return templates;
 }
 function resolveGarmentMockup(product, templates) {
@@ -1489,6 +1489,7 @@ function AdminMockupEditor({ draft, setDraft, inputStyle }) {
       const ok = await storageSet(GARMENT_TEMPLATES_KEY, JSON.stringify(next), true);
       if (!ok) throw new Error("No se pudo guardar la plantilla compartida.");
       garmentTemplatesPromise = Promise.resolve(next);
+      window.dispatchEvent(new CustomEvent("kulto-garment-templates", { detail: next }));
       set({ templateId: id, enabled: true });
       setTemplateStatus("Plantilla compartida guardada. Guardá también el producto.");
     } catch (err) { setTemplateStatus(err.message || "Error guardando plantilla."); }
@@ -3526,7 +3527,8 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
     combined = product.photoPool;
   }
   const images = combined;
-  const garmentTemplates = useGarmentTemplates();\n  const mock = resolveGarmentMockup(product, garmentTemplates);
+  const garmentTemplates = useGarmentTemplates();
+  const mock = resolveGarmentMockup(product, garmentTemplates);
   const [mockColor, setMockColor] = useState(null);
   const [autoColorIdx, setAutoColorIdx] = useState(null);
 
@@ -4004,7 +4006,8 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
   // el color elegido (ver recolorExistingPhoto).
   const colorImages = color ? getColorImages(color) : [];
   const images = colorImages.length > 0 ? colorImages : (product.photoPool || []);
-  const mock = activeMockup(product);
+  const garmentTemplates = useGarmentTemplates();
+  const mock = resolveGarmentMockup(product, garmentTemplates);
   // La primera variante conserva las fotos originales subidas por el administrador.
   // En otras variantes, un mockup configurado permite mostrar el nuevo color;
   // nunca sustituimos la foto original por una camiseta vacía.
