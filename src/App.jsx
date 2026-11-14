@@ -3185,7 +3185,24 @@ function GlobalStyle({ colors }) {
         --font-display:'Archivo Black', 'Inter', sans-serif;
         --font-body:'Inter', sans-serif;
       }
-      .kulto-root{ font-family:var(--font-body); background:var(--ink); color:var(--bone); transition:filter .25s ease; }
+      /* KULTO storefront refresh: preserves the administrator's palette and all existing assets. */
+      .kulto-root{ font-family:var(--font-body); background:var(--ink); color:var(--bone); transition:filter .25s ease; letter-spacing:-.008em; }
+      .kulto-root > header{ background:color-mix(in srgb, var(--ink) 92%, transparent) !important; backdrop-filter:blur(18px); -webkit-backdrop-filter:blur(18px); box-shadow:0 12px 36px rgba(0,0,0,.1); }
+      .kulto-root .kulto-display{ letter-spacing:-.045em; line-height:1.06; }
+      .kulto-root .kulto-card{ border-radius:20px; overflow:hidden; isolation:isolate; border-color:color-mix(in srgb, var(--bone) 10%, transparent) !important; }
+      .kulto-root .kulto-card:hover{ box-shadow:0 22px 55px -28px color-mix(in srgb, var(--sun) 45%, #000); }
+      .kulto-root .kulto-card-img{ transition:transform .55s cubic-bezier(.2,.75,.25,1); }
+      .kulto-root .kulto-banner-tile{ border-radius:22px; }
+      .kulto-root main section{ scroll-margin-top:90px; }
+      .kulto-root button:focus-visible,.kulto-root a:focus-visible{ outline:2px solid var(--sun); outline-offset:3px; }
+      @media (min-width:768px){
+        .kulto-root > header > div{ min-height:76px; }
+        .kulto-root .kulto-card:hover{ transform:translateY(-6px); }
+      }
+      @media (max-width:767px){
+        .kulto-root .kulto-card{ border-radius:14px; }
+        .kulto-root .kulto-banner-tile{ border-radius:16px; }
+      }
       .kulto-root *{ box-sizing:border-box; }
       /* Modo claro: en vez de redefinir cada color a mano (la web entera da
          por sentado que el fondo es oscuro y el texto claro, en cientos de
