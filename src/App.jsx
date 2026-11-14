@@ -5439,6 +5439,23 @@ function Home({ products, settings, reviews, customWorkGallery, onOpen, onGoCata
     <div>
       <Hero onGoCatalog={onGoCatalog} onGoWizard={onGoWizard} onSearch={onSearch} heroTitle={settings.heroTitle} heroSubtitle={settings.heroSubtitle} heroImage={settings.heroImage} heroImages={settings.heroImages} banners={settings.banners} />
 
+      <div className="kulto-editorial-benefits" aria-label="Ventajas de comprar en KULTO STORE">
+        <span>✦ Diseños con personalidad</span><span>✦ Compra online en España</span><span>✦ Personaliza tu estilo</span>
+      </div>
+      {featuredCategories.length > 0 && (
+        <section className="kulto-editorial-categories max-w-6xl mx-auto px-4 md:px-6 w-full" aria-label="Explora las categorías">
+          <div className="kulto-editorial-section-head"><h2>Explora <em>KULTO</em></h2><button onClick={() => onGoCatalog({})}>Ver todo el catálogo <ArrowRight size={18}/></button></div>
+          <div className="kulto-editorial-category-grid">
+            {featuredCategories.map(({ name, product }) => {
+              const photo = product?.photoPool?.[0] || product?.colors?.flatMap((c) => getColorImages(c))?.[0];
+              return <button key={name} className="kulto-editorial-category" onClick={() => onGoCatalog({ category: name })} aria-label={`Ver ${name}`}>
+                {photo && <img loading="lazy" src={photo} alt={name} />}
+                <span>{name}<ArrowRight size={17}/></span>
+              </button>;
+            })}
+          </div>
+        </section>
+      )}
       <div className="flex flex-col gap-14 py-12">
         {renderGroups.map((g) => {
           if (g.type === "tiles") {
