@@ -3554,6 +3554,9 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
   const images = combined;
   const garmentTemplates = useGarmentTemplates();
   const mock = resolveGarmentMockup(product, garmentTemplates);
+  const backMock = resolveGarmentMockup(product, garmentTemplates, "back");
+  const [cardSide, setCardSide] = useState("front");
+  const currentMock = cardSide === "back" && backMock ? backMock : (mock || backMock);
   const [mockColor, setMockColor] = useState(null);
   const [autoColorIdx, setAutoColorIdx] = useState(null);
 
@@ -3562,20 +3565,20 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
   // punto correspondiente aunque se haya llegado ahí con las flechitas.
   let activeColorIdx = -1;
   starts.forEach((s, i) => { if (s !== null && s <= idx) activeColorIdx = i; });
-  if (mock) activeColorIdx = mockColor === null ? -1 : mockColor;
+  if (currentMock) activeColorIdx = mockColor === null ? -1 : mockColor;
   else if (autoColorIdx !== null) activeColorIdx = autoColorIdx;
   const activeColor = activeColorIdx >= 0 ? colors[activeColorIdx] : colors[0];
 
   const onSale = product.tags?.oferta && product.salePrice;
   const isCover = product.imageFit === "cover";
-  const bg = product.imageBackground || (activeColor && !mock ? activeColor.hex : "var(--ink-3)");
+  const bg = product.imageBackground || (activeColor && !currentMock ? activeColor.hex : "var(--ink-3)");
 
   const prev = (e) => { e.stopPropagation(); setIdx((i) => (i - 1 + images.length) % images.length); };
   const next = (e) => { e.stopPropagation(); setIdx((i) => (i + 1) % images.length); };
   const cardAutoImg = useAutoColorImage(product, autoColorIdx !== null ? colors[autoColorIdx] : null, autoColorIdx !== null);
   const pickColor = (e, i) => {
     e.stopPropagation();
-    if (mock) { setMockColor(i); return; }
+    if (currentMock) { setMockColor(i); return; }
     if (starts[i] !== null) { setAutoColorIdx(null); setIdx(starts[i]); return; }
     if (autoColorSource(product)) setAutoColorIdx(i);
   };
@@ -3635,7 +3638,7 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
       qty: quickQty,
       unitPrice: onSale ? product.salePrice : product.price,
       points: product.points ?? null,
-      previewImage: (mock ? mock.cover : images[idx]) || null,
+      previewImage: (currentMock ? currentMock.cover : images[idx]) || null,
     };
     onAddToCart(item);
     setQuickJustAdded(true);
@@ -3655,11 +3658,11 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
         className="relative overflow-hidden"
         style={{ background: bg, aspectRatio: "4 / 5" }}
       >
-        {mock ? (
-          mockColor === null && mock.cover ? (
-            <FastImg loading="lazy" src={mock.cover} alt={product.name} className="kulto-card-img w-full h-full object-cover" />
+        {currentMock ? (
+          mockColor === null && currentMock.cover ? (
+            <FastImg loading="lazy" src={currentMock.cover} alt={product.name} className="kulto-card-img w-full h-full object-cover" />
           ) : (
-            <MockupComposite mockup={mock} hex={colors[mockColor ?? 0]?.hex || "#ffffff"} />
+            <MockupComposite mockup={currentMock} hex={colors[mockColor ?? 0]?.hex || "#ffffff"} />
           )
         ) : autoColorIdx !== null && cardAutoImg ? (
           <FastImg loading="lazy" src={cardAutoImg} alt={product.name} className="kulto-card-img w-full h-full object-contain" />
@@ -3668,6 +3671,17 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
         ) : (
           <div className="w-full h-full flex items-center justify-center">
             <Shirt size={36} style={{ color: "rgba(243,239,230,0.35)" }} />
+          </div>
+        )}
+        {mock && backMock && (
+          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1 rounded-full p-1"
+            style={{ background: "rgba(15,15,15,.85)" }} role="group" aria-label="Vista de la camiseta">
+            {[[ "front", "Delante" ], [ "back", "Detrás" ]].map(([v, label]) => (
+              <button key={v} type="button" onClick={(event) => { event.stopPropagation(); setCardSide(v); }}
+                className="kulto-btn px-2.5 py-1 rounded-full text-[11px] font-semibold"
+                aria-pressed={cardSide === v}
+                style={{ color: cardSide === v ? "#111" : "#fff", background: cardSide === v ? "#fff" : "transparent" }}>{label}</button>
+            ))}
           </div>
         )}
         <div className="absolute top-2 left-2 flex flex-col gap-1 items-start max-w-[68%]">
@@ -3685,7 +3699,7 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
             <Heart size={16} style={{ color: isFavorite ? "var(--signal)" : "var(--bone)" }} fill={isFavorite ? "var(--signal)" : "none"} />
           </button>
         )}
-        {!mock && images.length > 1 && (
+        {!currentMock && images.length > 1 && (
           <>
             <button
               onClick={prev}
