@@ -1204,6 +1204,27 @@ function tintedMockupCanvas(src, prep, hex) {
   return cv;
 }
 
+// Biblioteca compartida de prendas base: una plantilla PNG por tipo, estampado por producto.
+const GARMENT_TEMPLATES_KEY = "garment-base-templates-v1";
+let garmentTemplatesPromise = null;
+function readGarmentTemplates() {
+  if (!garmentTemplatesPromise) garmentTemplatesPromise = storageGet(GARMENT_TEMPLATES_KEY, true)
+    .then((raw) => { try { return JSON.parse(raw || "{}") || {}; } catch { return {}; } })
+    .catch(() => ({}));
+  return garmentTemplatesPromise;
+}
+function useGarmentTemplates() {
+  const [templates, setTemplates] = useState({});
+  useEffect(() => { let live = true; readGarmentTemplates().then((v) => { if (live) setTemplates(v); }); return () => { live = false; }; }, []);
+  return templates;
+}
+function resolveGarmentMockup(product, templates) {
+  const m = product?.mockup;
+  if (!m?.enabled || !(m.design || m.logoLight || m.logoDark)) return null;
+  const template = m.templateId ? templates?.[m.templateId] : null;
+  const base = template?.base || m.base;
+  return base ? { ...m, base, ar: template?.ar || m.ar } : null;
+}
 function activeMockup(product) {
   const m = product?.mockup;
   return m && m.enabled && m.base && (m.design || m.logoLight || m.logoDark) ? m : null;
@@ -1380,7 +1401,7 @@ async function detectDesignPlacement(baseSrc, exampleSrc, designSrc) {
 // Editor del admin: sube mockup vacío, diseño PNG y portada, y acomoda el
 // diseño arrastrándolo (o con los deslizadores) viendo cómo queda en un color.
 function AdminMockupEditor({ draft, setDraft, inputStyle }) {
-  const m = draft.mockup || { enabled: true, base: null, ar: 0.8, design: null, x: 50, y: 38, w: 40, rot: 0, cover: null };
+  const templates = useGarmentTemplates();\n  const [templateName, setTemplateName] = useState("");\n  const [templateStatus, setTemplateStatus] = useState("");\n  const m = draft.mockup || { enabled: true, base: null, ar: 0.8, design: null, x: 50, y: 38, w: 40, rot: 0, cover: null };\n  const selectedTemplate = m.templateId ? templates[m.templateId] : null;\n  const displayMockup = selectedTemplate ? { ...m, base: selectedTemplate.base, ar: selectedTemplate.ar } : m;
   const set = (patch) => setDraft((d) => ({ ...d, mockup: { ...(d.mockup || { enabled: true, base: null, ar: 0.8, design: null, x: 50, y: 38, w: 40, rot: 0, cover: null }), ...patch } }));
   const [previewHex, setPreviewHex] = useState(draft.colors?.[0]?.hex || "#E8452C");
   const [busy, setBusy] = useState(false);
@@ -1455,7 +1476,25 @@ function AdminMockupEditor({ draft, setDraft, inputStyle }) {
     </div>
   );
 
-  const canPreview = !!m.base;
+  const saveTemplate = async (file) => {
+    if (!file || !templateName.trim()) { setTemplateStatus("Escribí un nombre y elegí un PNG."); return; }
+    if (file.type !== "image/png") { setTemplateStatus("La plantilla debe ser PNG con fondo transparente."); return; }
+    setBusy(true);
+    try {
+      const b64 = await new Promise((resolve) => fileToBase64(file, resolve, 1400, 1, "image/png"));
+      const url = (await uploadDataUrlToStorage(b64)) || b64;
+      const ar = await new Promise((resolve) => { const i = new Image(); i.onload = () => resolve(i.naturalWidth / i.naturalHeight); i.onerror = () => resolve(0.8); i.src = b64; });
+      const id = templateName.trim().toLowerCase().replace(/[^a-z0-9áéíóúñ-]+/gi, "-");
+      const next = { ...await readGarmentTemplates(), [id]: { name: templateName.trim(), base: url, ar } };
+      const ok = await storageSet(GARMENT_TEMPLATES_KEY, JSON.stringify(next), true);
+      if (!ok) throw new Error("No se pudo guardar la plantilla compartida.");
+      garmentTemplatesPromise = Promise.resolve(next);
+      set({ templateId: id, enabled: true });
+      setTemplateStatus("Plantilla compartida guardada. Guardá también el producto.");
+    } catch (err) { setTemplateStatus(err.message || "Error guardando plantilla."); }
+    finally { setBusy(false); }
+  };
+  const canPreview = !!displayMockup.base;
   return (
     <div className="rounded-2xl p-3 flex flex-col gap-3" style={{ background: "var(--ink-3)", border: "1px dashed var(--line)" }}>
       <div>
@@ -1468,6 +1507,20 @@ function AdminMockupEditor({ draft, setDraft, inputStyle }) {
         <input type="checkbox" checked={!!m.enabled} onChange={(e) => set({ enabled: e.target.checked })} />
         Usar el mockup en este producto
       </label>
+      <div className="rounded-xl p-3 flex flex-col gap-2" style={{ background: "var(--ink)", border: "1px solid var(--line)" }}>
+        <p className="text-xs font-semibold" style={{ color: "var(--bone)" }}>Plantilla reutilizable para varios productos</p>
+        <select value={m.templateId || ""} onChange={(e) => set({ templateId: e.target.value || null, enabled: true })} className="w-full rounded-lg p-2 text-sm" style={{ background: "var(--ink-3)", color: "var(--bone)" }}>
+          <option value="">Usar mockup propio de este producto</option>
+          {Object.entries(templates).map(([id, item]) => <option key={id} value={id}>{item.name}</option>)}
+        </select>
+        <input type="text" placeholder="Nombre de plantilla, ej. Oversize" value={templateName} onChange={(e) => setTemplateName(e.target.value)} className="rounded-lg p-2 text-sm" style={{ background: "var(--ink-3)", color: "var(--bone)" }} />
+        <label className="kulto-btn text-xs px-3 py-2 rounded-full cursor-pointer text-center" style={{ background: "var(--sun)", color: "var(--ink)" }}>
+          Crear plantilla compartida (PNG transparente)
+          <input type="file" accept="image/png" className="hidden" onChange={(e) => { saveTemplate(e.target.files?.[0]); e.target.value = ""; }} />
+        </label>
+        {templateStatus && <p className="text-xs" style={{ color: "var(--bone)" }}>{templateStatus}</p>}
+      </div>
+      {m.templateId && selectedTemplate && <p className="text-xs" style={{ color: "var(--sun)" }}>Plantilla activa: {selectedTemplate.name}. Solo necesitás subir el estampado de este producto.</p>}
       {slot("1. Mockup vacío", "La prenda sin estampa, de frente.", "base", m.base)}
       {slot("2. Diseño (PNG)", "La estampa con fondo transparente.", "design", m.design)}
       {slot("3. Ejemplo / portada", "Foto de cómo debe quedar: el mismo mockup con el diseño ya puesto en su lugar. Se ve en las tarjetas y sirve para acomodar el diseño solo.", "cover", m.cover)}
@@ -1494,7 +1547,7 @@ function AdminMockupEditor({ draft, setDraft, inputStyle }) {
             )}
             <p className="text-xs mb-1" style={{ color: "var(--slate)" }}>Tocá o arrastrá sobre la prenda para mover {target === "logo" ? "el texto" : "el diseño"}:</p>
             <div className="rounded-xl overflow-hidden mx-auto relative" style={{ aspectRatio: "4 / 5", maxWidth: 280, background: "var(--ink-2)", border: "1px solid var(--line)" }}>
-              <MockupComposite mockup={m} hex={previewHex} innerRef={innerRef} designProps={designProps} />
+              <MockupComposite mockup={displayMockup} hex={previewHex} innerRef={innerRef} designProps={designProps} />
               {showExample && m.cover && <img src={m.cover} alt="" draggable={false} className="absolute inset-0 w-full h-full object-contain" style={{ opacity: 0.45, pointerEvents: "none" }} />}
             </div>
             {m.cover && (
@@ -3473,7 +3526,7 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
     combined = product.photoPool;
   }
   const images = combined;
-  const mock = activeMockup(product);
+  const garmentTemplates = useGarmentTemplates();\n  const mock = resolveGarmentMockup(product, garmentTemplates);
   const [mockColor, setMockColor] = useState(null);
   const [autoColorIdx, setAutoColorIdx] = useState(null);
 
