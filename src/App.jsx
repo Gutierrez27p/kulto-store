@@ -4706,126 +4706,51 @@ function ClampText({ text, lines = 3, className = "", style = {}, buttonStyle = 
   );
 }
 
-function Hero({ onGoCatalog, onGoWizard, onSearch, heroTitle, heroSubtitle, heroImage, heroImages, banners = [] }) {
-  const [query, setQuery] = useState("");
-  const submit = (e) => {
-    e.preventDefault();
-    if (query.trim()) onSearch(query.trim());
-  };
-
+function Hero({ onGoCatalog, onGoWizard, onSearch, heroTitle, heroSubtitle, heroImage, heroImages, banners = [], featuredPhoto = null }) {
   const activeBanners = (banners || []).filter((b) => b.active !== false && b.placement !== "section");
   const [slide, setSlide] = useState(0);
-
+  const images = heroImages?.length ? heroImages : (heroImage ? [heroImage] : []);
+  const [imageIndex, setImageIndex] = useState(0);
   useEffect(() => { setSlide(0); }, [activeBanners.length]);
-
   useEffect(() => {
     if (activeBanners.length < 2) return;
-    const t = setInterval(() => setSlide((s) => (s + 1) % activeBanners.length), 5500);
-    return () => clearInterval(t);
+    const id = setInterval(() => setSlide((i) => (i + 1) % activeBanners.length), 5500);
+    return () => clearInterval(id);
   }, [activeBanners.length]);
-
-  // Cuando no hay ningún banner activo arriba de todo, la imagen decorativa
-  // puede tener varias fotos cargadas — van rotando solas cada tantos
-  // segundos, cada una tal cual se subió (sin recortarla ni deformarla).
-  const heroImgList = heroImages && heroImages.length ? heroImages : (heroImage ? [heroImage] : []);
-  const [heroImgIdx, setHeroImgIdx] = useState(0);
-  useEffect(() => { setHeroImgIdx(0); }, [heroImgList.length]);
   useEffect(() => {
-    if (activeBanners.length > 0 || heroImgList.length < 2) return;
-    const t = setInterval(() => setHeroImgIdx((i) => (i + 1) % heroImgList.length), 4000);
-    return () => clearInterval(t);
-  }, [activeBanners.length, heroImgList.length]);
-
-  const runCta = (banner) => {
-    if (!banner || banner.ctaAction === "none") return;
-    if (banner.ctaAction === "wizard") onGoWizard();
-    else if (banner.ctaAction === "url" && banner.ctaUrl) window.open(banner.ctaUrl, "_blank", "noreferrer");
-    else if (banner.ctaAction === "group" && banner.ctaGroup) onGoCatalog(banner.ctaGroup);
-    else onGoCatalog();
+    if (activeBanners.length || images.length < 2) return;
+    const id = setInterval(() => setImageIndex((i) => (i + 1) % images.length), 5000);
+    return () => clearInterval(id);
+  }, [activeBanners.length, images.length]);
+  const banner = activeBanners.length ? activeBanners[slide % activeBanners.length] : null;
+  const backgroundImage = banner?.image || images[imageIndex % (images.length || 1)] || featuredPhoto;
+  const headline = banner?.title || "STREETWEAR\nSIN LÍMITES";
+  const subtitle = banner?.subtitle || "Camisetas, oversize y sudaderas con diseños únicos. Descubre tu estilo en KULTO STORE.";
+  const runPrimary = () => {
+    if (!banner || !banner.ctaAction || banner.ctaAction === "catalog") { onGoCatalog({}); return; }
+    if (banner.ctaAction === "wizard") { onGoWizard(); return; }
+    if (banner.ctaAction === "url" && banner.ctaUrl) { window.open(banner.ctaUrl, "_blank", "noopener,noreferrer"); return; }
+    if (banner.ctaAction === "group" && banner.ctaGroup) { onGoCatalog({ group: banner.ctaGroup }); return; }
+    onGoCatalog({});
   };
-
-  const current = activeBanners.length ? activeBanners[slide % activeBanners.length] : null;
-  const title = current ? current.title : heroTitle;
-  const subtitle = current ? current.subtitle : heroSubtitle;
-  const image = current ? current.image : (heroImgList[heroImgIdx] || null);
-
-  const prevSlide = () => setSlide((s) => (s - 1 + activeBanners.length) % activeBanners.length);
-  const nextSlide = () => setSlide((s) => (s + 1) % activeBanners.length);
-
   return (
-    <section className="relative overflow-hidden" style={{ borderBottom: "1px solid var(--line)" }}>
-      <div className="max-w-6xl mx-auto px-4 md:px-6 py-14 md:py-24 grid md:grid-cols-2 gap-10 items-center">
-        <div>
-          <div key={`text-${slide}`} className="kulto-hero-fade">
-            <h1 className="kulto-display leading-[0.95] text-4xl sm:text-5xl md:text-6xl whitespace-pre-line" style={{ color: "var(--bone)", ...textOutlineStyle(current?.textOutlineWidth, current?.textOutlineColor) }}>
-              {title}
-            </h1>
-            <div className="mt-5 flex flex-col gap-1 max-w-md">
-              <ClampText text={subtitle} lines={4} className="text-base md:text-lg" style={{ color: "var(--slate)", ...subtitleOutline(current) }} />
-            </div>
-          </div>
-          <form onSubmit={submit} className="mt-6 max-w-sm relative">
-            <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2" style={{ color: "var(--slate)" }} />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Buscar productos..."
-              className="w-full rounded-full pl-10 pr-4 py-3 text-sm"
-              style={{ background: "var(--ink-2)", color: "var(--bone)", border: "1px solid var(--line)" }}
-            />
-          </form>
-          <div className="mt-5 flex flex-wrap gap-3">
-            {current ? (
-              <button onClick={() => runCta(current)} className="kulto-btn rounded-full px-6 py-3 font-semibold" style={{ background: "var(--signal)", color: "var(--bone)" }}>
-                {current.ctaLabel || "Ver catálogo"}
-              </button>
-            ) : (
-              <button onClick={onGoCatalog} className="kulto-btn rounded-full px-6 py-3 font-semibold" style={{ background: "var(--signal)", color: "var(--bone)" }}>
-                Ver catálogo
-              </button>
-            )}
-            <button onClick={onGoWizard} className="kulto-btn rounded-full px-6 py-3 font-semibold flex items-center gap-2" style={{ background: "transparent", color: "var(--bone)", border: "1px solid var(--line)" }}>
-              Personalizar mi prenda <ArrowRight size={16} />
-            </button>
-          </div>
+    <section className="kulto-editorial-hero" aria-label="Descubre KULTO STORE">
+      {backgroundImage && <img src={backgroundImage} alt="" className="kulto-editorial-hero-photo" fetchPriority="high" />}
+      <div className="kulto-editorial-hero-overlay" />
+      <div className="kulto-editorial-hero-inner">
+        <div className="kulto-editorial-hero-copy">
+          <span className="kulto-editorial-kicker">KULTO STORE · ESTILO URBANO</span>
+          <h1>{headline}</h1>
+          <p>{subtitle}</p>
+          <button type="button" onClick={runPrimary} className="kulto-editorial-primary">
+            {banner?.ctaLabel || "Descubrir colección"} <ArrowRight size={20}/>
+          </button>
           {activeBanners.length > 1 && (
-            <div className="mt-6 flex items-center gap-3">
-              <button onClick={prevSlide} aria-label="Banner anterior" className="kulto-btn w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "var(--ink-2)", border: "1px solid var(--line)", color: "var(--bone)" }}>
-                <ChevronLeft size={14} />
-              </button>
-              <div className="flex items-center gap-2">
-                {activeBanners.map((b, i) => (
-                  <button
-                    key={b.id || i}
-                    onClick={() => setSlide(i)}
-                    aria-label={`Banner ${i + 1}`}
-                    className="kulto-btn rounded-full"
-                    style={{ width: i === slide ? 22 : 8, height: 8, background: i === slide ? "var(--signal)" : "var(--line)", transition: "width .2s" }}
-                  />
-                ))}
-              </div>
-              <button onClick={nextSlide} aria-label="Banner siguiente" className="kulto-btn w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "var(--ink-2)", border: "1px solid var(--line)", color: "var(--bone)" }}>
-                <ChevronRight size={14} />
-              </button>
+            <div className="kulto-editorial-hero-dots" aria-label="Banners destacados">
+              {activeBanners.map((item, i) => <button key={item.id || i} type="button" onClick={() => setSlide(i)}
+                aria-label={`Ver banner ${i + 1}`} aria-pressed={slide === i}
+                className={slide === i ? "is-active" : ""} />)}
             </div>
-          )}
-        </div>
-        <div className="relative h-64 md:h-96 flex items-center justify-center">
-          {image ? (
-            <img key={`img-${slide}-${heroImgIdx}`} src={image} alt="" className="w-full h-full object-contain kulto-hero-fade" />
-          ) : (
-            <>
-              <div className="absolute rounded-3xl" style={{ width: "70%", height: "70%", background: "var(--ink-2)", border: "1px solid var(--line)", transform: "rotate(-6deg)" }} />
-              <div className="absolute rounded-3xl flex items-center justify-center" style={{ width: "58%", height: "58%", background: "var(--signal)", transform: "rotate(8deg)" }}>
-                <Shirt size={64} color="var(--bone)" />
-              </div>
-              <div className="absolute rounded-full px-4 py-2 font-semibold text-sm kulto-display" style={{ top: "6%", right: "8%", background: "var(--sun)", color: "var(--ink)", transform: "rotate(-10deg)" }}>
-                Diseños originales
-              </div>
-              <div className="absolute rounded-full px-4 py-2 font-semibold text-sm kulto-display" style={{ bottom: "8%", left: "2%", background: "var(--bone)", color: "var(--ink)", transform: "rotate(6deg)" }}>
-                Pide por WhatsApp
-              </div>
-            </>
           )}
         </div>
       </div>
@@ -5442,7 +5367,8 @@ function Home({ products, settings, reviews, customWorkGallery, onOpen, onGoCata
 
   return (
     <div className="kulto-editorial-home">
-      <Hero onGoCatalog={onGoCatalog} onGoWizard={onGoWizard} onSearch={onSearch} heroTitle={settings.heroTitle} heroSubtitle={settings.heroSubtitle} heroImage={settings.heroImage} heroImages={settings.heroImages} banners={settings.banners} />
+      <Hero onGoCatalog={onGoCatalog} onGoWizard={onGoWizard} onSearch={onSearch} heroTitle={settings.heroTitle} heroSubtitle={settings.heroSubtitle} heroImage={settings.heroImage} heroImages={settings.heroImages} banners={settings.banners}
+        featuredPhoto={(products || []).map((p) => p.photoPool?.[0] || (p.colors || []).flatMap((c) => getColorImages(c))[0]).find(Boolean) || null} />
 
       <div className="kulto-editorial-benefits" aria-label="Ventajas de comprar en KULTO STORE">
         <span>✦ Diseños con personalidad</span><span>✦ Compra online en España</span><span>✦ Personaliza tu estilo</span>
@@ -5452,12 +5378,24 @@ function Home({ products, settings, reviews, customWorkGallery, onOpen, onGoCata
           <div className="kulto-editorial-section-head"><h2>Explora <em>KULTO</em></h2><button onClick={() => onGoCatalog({})}>Ver todo el catálogo <ArrowRight size={18}/></button></div>
           <div className="kulto-editorial-category-grid">
             {featuredCategories.map(({ name, product }) => {
-              const photo = product?.photoPool?.[0] || product?.colors?.flatMap((c) => getColorImages(c))?.[0];
+              const photo = product?.photoPool?.[0] || (product?.colors || []).flatMap((c) => getColorImages(c))[0];
               return <button key={name} className="kulto-editorial-category" onClick={() => onGoCatalog({ category: name })} aria-label={`Ver ${name}`}>
                 {photo && <img loading="lazy" src={photo} alt={name} />}
                 <span>{name}<ArrowRight size={17}/></span>
               </button>;
             })}
+          </div>
+        </section>
+      )}
+      {(products || []).length > 0 && (
+        <section className="kulto-editorial-new-arrivals max-w-6xl mx-auto px-4 md:px-6 w-full">
+          <div className="kulto-editorial-section-head">
+            <h2>Novedades</h2>
+            <button onClick={() => onGoCatalog({})}>Ver productos <ArrowRight size={18}/></button>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-5">
+            {products.slice(0, 4).map((p) => <ProductCard key={p.id} product={p} onOpen={onOpen} isFavorite={favorites?.includes(p.id)}
+              onToggleFavorite={onToggleFavorite} onAddToCart={onAddToCart} />)}
           </div>
         </section>
       )}
@@ -18297,7 +18235,10 @@ function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, cus
   // empuja el header (y sus botones) para abajo de esa franja, sin perder
   // el fondo que llega hasta el borde.
   return (
-    <header className="sticky top-0 z-40" style={{ background: "var(--ink)", borderBottom: "1px solid var(--line)", paddingTop: "env(safe-area-inset-top)" }}>
+    <header className="kulto-editorial-header sticky top-0 z-40" style={{ background: "var(--ink)", borderBottom: "1px solid var(--line)", paddingTop: "env(safe-area-inset-top)" }}>
+      <div className="kulto-editorial-announcement">
+        <span>DISEÑOS ORIGINALES</span><span>ROPA URBANA EN ESPAÑA</span><span>PERSONALIZA TU PRENDA</span>
+      </div>
       <div className="max-w-6xl mx-auto px-4 md:px-6 flex items-center justify-between h-16">
         <div className="flex items-center min-w-0">
         {page !== "home" && onBack && (
@@ -18317,7 +18258,7 @@ function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, cus
         </button>
         </div>
         <nav className="hidden md:flex items-center gap-8">
-          <NavLink label="Inicio" active={page === "home"} onClick={() => go("home")} />
+          <NavLink label="Novedades" active={page === "home"} onClick={() => go("home")} />
           <div ref={catalogMenuRef}>
             <button
               onClick={() => setCatalogMenuOpen((o) => !o)}
