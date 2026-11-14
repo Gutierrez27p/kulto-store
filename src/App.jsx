@@ -90,7 +90,7 @@ const ADMIN_TABS = [
 const ADMIN_TAB_KEYS = ADMIN_TABS.map(([key]) => key);
 const ADMIN_TAB_META = {
   productos: { icon: Shirt, hint: "Fotos, precios y stock" },
-  mockups: { icon: Layers, hint: "Modelos y asignación masiva" },
+  mockups: { icon: Boxes, hint: "Modelos y asignación masiva" },
   personalizar: { icon: Sparkles, hint: "Banners, colores y textos" },
   pedidos: { icon: Package, hint: "Pedidos que llegan" },
   ventas: { icon: TrendingUp, hint: "Ofertas y ventas" },
