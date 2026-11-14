@@ -1218,12 +1218,14 @@ function useGarmentTemplates() {
   useEffect(() => { let live = true; const update = (e) => { if (live) setTemplates(e.detail); }; readGarmentTemplates().then((v) => { if (live) setTemplates(v); }); window.addEventListener("kulto-garment-templates", update); return () => { live = false; window.removeEventListener("kulto-garment-templates", update); }; }, []);
   return templates;
 }
-function resolveGarmentMockup(product, templates) {
-  const m = product?.mockup;
-  if (!m?.enabled || !(m.design || m.logoLight || m.logoDark)) return null;
+function resolveGarmentMockup(product, templates, side = "front") {
+  const root = product?.mockup;
+  if (!root?.enabled) return null;
+  const m = side === "back" ? root.back : root;
+  if (!m || !(m.design || m.logoLight || m.logoDark)) return null;
   const template = m.templateId ? templates?.[m.templateId] : null;
   const base = template?.base || m.base;
-  return base ? { ...m, base, ar: template?.ar || m.ar } : null;
+  return base ? { ...m, base, ar: template?.ar || m.ar, cover: m.cover || (side === "front" ? root.cover : null) } : null;
 }
 function activeMockup(product) {
   const m = product?.mockup;
@@ -1402,12 +1404,19 @@ async function detectDesignPlacement(baseSrc, exampleSrc, designSrc) {
 // diseño arrastrándolo (o con los deslizadores) viendo cómo queda en un color.
 function AdminMockupEditor({ draft, setDraft, inputStyle }) {
   const templates = useGarmentTemplates();
+  const [side, setSide] = useState("front");
   const [templateName, setTemplateName] = useState("");
   const [templateStatus, setTemplateStatus] = useState("");
-  const m = draft.mockup || { enabled: true, base: null, ar: 0.8, design: null, x: 50, y: 38, w: 40, rot: 0, cover: null };
+  const root = draft.mockup || { enabled: true, base: null, ar: 0.8, design: null, x: 50, y: 38, w: 40, rot: 0, cover: null };
+  const m = side === "back" ? (root.back || { base: null, design: null, ar: 0.8, x: 50, y: 38, w: 40, rot: 0 }) : root;
   const selectedTemplate = m.templateId ? templates[m.templateId] : null;
   const displayMockup = selectedTemplate ? { ...m, base: selectedTemplate.base, ar: selectedTemplate.ar } : m;
-  const set = (patch) => setDraft((d) => ({ ...d, mockup: { ...(d.mockup || { enabled: true, base: null, ar: 0.8, design: null, x: 50, y: 38, w: 40, rot: 0, cover: null }), ...patch } }));
+  const set = (patch) => setDraft((d) => {
+    const existing = d.mockup || { enabled: true };
+    return { ...d, mockup: side === "back"
+      ? { ...existing, back: { ...(existing.back || {}), ...patch } }
+      : { ...existing, ...patch } };
+  });
   const [previewHex, setPreviewHex] = useState(draft.colors?.[0]?.hex || "#E8452C");
   const [busy, setBusy] = useState(false);
   const innerRef = useRef(null);
@@ -1417,11 +1426,11 @@ function AdminMockupEditor({ draft, setDraft, inputStyle }) {
   const [showExample, setShowExample] = useState(false);
   const [target, setTarget] = useState("design"); // qué se mueve: "design" o "logo"
   const autoPlace = async () => {
-    if (!m.base || !m.design || !m.cover) return;
+    if (!displayMockup.base || !m.design || !m.cover) return;
     setDetecting(true);
     setDetectMsg("");
     try {
-      const r = await detectDesignPlacement(m.base, m.cover, m.design);
+      const r = await detectDesignPlacement(displayMockup.base, m.cover, m.design);
       if (r.ok) { set({ x: r.x, y: r.y, w: r.w, rot: r.rot }); setDetectMsg("Listo: acomodé el diseño como en el ejemplo. Podés ajustarlo a mano si hace falta."); }
       else setDetectMsg(r.error);
     } catch {
@@ -1504,13 +1513,24 @@ function AdminMockupEditor({ draft, setDraft, inputStyle }) {
   return (
     <div className="rounded-2xl p-3 flex flex-col gap-3" style={{ background: "var(--ink-3)", border: "1px dashed var(--line)" }}>
       <div>
-        <p className="text-sm font-semibold" style={{ color: "var(--bone)" }}>Mockup con diseño (los colores se generan solos)</p>
+        <p className="text-sm font-semibold" style={{ color: "var(--bone)" }}>Mockup delantero y trasero (los colores se generan solos)</p>
         <p className="text-xs mt-1" style={{ color: "var(--slate)" }}>
-          Subí la prenda vacía (mejor blanca o muy clara), el diseño en PNG sin fondo y una foto de portada de cómo querés que se vea. Cuando el cliente cambie de color, solo se pinta la prenda y el diseño queda en el mismo lugar.
+          Configura por separado la delantera y la espalda. Cada cara tiene su propio mockup PNG, estampado transparente y posición. Ambas cambian de color al seleccionar una variante, sin alterar la estampa.
         </p>
       </div>
+      <div className="flex gap-2" role="tablist" aria-label="Cara de la prenda">
+        {[[ "front", "Delantera" ], [ "back", "Trasera" ]].map(([value, label]) => (
+          <button type="button" key={value} role="tab" aria-selected={side === value}
+            className="kulto-btn flex-1 rounded-xl px-3 py-2.5 text-sm font-semibold"
+            style={{ background: side === value ? "var(--sun)" : "var(--ink)", color: side === value ? "var(--ink)" : "var(--bone)", border: "1px solid var(--line)" }}
+            onClick={() => { setSide(value); setDetectMsg(""); setTemplateStatus(""); }}>{label}</button>
+        ))}
+      </div>
+      <p className="text-xs" style={{ color: "var(--slate)" }}>
+        {side === "front" ? "Configura el mockup y el estampado delantero." : "Configura un segundo mockup y PNG para la espalda. Si no tiene estampado trasero, puedes dejarlo vacío."}
+      </p>
       <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer" style={{ color: "var(--bone)" }}>
-        <input type="checkbox" checked={!!m.enabled} onChange={(e) => set({ enabled: e.target.checked })} />
+        <input type="checkbox" checked={!!root.enabled} onChange={(e) => setDraft((d) => ({ ...d, mockup: { ...(d.mockup || {}), enabled: e.target.checked } }))} />
         Usar el mockup en este producto
       </label>
       <div className="rounded-xl p-3 flex flex-col gap-2" style={{ background: "var(--ink)", border: "1px solid var(--line)" }}>
@@ -1527,12 +1547,12 @@ function AdminMockupEditor({ draft, setDraft, inputStyle }) {
         {templateStatus && <p className="text-xs" style={{ color: "var(--bone)" }}>{templateStatus}</p>}
       </div>
       {m.templateId && selectedTemplate && <p className="text-xs" style={{ color: "var(--sun)" }}>Plantilla activa: {selectedTemplate.name}. Solo necesitás subir el estampado de este producto.</p>}
-      {slot("1. Mockup vacío", "La prenda sin estampa, de frente.", "base", m.base)}
+      {slot("1. Mockup vacío", side === "front" ? "Camiseta vista de frente, sin estampado." : "Camiseta vista por detrás, sin estampado.", "base", m.base)}
       {slot("2. Diseño (PNG)", "La estampa con fondo transparente.", "design", m.design)}
-      {slot("3. Ejemplo / portada", "Foto de cómo debe quedar: el mismo mockup con el diseño ya puesto en su lugar. Se ve en las tarjetas y sirve para acomodar el diseño solo.", "cover", m.cover)}
+      {slot(side === "front" ? "3. Imagen de portada" : "3. Imagen trasera (opcional)", "Foto final de esta cara de la prenda. En la delantera será la portada del catálogo.", "cover", m.cover)}
       {slot("4. Texto para prendas claras (negro)", "Opcional: el texto o logo en negro, PNG sin fondo (ej. Kulto en el frente).", "logoLight", m.logoLight)}
       {slot("5. Texto para prendas oscuras (blanco)", "Opcional: el mismo texto en blanco. Se usa solo en las prendas oscuras.", "logoDark", m.logoDark)}
-      {m.base && m.design && m.cover && (
+      {displayMockup.base && m.design && m.cover && (
         <div className="flex flex-col gap-1.5">
           <button type="button" onClick={autoPlace} disabled={detecting} className="kulto-btn text-xs font-semibold px-4 py-2.5 rounded-full self-start" style={{ background: "var(--sun)", color: "var(--ink)", opacity: detecting ? 0.6 : 1 }}>
             {detecting ? "Comparando…" : "Acomodar el diseño solo, según el ejemplo"}
@@ -1586,7 +1606,7 @@ function AdminMockupEditor({ draft, setDraft, inputStyle }) {
           </div>
         </div>
       )}
-      <p className="text-[11px]" style={{ color: "var(--slate)" }}>Recordá guardar el producto. Los colores que tengan su propia foto siguen usando esa foto.</p>
+      <p className="text-[11px]" style={{ color: "var(--slate)" }}>Guardá el producto para conservar las dos caras. El mockup delantero ya configurado se mantiene intacto al añadir la trasera.</p>
     </div>
   );
 }
@@ -3966,6 +3986,7 @@ function ProductReviewsBlock({ product, reviews }) {
 function ProductConfigurator({ product, settings, onAddToCart, compact, reviews = [] }) {
   const [colorIdx, setColorIdx] = useState(0);
   const [imgIdx, setImgIdx] = useState(0);
+  const [mockSide, setMockSide] = useState("front");
   const [sizeIdx, setSizeIdx] = useState(0);
   const [aud, setAud] = useState(() => audsOf(product)[0] || "h");
   const [designMode, setDesignMode] = useState(product.designs && product.designs.length ? "design" : "custom");
@@ -3987,6 +4008,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
   useEffect(() => {
     setColorIdx(0);
     setImgIdx(0);
+    setMockSide("front");
     setSizeIdx(0);
     setAud(audsOf(product)[0] || "h");
     setDesignMode(product.designs && product.designs.length ? "design" : "custom");
@@ -4013,12 +4035,14 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
   const images = colorImages.length > 0 ? colorImages : (product.photoPool || []);
   const garmentTemplates = useGarmentTemplates();
   const mock = resolveGarmentMockup(product, garmentTemplates);
+  const backMock = resolveGarmentMockup(product, garmentTemplates, "back");
+  const previewMock = mockSide === "back" && backMock ? backMock : (mock || backMock);
   // La primera variante conserva las fotos originales subidas por el administrador.
   // En otras variantes, un mockup configurado permite mostrar el nuevo color;
   // nunca sustituimos la foto original por una camiseta vacía.
   // Si el administrador activó el mockup de dos capas, mostrarlo SIEMPRE: camiseta base + PNG independiente.
   // La galería original sigue almacenada, pero no debe tapar la previsualización dinámica.
-  const mockActive = !!mock;
+  const mockActive = !!previewMock;
   const mockHex = color?.hex || "#ffffff";
   const canRecolor = colorImages.length === 0 && !mockActive && (Boolean(product.fabricMask) || product.autoRecolor === true) && (colorIdx > 0 || images.length === 0);
   const autoImage = useAutoColorImage(product, color, canRecolor, imgIdx);
@@ -4117,7 +4141,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
           }}
         >
           {mockActive ? (
-            <MockupComposite mockup={mock} hex={mockHex} />
+            <MockupComposite mockup={previewMock} hex={mockHex} />
           ) : activeImage ? (
             <img
               src={activeImage}
@@ -4186,6 +4210,16 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
             </button>
           )}
         </div>
+        {(mock || backMock) && (
+          <div className="flex gap-2 mt-3" role="group" aria-label="Vista de la camiseta">
+            {mock && <button type="button" onClick={() => setMockSide("front")}
+              className="kulto-btn rounded-lg px-4 py-2 text-xs font-semibold"
+              style={{ background: mockSide === "front" ? "var(--sun)" : "var(--ink-2)", color: mockSide === "front" ? "var(--ink)" : "var(--bone)", border: "1px solid var(--line)" }}>Delante</button>}
+            {backMock && <button type="button" onClick={() => setMockSide("back")}
+              className="kulto-btn rounded-lg px-4 py-2 text-xs font-semibold"
+              style={{ background: mockSide === "back" ? "var(--sun)" : "var(--ink-2)", color: mockSide === "back" ? "var(--ink)" : "var(--bone)", border: "1px solid var(--line)" }}>Detrás</button>}
+          </div>
+        )}
         {images.length > 1 && (
           <div className="flex gap-2 mt-2 overflow-x-auto kulto-scrollbar pb-1">
             {images.map((img, i) => (
