@@ -1,5 +1,6 @@
 import { escapeEmailHtml, secureSixDigitCode } from "./email-safety.js";
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { renderGarmentColor } from "./utils/garmentColor.js";
 import {
   ShoppingBag, X, Menu, Plus, Minus, Trash2, Pencil, ChevronRight, ChevronLeft, ChevronDown,
   MessageCircle, Lock, Check, Shirt, Upload, Package, Star, Sparkles, ArrowRight,
@@ -1852,13 +1853,27 @@ const autoRecolorCache = new Map();
 // Foto generada para un color que no tiene foto propia (ver arriba).
 function useAutoColorImage(product, color, enabled, imgIdx = 0) {
   const info = enabled && color && getColorImages(color).length === 0 && !activeMockup(product) ? autoColorSource(product, imgIdx) : null;
-  const key = info ? `${info.src}|${info.refHex || ""}|${info.guessFrom ? "g" : ""}|${info.clean ? 1 : 0}|${color.hex}` : null;
+  const key = info ? `${product.fabricMask || ""}|${info.src}|${info.refHex || ""}|${info.guessFrom ? "g" : ""}|${info.clean ? 1 : 0}|${color.hex}` : null;
   const [url, setUrl] = useState(() => (key ? autoRecolorCache.get(key) || null : null));
   useEffect(() => {
     if (!key) { setUrl(null); return; }
     if (autoRecolorCache.has(key)) { setUrl(autoRecolorCache.get(key)); return; }
     let alive = true;
     (async () => {
+      if (product.fabricMask && info.src) {
+        try {
+          const [photo, fabricMask] = await Promise.all([
+            loadMockupImg(info.src),
+            loadMockupImg(product.fabricMask),
+          ]);
+          const canvas = document.createElement("canvas");
+          renderGarmentColor({ canvas, photo, fabricMask, color: color.hex });
+          return canvas.toDataURL("image/png");
+        } catch (error) {
+          console.warn("[Kulto] Máscara de tela no válida; se conserva la foto original.", error);
+          return null;
+        }
+      }
       if (info.clean) return tintImageToColor(info.src, color.hex);
       const ref = info.guessFrom ? (await guessRefColorHex(info.src, info.guessFrom)) || info.refHex : info.refHex;
       // la foto ya es de este color: se muestra tal cual
@@ -10016,6 +10031,19 @@ function AdminProductForm({ categories, groups, onAddCategory, onAddGroup, saved
               >
                 {draft.colors.map((c, i) => <option key={i} value={i}>{c.name || `Color ${i + 1}`}</option>)}
               </select>
+            </div>
+          )}
+
+          {draft.photoPool?.length > 0 && draft.colors?.length > 1 && (
+            <div className="rounded-2xl p-3 mb-3" style={{ background: "var(--ink-3)", border: "1px dashed var(--line)" }}>
+              <label className="text-sm font-semibold block mb-1" style={{ color: "var(--bone)" }}>
+                Máscara de tela para colores dinámicos (opcional)
+              </label>
+              <p className="text-xs mb-2" style={{ color: "var(--slate)" }}>
+                Pegá la URL pública de una máscara PNG del mismo tamaño que la foto base. La parte opaca debe cubrir solo la tela, nunca el estampado. Sin máscara se mantiene el sistema anterior.
+              </p>
+              <input type="url" value={draft.fabricMask || ""} onChange={(e) => setDraft({ ...draft, fabricMask: e.target.value.trim() })}
+                placeholder="https://.../mascara-tela.png" className="w-full rounded-xl p-2 text-sm" style={inputStyle} />
             </div>
           )}
 
