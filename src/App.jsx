@@ -16889,7 +16889,7 @@ function AdminCustomWorkGallery({ items, onAdd, onRemove, speed = 0.5, onSpeedCh
 
 
 // Central model library; contains no individual design artworks or duplicated garments.
-function AdminGarmentMockupLibrary({ products, categories, groups, models, onSaveSettings, onSaveProductsBulk }) {
+function AdminGarmentMockupLibrary({ products, categories, groups, models, onSaveModels, onSaveProductsBulk }) {
   const [name, setName] = useState("");
   const [front, setFront] = useState(null);
   const [back, setBack] = useState(null);
@@ -16928,7 +16928,7 @@ function AdminGarmentMockupLibrary({ products, categories, groups, models, onSav
     setSaving(true);
     try {
       const next = [...models, { id: genId("garment"), name: name.trim(), base: front.url, ar: front.ar, backBase: back.url, backAr: back.ar, mask: frontMask?.url || null, backMask: backMask?.url || null, enabled: true, x: 50, y: 38, w: 38, backX: 50, backY: 38, backW: 40 }];
-      await onSaveSettings({ garmentMockupLibrary: next });
+      await onSaveModels(next);
       setName(""); setFront(null); setBack(null); setFrontMask(null); setBackMask(null); setStatus("Modelo guardado. Ya podés asignarlo a productos.");
     } catch (e) { setStatus("Error al guardar: " + (e?.message || "sin conexión")); }
     finally { setSaving(false); }
@@ -16946,7 +16946,7 @@ function AdminGarmentMockupLibrary({ products, categories, groups, models, onSav
       if (field === "base") patch.ar = img.naturalWidth / img.naturalHeight;
       if (field === "backBase") patch.backAr = img.naturalWidth / img.naturalHeight;
       const next = models.map((m) => m.id === model.id ? { ...m, ...patch } : m);
-      await onSaveSettings({ garmentMockupLibrary: next });
+      await onSaveModels(next);
       setStatus("Modelo actualizado: " + model.name);
     } catch (e) { setStatus("No se pudo actualizar: " + (e?.message || "Error")); }
     finally { setSaving(false); }
@@ -17014,7 +17014,7 @@ function AdminGarmentMockupLibrary({ products, categories, groups, models, onSav
   );
 }
 
-function AdminPanel({ products, categories, groups, orders, customers, onAdjustCustomerPoints, onDeleteCustomer, onCreateCustomer, onUpdateCustomerInfo, onSetInstagramStatus, onSendPasswordHelp, reviews, settings, hasDraftChanges, publishing, onPublishChanges, onDiscardChanges, photoInbox, onAddToInbox, onCreateProductFromInbox, onAddInboxToExisting, onRemoveFromInbox, savedColors, onSaveColorToLibrary, onRemoveColorFromLibrary, designLibrary, onAddDesignToLibrary, onRemoveDesignFromLibrary, designFolders, onAddDesignFolder, onRenameDesignFolder, onRemoveDesignFolder, onToggleDesignFolderCover, onAssignDesignToFolder, onSetDesignFolderCategory, onSetDesignFolderGarments, customWorkGallery, onAddCustomWork, onRemoveCustomWork, onAddCategory, onRenameCategory, onDeleteCategory, onMergeCategoryAsType, onAddGroup, onRenameGroup, onDeleteGroup, onSaveProduct, onSaveProductVerbose, onSaveProductsBulk, onQuickRestock, onDeleteProduct, onToggleOrderStatus, onSetLocalStatus, onSetLocalTracking, onUpdateTracking, onApplyDiscount, onRequestReview, onBulkComplete, onBulkArchive, onBulkDelete, onSaveReview, onDeleteReview, onReorderReview, onSaveSettings, onSetPaymentStatus, onLogout, permissions, isOwner, onSetAdminPermissions, jumpTo }) {
+function AdminPanel({ products, categories, groups, orders, customers, onAdjustCustomerPoints, onDeleteCustomer, onCreateCustomer, onUpdateCustomerInfo, onSetInstagramStatus, onSendPasswordHelp, reviews, settings, hasDraftChanges, publishing, onPublishChanges, onDiscardChanges, photoInbox, onAddToInbox, onCreateProductFromInbox, onAddInboxToExisting, onRemoveFromInbox, savedColors, onSaveColorToLibrary, onRemoveColorFromLibrary, designLibrary, onAddDesignToLibrary, onRemoveDesignFromLibrary, designFolders, onAddDesignFolder, onRenameDesignFolder, onRemoveDesignFolder, onToggleDesignFolderCover, onAssignDesignToFolder, onSetDesignFolderCategory, onSetDesignFolderGarments, customWorkGallery, onAddCustomWork, onRemoveCustomWork, onAddCategory, onRenameCategory, onDeleteCategory, onMergeCategoryAsType, onAddGroup, onRenameGroup, onDeleteGroup, onSaveProduct, onSaveProductVerbose, onSaveProductsBulk, onQuickRestock, onDeleteProduct, onToggleOrderStatus, onSetLocalStatus, onSetLocalTracking, onUpdateTracking, onApplyDiscount, onRequestReview, onBulkComplete, onBulkArchive, onBulkDelete, onSaveReview, onDeleteReview, onReorderReview, onSaveSettings, onSaveGarmentModels, onSetPaymentStatus, onLogout, permissions, isOwner, onSetAdminPermissions, jumpTo }) {
   // El dueño (isOwner) siempre ve todas las pestañas. Una cuenta de admin con
   // permisos limitados solo ve — y solo puede abrir — las que le dieron.
   const allowedTabs = isOwner ? ADMIN_TAB_KEYS : (permissions || []);
@@ -17440,7 +17440,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
       <div className="flex-1 min-w-0">
 
       {tab === "mockups" && (
-        <AdminGarmentMockupLibrary products={sellableProducts} categories={categories} groups={groups} models={settings?.garmentMockupLibrary || []} onSaveSettings={onSaveSettings} onSaveProductsBulk={onSaveProductsBulk} />
+        <AdminGarmentMockupLibrary products={sellableProducts} categories={categories} groups={groups} models={settings?.garmentMockupLibrary || []} onSaveModels={onSaveGarmentModels} onSaveProductsBulk={onSaveProductsBulk} />
       )}
 
       {tab === "productos" && (
@@ -20655,6 +20655,14 @@ export default function App() {
     return { ok: true, code };
   };
 
+  const handleSaveGarmentModels = async (models) => {
+    // Only confirm success after the library exists in persistent storage.
+    const next = { ...settings, garmentMockupLibrary: models };
+    const saved = await storageSetVerbose("kulto:settings", JSON.stringify(next), true);
+    if (!saved?.ok) throw new Error(saved?.error || "No se pudo guardar la biblioteca");
+    setSettings(next);
+  };
+
   const handleSaveSettings = async (partial) => {
     setSettings((prev) => {
       const next = { ...prev, ...partial };
@@ -20842,6 +20850,7 @@ export default function App() {
               onDeleteReview={handleDeleteReview}
               onReorderReview={handleReorderReview}
               onSaveSettings={handleSaveSettings}
+              onSaveGarmentModels={handleSaveGarmentModels}
               onLogout={handleLogoutCustomer}
             />
           ) : (
