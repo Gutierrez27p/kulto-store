@@ -1800,7 +1800,7 @@ function autoColorSource(product, imgIdx = 0) {
   if (base) return { src: base, clean: true };
   const lum = (hex) => { const { r, g, b } = hexToRgb(hex); return 0.299 * r + 0.587 * g + 0.114 * b; };
   // Repintar fotos que ya traen el diseño no es confiable (se confunde con el fondo): solo si el admin lo activó en el producto.
-  if (product?.autoRecolor !== true) return null;
+  if (product?.autoRecolor !== true && !product?.fabricMask) return null;
   const withImg = (product?.colors || []).filter((c) => getColorImages(c).length > 0).sort((a, b) => lum(b.hex) - lum(a.hex));
   if (withImg.length) { const li = getColorImages(withImg[0]); return { src: li[imgIdx] || li[0], clean: false, refHex: withImg[0].hex }; }
   if (product?.photoPool?.length && product?.colors?.length) {
@@ -1852,7 +1852,7 @@ async function guessRefColorHex(src, colors) {
 const autoRecolorCache = new Map();
 // Foto generada para un color que no tiene foto propia (ver arriba).
 function useAutoColorImage(product, color, enabled, imgIdx = 0) {
-  const info = enabled && color && getColorImages(color).length === 0 && !activeMockup(product) ? autoColorSource(product, imgIdx) : null;
+  const info = enabled && color && getColorImages(color).length === 0 ? autoColorSource(product, imgIdx) : null;
   const key = info ? `${product.fabricMask || ""}|${info.src}|${info.refHex || ""}|${info.guessFrom ? "g" : ""}|${info.clean ? 1 : 0}|${color.hex}` : null;
   const [url, setUrl] = useState(() => (key ? autoRecolorCache.get(key) || null : null));
   useEffect(() => {
@@ -3955,7 +3955,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
   // La primera variante conserva las fotos originales subidas por el administrador.
   // En otras variantes, un mockup configurado permite mostrar el nuevo color;
   // nunca sustituimos la foto original por una camiseta vacía.
-  const mockActive = !!mock && colorImages.length === 0 && (images.length === 0 || colorIdx > 0);
+  const mockActive = !!mock && !product.fabricMask && colorImages.length === 0 && (images.length === 0 || colorIdx > 0);
   const mockHex = color?.hex || "#ffffff";
   const canRecolor = colorImages.length === 0 && !mockActive && (Boolean(product.fabricMask) || product.autoRecolor === true) && (colorIdx > 0 || images.length === 0);
   const autoImage = useAutoColorImage(product, color, canRecolor, imgIdx);
