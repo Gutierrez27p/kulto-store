@@ -7,3 +7,26 @@ html, body, #root {
   padding: 0;
   min-height: 100%;
 }
+
+/* KULTO Editorial 2026 — presentación únicamente; conserva catálogo y datos existentes. */
+.kulto-editorial-home{background:#f7f5f0;color:#171717}
+.kulto-editorial-home > .flex{background:#f7f5f0}
+.kulto-editorial-home .max-w-6xl{max-width:1380px}
+.kulto-editorial-home .kulto-editorial-benefits{display:flex;align-items:center;justify-content:space-evenly;gap:20px;flex-wrap:wrap;padding:20px 24px;background:#f0eee9;color:#171717;font-size:13px;font-weight:700;letter-spacing:.01em}
+.kulto-editorial-home .kulto-editorial-categories{padding-top:48px;padding-bottom:12px}
+.kulto-editorial-section-head{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:22px;color:#141414}
+.kulto-editorial-section-head h2{font-family:'Archivo Black',Inter,sans-serif;font-size:clamp(28px,4vw,44px);font-weight:900;letter-spacing:-.055em;line-height:1.05}
+.kulto-editorial-section-head h2 em{font-style:italic}
+.kulto-editorial-section-head button{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700}
+.kulto-editorial-category-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px}
+.kulto-editorial-category{position:relative;aspect-ratio:3/4;border-radius:15px;overflow:hidden;background:#d7d4ce;text-align:left;isolation:isolate}
+.kulto-editorial-category img{width:100%;height:100%;object-fit:cover;transition:transform .4s ease}
+.kulto-editorial-category:hover img{transform:scale(1.06)}
+.kulto-editorial-category:after{content:"";position:absolute;inset:40% 0 0;background:linear-gradient(transparent,rgba(0,0,0,.68));z-index:0}
+.kulto-editorial-category span{position:absolute;z-index:1;left:14px;right:12px;bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:5px;color:white;font-size:clamp(12px,1.4vw,17px);font-weight:800;text-shadow:0 1px 4px #0008}
+.kulto-editorial-home .kulto-card{border-radius:14px!important;box-shadow:none!important;transition:transform .2s ease,box-shadow .2s ease}
+.kulto-editorial-home .kulto-card:hover{transform:translateY(-4px);box-shadow:0 14px 30px #00000015!important}
+.kulto-editorial-home .kulto-display{letter-spacing:-.04em}
+.kulto-editorial-home section{scroll-margin-top:100px}
+@media(max-width:850px){.kulto-editorial-category-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.kulto-editorial-home .kulto-editorial-categories{padding-top:30px}}
+@media(max-width:520px){.kulto-editorial-category-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.kulto-editorial-home .kulto-editorial-benefits{gap:8px;font-size:11px;padding:14px 10px}.kulto-editorial-section-head h2{font-size:29px}.kulto-editorial-section-head button{font-size:11px}.kulto-editorial-category{border-radius:12px}}
