@@ -1051,7 +1051,7 @@ function resolveProductMockup(product) {
   if (!model?.base) return original;
   const design = original?.design || (product?.designs?.length === 1 ? product.designs[0]?.image : null);
   if (!design) return original; // Never hide an existing product photo if its art cannot be recovered.
-  return { ...model, ...original, base: model.base, backBase: model.backBase || null, ar: model.ar || original?.ar, backAr: model.backAr || original?.backAr, design, enabled: true };
+  return { ...model, ...original, base: model.base, backBase: model.backBase || null, mask: model.mask || null, backMask: model.backMask || null, ar: model.ar || original?.ar, backAr: model.backAr || original?.backAr, design, enabled: true };
 }
 const mockupPrepCache = new Map(); // src -> Promise<prep>
 const mockupTintedCache = new Map(); // `${src}|${hex}` -> canvas
@@ -1074,8 +1074,9 @@ function loadMockupImg(src) {
 // luces y sombras de la tela. Así se puede repintar la prenda de cualquier
 // color —aunque el mockup sea negro— sin tocar el fondo, y el diseño se
 // recorta a la forma de la prenda.
-function prepareMockupBase(src) {
-  if (mockupPrepCache.has(src)) return mockupPrepCache.get(src);
+function prepareMockupBase(src, explicitMask = null) {
+  const cacheKey = `${src}|${explicitMask || ""}`;
+  if (mockupPrepCache.has(cacheKey)) return mockupPrepCache.get(cacheKey);
   const p = (async () => {
     const img = await loadMockupImg(src);
     const k = Math.min(1, 900 / Math.max(img.naturalWidth, img.naturalHeight));
@@ -1086,6 +1087,19 @@ function prepareMockupBase(src) {
     const ctx = cv.getContext("2d", { willReadFrequently: true });
     ctx.drawImage(img, 0, 0, w, h);
     const orig = ctx.getImageData(0, 0, w, h);
+    let maskAlpha = null;
+    if (explicitMask) {
+      const stencil = await loadMockupImg(explicitMask);
+      const maskCanvas = document.createElement("canvas");
+      maskCanvas.width = w; maskCanvas.height = h;
+      const maskContext = maskCanvas.getContext("2d", { willReadFrequently: true });
+      maskContext.drawImage(stencil, 0, 0, w, h);
+      const pixels = maskContext.getImageData(0, 0, w, h).data;
+      maskAlpha = new Float32Array(w * h);
+      let covered = 0;
+      for (let i = 0; i < w * h; i++) { maskAlpha[i] = pixels[i * 4 + 3] / 255; if (maskAlpha[i] > 0.1) covered++; }
+      if (covered < w * h * 0.02 || covered > w * h * 0.95) throw new Error("La máscara debe contener una silueta opaca sobre fondo transparente.");
+    }
     const d = orig.data;
     const n = w * h;
     const lum = new Float32Array(n);
@@ -1125,7 +1139,9 @@ function prepareMockupBase(src) {
       }
     }
     const mask = new Uint8Array(n);
-    if (isCutout) {
+    if (maskAlpha) {
+      for (let i = 0; i < n; i++) mask[i] = maskAlpha[i] >= 0.1 ? 1 : 0;
+    } else if (isCutout) {
       for (let i = 0; i < n; i++) mask[i] = d[i * 4 + 3] >= 10 ? 1 : 0;
     } else if (seed >= 0) {
       const stack = [seed];
@@ -1161,8 +1177,8 @@ function prepareMockupBase(src) {
       for (let i = 0; i < n; i++) mask[i] = d[i * 4 + 3] >= 10 ? 1 : 0;
     }
     // borde suave (desenfoque simple de 3x3, dos veces)
-    let soft = Float32Array.from(mask);
-    for (let pass = 0; pass < 2; pass++) {
+    let soft = maskAlpha ? maskAlpha : (isCutout ? Float32Array.from({ length: n }, (_, i) => d[i * 4 + 3] / 255) : Float32Array.from(mask));
+    for (let pass = 0; pass < (maskAlpha || isCutout ? 0 : 2); pass++) {
       const next = new Float32Array(n);
       for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
@@ -1195,14 +1211,15 @@ function prepareMockupBase(src) {
     const mimg = mctx.createImageData(w, h);
     for (let i = 0; i < n; i++) { mimg.data[i * 4 + 3] = Math.round(soft[i] * 255); }
     mctx.putImageData(mimg, 0, 0);
-    return { w, h, orig, soft, shade, maskCv };
+    return { w, h, orig, soft, shade, maskCv, maskKey: explicitMask };
   })();
-  mockupPrepCache.set(src, p);
+  mockupPrepCache.set(cacheKey, p);
+  p.catch(() => mockupPrepCache.delete(cacheKey));
   return p;
 }
 
 function tintedMockupCanvas(src, prep, hex) {
-  const key = `${src}|${hex}`;
+  const key = `${src}|${prep.maskKey || ""}|${hex}`;
   if (mockupTintedCache.has(key)) return mockupTintedCache.get(key);
   const { w, h, orig, soft, shade } = prep;
   const { r: tr, g: tg, b: tb } = hexToRgb(hex);
@@ -1212,7 +1229,7 @@ function tintedMockupCanvas(src, prep, hex) {
   const out = ctx.createImageData(w, h);
   const d = orig.data, o = out.data;
   for (let i = 0; i < w * h; i++) {
-    const a = soft[i], s = shade[i] * 0.98;
+    const a = soft[i], s = shade[i];
     o[i * 4] = d[i * 4] * (1 - a) + tr * s * a;
     o[i * 4 + 1] = d[i * 4 + 1] * (1 - a) + tg * s * a;
     o[i * 4 + 2] = d[i * 4 + 2] * (1 - a) + tb * s * a;
@@ -1236,11 +1253,11 @@ function MockupComposite({ mockup, hex, innerRef, designProps }) {
   const logoSrc = hexL > 150 ? (mockup.logoLight || mockup.logoDark || null) : (mockup.logoDark || mockup.logoLight || null);
   useEffect(() => {
     let alive = true;
-    Promise.all([prepareMockupBase(mockup.base), mockup.design ? loadMockupImg(mockup.design) : Promise.resolve(null), logoSrc ? loadMockupImg(logoSrc).catch(() => null) : Promise.resolve(null)])
+    Promise.all([prepareMockupBase(mockup.base, mockup.mask), mockup.design ? loadMockupImg(mockup.design) : Promise.resolve(null), logoSrc ? loadMockupImg(logoSrc).catch(() => null) : Promise.resolve(null)])
       .then(([prep, dimg, limg]) => { if (alive) setSt({ prep, dimg, limg, error: false }); })
       .catch(() => { if (alive) setSt({ prep: null, dimg: null, limg: null, error: true }); });
     return () => { alive = false; };
-  }, [mockup.base, mockup.design, logoSrc]);
+  }, [mockup.base, mockup.mask, mockup.design, logoSrc]);
   useEffect(() => {
     const { prep, dimg, limg } = st;
     const cv = canvasRef.current;
@@ -1521,7 +1538,7 @@ function AdminMockupEditor({ draft, setDraft, inputStyle }) {
             )}
             <p className="text-xs mb-1" style={{ color: "var(--slate)" }}>Tocá o arrastrá sobre la prenda para mover {target === "logo" ? "el texto" : "el diseño"}:</p>
             <div className="rounded-xl overflow-hidden mx-auto relative" style={{ aspectRatio: "4 / 5", maxWidth: 280, background: "var(--ink-2)", border: "1px solid var(--line)" }}>
-              <MockupComposite mockup={editorSide === "back" && m.backBase ? { ...m, base: m.backBase, ar: m.backAr, x: m.backX ?? 50, y: m.backY ?? 38, w: m.backW ?? 40, rot: m.backRot ?? 0, logoLight: null, logoDark: null } : m} hex={previewHex} innerRef={innerRef} designProps={designProps} />
+              <MockupComposite mockup={editorSide === "back" && m.backBase ? { ...m, base: m.backBase, mask: m.backMask, ar: m.backAr, x: m.backX ?? 50, y: m.backY ?? 38, w: m.backW ?? 40, rot: m.backRot ?? 0, logoLight: null, logoDark: null } : m} hex={previewHex} innerRef={innerRef} designProps={designProps} />
               {showExample && m.cover && <img src={m.cover} alt="" draggable={false} className="absolute inset-0 w-full h-full object-contain" style={{ opacity: 0.45, pointerEvents: "none" }} />}
             </div>
             {m.cover && (
@@ -3986,7 +4003,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
   const mock = activeMockup(product);
   // Always honor the explicitly configured mockup; other uploaded photos remain in the gallery.
   const mockActive = !!mock;
-  const backMock = mockActive && mock.backBase ? { ...mock, base: mock.backBase, ar: mock.backAr, x: mock.backX ?? 50, y: mock.backY ?? 38, w: mock.backW ?? 40, rot: mock.backRot ?? 0, logoLight: null, logoDark: null } : null;
+  const backMock = mockActive && mock.backBase ? { ...mock, base: mock.backBase, mask: mock.backMask, ar: mock.backAr, x: mock.backX ?? 50, y: mock.backY ?? 38, w: mock.backW ?? 40, rot: mock.backRot ?? 0, logoLight: null, logoDark: null } : null;
   const mockHex = color?.hex || "#ffffff";
   const autoImage = useAutoColorImage(product, color, !mockActive && colorImages.length === 0, imgIdx);
   const activeImage = (colorImages.length === 0 && autoImage) || images[imgIdx] || null;
