@@ -1401,7 +1401,12 @@ async function detectDesignPlacement(baseSrc, exampleSrc, designSrc) {
 // Editor del admin: sube mockup vacío, diseño PNG y portada, y acomoda el
 // diseño arrastrándolo (o con los deslizadores) viendo cómo queda en un color.
 function AdminMockupEditor({ draft, setDraft, inputStyle }) {
-  const templates = useGarmentTemplates();\n  const [templateName, setTemplateName] = useState("");\n  const [templateStatus, setTemplateStatus] = useState("");\n  const m = draft.mockup || { enabled: true, base: null, ar: 0.8, design: null, x: 50, y: 38, w: 40, rot: 0, cover: null };\n  const selectedTemplate = m.templateId ? templates[m.templateId] : null;\n  const displayMockup = selectedTemplate ? { ...m, base: selectedTemplate.base, ar: selectedTemplate.ar } : m;
+  const templates = useGarmentTemplates();
+  const [templateName, setTemplateName] = useState("");
+  const [templateStatus, setTemplateStatus] = useState("");
+  const m = draft.mockup || { enabled: true, base: null, ar: 0.8, design: null, x: 50, y: 38, w: 40, rot: 0, cover: null };
+  const selectedTemplate = m.templateId ? templates[m.templateId] : null;
+  const displayMockup = selectedTemplate ? { ...m, base: selectedTemplate.base, ar: selectedTemplate.ar } : m;
   const set = (patch) => setDraft((d) => ({ ...d, mockup: { ...(d.mockup || { enabled: true, base: null, ar: 0.8, design: null, x: 50, y: 38, w: 40, rot: 0, cover: null }), ...patch } }));
   const [previewHex, setPreviewHex] = useState(draft.colors?.[0]?.hex || "#E8452C");
   const [busy, setBusy] = useState(false);
