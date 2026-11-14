@@ -18204,6 +18204,11 @@ function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, cus
     }
     return ps.slice(0, 4).map((p) => ({ key: p.id, label: p.name, img: tileImage(p), onClick: () => goCatalog(it) }));
   };
+  // Accesos editoriales al catálogo: se construyen únicamente con categorías reales.
+  const editorialCategories = Array.from(new Set((products || []).map((p) => p.category).filter(Boolean)));
+  const navCategory = (term) => editorialCategories.find((c) => c.toLocaleLowerCase("es").includes(term));
+  const navLabels = ["camiseta", "oversize", "sudadera", "top"].map((term) => navCategory(term)).filter(Boolean);
+  const navUnique = Array.from(new Set(navLabels)).slice(0, 4);
   const go = (p) => { setPage(p); setOpen(false); };
   useEffect(() => {
     if (!catalogMenuOpen) return;
@@ -18267,7 +18272,7 @@ function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, cus
               className="kulto-btn kulto-nav text-sm font-semibold pb-1 flex items-center gap-1"
               style={{ color: "var(--bone)", borderBottom: page === "catalog" ? "2px solid var(--signal)" : "2px solid transparent" }}
             >
-              Productos <ChevronDown size={14} />
+              Camisetas <ChevronDown size={14} />
             </button>
             {catalogMenuOpen && (() => {
               const activeItem = productsMenuItems.find((x) => x.id === megaItemId) || productsMenuItems[0] || null;
@@ -18327,6 +18332,10 @@ function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, cus
               );
             })()}
           </div>
+          {navUnique.map((category) => (
+            <NavLink key={category} label={category} active={false} onClick={() => { onGoCatalog?.({ category }); closeMenus(); }} />
+          ))}
+          <NavLink label="Ofertas" active={false} onClick={() => { onGoCatalog?.({ collection: "ofertas" }); closeMenus(); }} />
           <NavLink label="Personalizar" active={page === "wizard"} onClick={() => go("wizard")} />
           <NavLink label="Mi pedido" active={page === "seguimiento"} onClick={() => go("seguimiento")} />
           {customer && <NavLink label="Favoritos" active={page === "favoritos"} onClick={() => go("favoritos")} />}
