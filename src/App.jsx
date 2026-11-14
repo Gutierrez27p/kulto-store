@@ -5435,8 +5435,13 @@ function Home({ products, settings, reviews, customWorkGallery, onOpen, onGoCata
     }
   }
 
+  // Categorías derivadas de los productos ya publicados: no se cambian nombres ni imágenes.
+  const featuredCategories = [...new Set((products || []).map((p) => p.category).filter(Boolean))]
+    .slice(0, 6)
+    .map((name) => ({ name, product: products.find((p) => p.category === name) }));
+
   return (
-    <div>
+    <div className="kulto-editorial-home">
       <Hero onGoCatalog={onGoCatalog} onGoWizard={onGoWizard} onSearch={onSearch} heroTitle={settings.heroTitle} heroSubtitle={settings.heroSubtitle} heroImage={settings.heroImage} heroImages={settings.heroImages} banners={settings.banners} />
 
       <div className="kulto-editorial-benefits" aria-label="Ventajas de comprar en KULTO STORE">
