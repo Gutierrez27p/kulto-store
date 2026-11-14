@@ -16891,6 +16891,8 @@ function AdminGarmentMockupLibrary({ products, categories, groups, models, onSav
   const [name, setName] = useState("");
   const [front, setFront] = useState(null);
   const [back, setBack] = useState(null);
+  const [frontMask, setFrontMask] = useState(null);
+  const [backMask, setBackMask] = useState(null);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState("");
   const [modelId, setModelId] = useState("");
@@ -16907,10 +16909,14 @@ function AdminGarmentMockupLibrary({ products, categories, groups, models, onSav
     setStatus("");
     try {
       const b64 = await new Promise((resolve) => fileToBase64(file, resolve, 1400, 1, "image/png"));
-      const url = (await uploadDataUrlToStorage(b64)) || b64;
+      const url = await uploadDataUrlToStorage(b64);
+      if (!url) throw new Error("No se pudo subir a Storage; no se guarda el modelo para evitar fotos que desaparezcan.");
       const image = await loadMockupImg(url);
       const info = { url, ar: image.naturalWidth / image.naturalHeight };
-      if (side === "front") setFront(info); else setBack(info);
+      if (side === "front") setFront(info);
+      else if (side === "back") setBack(info);
+      else if (side === "frontMask") setFrontMask(info);
+      else setBackMask(info);
     } catch (e) { setStatus("No se pudo leer la imagen: " + (e?.message || "error")); }
     finally { setSaving(false); }
   };
@@ -16918,9 +16924,9 @@ function AdminGarmentMockupLibrary({ products, categories, groups, models, onSav
     if (!name.trim() || !front?.url || !back?.url) { setStatus("Indicá el nombre y subí delante y detrás."); return; }
     setSaving(true);
     try {
-      const next = [...models, { id: genId("garment"), name: name.trim(), base: front.url, ar: front.ar, backBase: back.url, backAr: back.ar, enabled: true, x: 50, y: 38, w: 38, backX: 50, backY: 38, backW: 40 }];
+      const next = [...models, { id: genId("garment"), name: name.trim(), base: front.url, ar: front.ar, backBase: back.url, backAr: back.ar, mask: frontMask?.url || null, backMask: backMask?.url || null, enabled: true, x: 50, y: 38, w: 38, backX: 50, backY: 38, backW: 40 }];
       await onSaveSettings({ garmentMockupLibrary: next });
-      setName(""); setFront(null); setBack(null); setStatus("Modelo guardado. Ya podés asignarlo a productos.");
+      setName(""); setFront(null); setBack(null); setFrontMask(null); setBackMask(null); setStatus("Modelo guardado. Ya podés asignarlo a productos.");
     } catch (e) { setStatus("Error al guardar: " + (e?.message || "sin conexión")); }
     finally { setSaving(false); }
   };
@@ -16951,6 +16957,14 @@ function AdminGarmentMockupLibrary({ products, categories, groups, models, onSav
             <input type="file" accept="image/png,image/webp" onChange={(e) => { pick(e.target.files?.[0], side); e.target.value = ""; }} className="sr-only" />
           </label>)}
         </div>
+        <p className="text-xs" style={{ color: "var(--slate)" }}>Si tu camiseta tiene fondo o deja partes sin colorear, subí también una máscara PNG: prenda sólida y opaca, fondo totalmente transparente, misma silueta en la misma posición. Es opcional para mockups ya recortados.</p>
+        <div className="grid grid-cols-2 gap-3">
+          {[[frontMask, "Máscara delantera", "frontMask"], [backMask, "Máscara trasera", "backMask"]].map(([img, label, side]) => <label key={side} className="rounded-xl p-3 text-xs cursor-pointer text-center" style={{ border: "1px dashed var(--line)" }}>
+            <p className="mb-2 font-semibold">{label} (opcional)</p>
+            {img ? <img src={img.url} alt={label} className="mx-auto h-24 object-contain" /> : <div className="h-24 flex items-center justify-center" style={{ color: "var(--slate)" }}>Añadir silueta PNG</div>}
+            <input type="file" accept="image/png,image/webp" onChange={(e) => { pick(e.target.files?.[0], side); e.target.value = ""; }} className="sr-only" />
+          </label>)}
+        </div>
         <button type="button" onClick={add} disabled={saving} className="kulto-btn rounded-full px-5 py-2.5 font-semibold" style={{ background: "var(--sun)", color: "var(--ink)" }}>{saving ? "Guardando…" : "Guardar modelo"}</button>
       </div>
       {models.length > 0 && <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -16959,7 +16973,7 @@ function AdminGarmentMockupLibrary({ products, categories, groups, models, onSav
           <div className="grid grid-cols-2 gap-2"><img src={m.base} alt="Delante" className="h-32 w-full object-contain"/><img src={m.backBase} alt="Detrás" className="h-32 w-full object-contain"/></div>
           <p className="text-xs mt-2" style={{ color: "var(--slate)" }}>{products.filter((p) => p.garmentMockupId === m.id).length} productos asignados</p>
           <button type="button" onClick={() => setTestModel(testModel === m.id ? null : m.id)} className="text-xs underline mt-2">Probar colores</button>
-          {testModel === m.id && <div className="mt-2 space-y-2"><input type="color" value={previewColor} onChange={(e) => setPreviewColor(e.target.value)} aria-label="Color de prueba"/><div className="grid grid-cols-2 h-44 gap-2"><MockupComposite mockup={{ ...m, design: null }} hex={previewColor}/><MockupComposite mockup={{ ...m, base: m.backBase, design: null }} hex={previewColor}/></div></div>}
+          {testModel === m.id && <div className="mt-2 space-y-2"><input type="color" value={previewColor} onChange={(e) => setPreviewColor(e.target.value)} aria-label="Color de prueba"/><div className="grid grid-cols-2 h-44 gap-2"><MockupComposite mockup={{ ...m, design: null }} hex={previewColor}/><MockupComposite mockup={{ ...m, base: m.backBase, mask: m.backMask, design: null }} hex={previewColor}/></div></div>}
         </div>)}
       </div>}
       <div className="rounded-2xl p-5 space-y-3" style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}>
