@@ -1090,9 +1090,13 @@ function prepareMockupBase(src) {
     const rr = med(rs), gg = med(gs), bb = med(bs);
     const refLum = 0.299 * rr + 0.587 * gg + 0.114 * bb;
     const thr = refLum < 90 ? 70 : 48;
+    // A cut-out PNG provides a more reliable mask than guessing from fabric colors.
+    const corners = [0, w - 1, (h - 1) * w, n - 1];
+    const isCutout = corners.filter((idx) => d[idx * 4 + 3] < 16).length >= 3;
     const cand = new Uint8Array(n);
     for (let i = 0; i < n; i++) {
       if (d[i * 4 + 3] < 10) continue;
+      if (isCutout) { cand[i] = 1; continue; }
       const dr = d[i * 4] - rr, dg = d[i * 4 + 1] - gg, db = d[i * 4 + 2] - bb;
       if (Math.sqrt(dr * dr + dg * dg + db * db) < thr) cand[i] = 1;
     }
@@ -1108,7 +1112,9 @@ function prepareMockupBase(src) {
       }
     }
     const mask = new Uint8Array(n);
-    if (seed >= 0) {
+    if (isCutout) {
+      for (let i = 0; i < n; i++) mask[i] = d[i * 4 + 3] >= 10 ? 1 : 0;
+    } else if (seed >= 0) {
       const stack = [seed];
       mask[seed] = 1;
       while (stack.length) {
@@ -1166,9 +1172,10 @@ function prepareMockupBase(src) {
     sample.sort((a, b) => a - b);
     const lref = Math.max(1, sample.length ? sample[sample.length >> 1] : 128);
     const ratios = sample.map((v) => Math.min(3, Math.max(0.2, v / lref))).sort((a, b) => a - b);
-    const p97 = ratios.length ? ratios[Math.min(ratios.length - 1, Math.floor(ratios.length * 0.97))] : 1;
+    // Preserve folds but center the selected color at its actual RGB value.
+    // The previous 0.88 base darkened every color by about 12%, including white.
     const shade = new Float32Array(n);
-    for (let i = 0; i < n; i++) shade[i] = Math.min(1, Math.max(0.12, 0.88 + 0.5 * (Math.min(3, Math.max(0.2, lum[i] / lref)) - 1)));
+    for (let i = 0; i < n; i++) shade[i] = Math.max(0.78, Math.min(1.12, 1 + 0.22 * (lum[i] / lref - 1)));
     const maskCv = document.createElement("canvas");
     maskCv.width = w; maskCv.height = h;
     const mctx = maskCv.getContext("2d");
@@ -3916,6 +3923,7 @@ function ProductReviewsBlock({ product, reviews }) {
 function ProductConfigurator({ product, settings, onAddToCart, compact, reviews = [] }) {
   const [colorIdx, setColorIdx] = useState(0);
   const [imgIdx, setImgIdx] = useState(0);
+  const [showUploadedPhoto, setShowUploadedPhoto] = useState(false);
   const [sizeIdx, setSizeIdx] = useState(0);
   const [aud, setAud] = useState(() => audsOf(product)[0] || "h");
   const [designMode, setDesignMode] = useState(product.designs && product.designs.length ? "design" : "custom");
@@ -3937,6 +3945,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
   useEffect(() => {
     setColorIdx(0);
     setImgIdx(0);
+    setShowUploadedPhoto(false);
     setSizeIdx(0);
     setAud(audsOf(product)[0] || "h");
     setDesignMode(product.designs && product.designs.length ? "design" : "custom");
@@ -3953,7 +3962,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
     setZoomOpen(false);
   }, [product.id]);
 
-  useEffect(() => { setImgIdx(0); }, [colorIdx]);
+  useEffect(() => { setImgIdx(0); setShowUploadedPhoto(false); }, [colorIdx]);
 
   const color = product.colors && product.colors[colorIdx];
   // Si el color no tiene fotos propias, se muestran las fotos generales del
@@ -3962,10 +3971,11 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
   const colorImages = color ? getColorImages(color) : [];
   const images = colorImages.length > 0 ? colorImages : (product.photoPool || []);
   const mock = activeMockup(product);
-  const mockActive = !!mock && colorImages.length === 0;
+  // Always honor the explicitly configured mockup; other uploaded photos remain in the gallery.
+  const mockActive = !!mock;
   const backMock = mockActive && mock.backBase ? { ...mock, base: mock.backBase, ar: mock.backAr, x: mock.backX ?? 50, y: mock.backY ?? 38, w: mock.backW ?? 40, rot: mock.backRot ?? 0, logoLight: null, logoDark: null } : null;
   const mockHex = color?.hex || "#ffffff";
-  const autoImage = useAutoColorImage(product, color, colorImages.length === 0, imgIdx);
+  const autoImage = useAutoColorImage(product, color, !mockActive && colorImages.length === 0, imgIdx);
   const activeImage = (colorImages.length === 0 && autoImage) || images[imgIdx] || null;
   const isCover = product.imageFit === "cover";
   const previewBg = product.imageBackground || (color && !mock && colorImages.length > 0 ? color.hex : "var(--ink-3)");
@@ -4060,7 +4070,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
             setZoomOrigin({ x: ((e.clientX - rect.left) / rect.width) * 100, y: ((e.clientY - rect.top) / rect.height) * 100 });
           }}
         >
-          {mockActive ? (
+          {mockActive && !showUploadedPhoto ? (
             backMock ? (
               <div className="grid grid-cols-2 gap-2 w-full h-full p-2 sm:p-3">
                 <div className="relative min-w-0 rounded-xl overflow-hidden" style={{ background: "var(--ink-2)" }}><MockupComposite mockup={mock} hex={mockHex} /><span className="absolute bottom-2 left-2 text-[10px] font-bold px-2 py-1 rounded-full" style={{ background: "var(--ink)", color: "var(--bone)" }}>DELANTE</span></div>
@@ -4098,7 +4108,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
               style={{ width: "48%", top: "26%", left: "26%", objectFit: "contain", filter: "drop-shadow(0 6px 14px rgba(0,0,0,0.35))" }}
             />
           )}
-          {images.length > 1 && (
+          {!mockActive && images.length > 1 && (
             <>
               <button
                 type="button"
@@ -4123,7 +4133,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
               </div>
             </>
           )}
-          {activeImage && (
+          {activeImage && (!mockActive || showUploadedPhoto) && (
             <button
               type="button"
               onClick={() => setZoomOpen(true)}
@@ -4135,14 +4145,15 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
             </button>
           )}
         </div>
-        {images.length > 1 && (
+        {(mockActive || images.length > 1) && (
           <div className="flex gap-2 mt-2 overflow-x-auto kulto-scrollbar pb-1">
+            {mockActive && <button type="button" onClick={() => setShowUploadedPhoto(false)} className="kulto-btn shrink-0 rounded-lg px-3 text-xs font-bold" style={{ minWidth: 85, height: 44, border: !showUploadedPhoto ? "2px solid var(--sun)" : "1px solid var(--line)", background: "var(--ink-3)", color: "var(--bone)" }}>Frente + espalda</button>}
             {images.map((img, i) => (
               <button
                 key={i}
-                onClick={() => setImgIdx(i)}
+                onClick={() => { setImgIdx(i); setShowUploadedPhoto(true); }}
                 className="kulto-btn shrink-0 rounded-lg overflow-hidden"
-                style={{ width: 44, height: 44, border: i === imgIdx ? "2px solid var(--sun)" : "1px solid var(--line)", background: "var(--ink-3)" }}
+                style={{ width: 44, height: 44, border: i === imgIdx && (!mockActive || showUploadedPhoto) ? "2px solid var(--sun)" : "1px solid var(--line)", background: "var(--ink-3)" }}
               >
                 <FastImg loading="lazy" src={img} className="w-full h-full object-contain" alt="" />
               </button>
