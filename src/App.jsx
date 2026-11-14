@@ -18136,8 +18136,8 @@ function NavLink({ label, active, onClick }) {
   );
 }
 
-function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, customer, themeMode, onToggleThemeMode, fontStep, onDecreaseFont, onIncreaseFont, socialLinks = {}, showAdminMenu = false, onGoAdminTab, onPreviewAsCustomer, productsMenuItems = [], onGoCatalog, products = [], onBack }) {
-  const [open, setOpen] = useState(false);
+function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, customer, themeMode, onToggleThemeMode, fontStep, onDecreaseFont, onIncreaseFont, socialLinks = {}, showAdminMenu = false, onGoAdminTab, onPreviewAsCustomer, productsMenuItems = [], onGoCatalog, onSearch, products = [], onBack }) {
+  const [open, setOpen] = useState(false);\n  const [searchOpen, setSearchOpen] = useState(false);\n  const [searchQuery, setSearchQuery] = useState("");
   const [adminMenuOpen, setAdminMenuOpen] = useState(false);
   const adminMenuRef = useRef(null);
   // Menú flotante de "Productos" (desktop) — lista "Catálogo" + los accesos
@@ -18415,6 +18415,21 @@ function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, cus
               )}
             </div>
           )}
+          <div className="relative">
+            <button type="button" aria-label="Buscar prendas" title="Buscar productos"
+              onClick={() => setSearchOpen((v) => !v)} className="kulto-btn p-2 rounded-full" style={{ color: "var(--bone)" }}>
+              <Search size={21} />
+            </button>
+            {searchOpen && (
+              <form onSubmit={(e) => { e.preventDefault(); if (searchQuery.trim()) { onSearch?.(searchQuery.trim()); setSearchOpen(false); } }}
+                className="absolute right-0 top-full mt-3 p-3 rounded-xl shadow-xl flex gap-2" style={{ background: "#161616", width: "min(87vw,350px)", zIndex: 80, border: "1px solid #555" }}>
+                <input autoFocus value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Buscar camisetas, sudaderas..." aria-label="Buscar productos"
+                  className="min-w-0 flex-1 px-3 py-2 rounded-lg text-sm" style={{ color: "#111", background: "white" }} />
+                <button type="submit" aria-label="Buscar" className="rounded-lg px-3 py-2" style={{ background: "#fff", color: "#111" }}><Search size={17}/></button>
+              </form>
+            )}
+          </div>
           <button onClick={onOpenCart} className="kulto-btn relative p-2 rounded-full" style={{ color: "var(--bone)" }}>
             <ShoppingBag size={21} />
             {cartCount > 0 && (
@@ -20560,7 +20575,7 @@ export default function App() {
   return (
     <div className="kulto-root min-h-screen flex flex-col" data-mode={themeMode}>
       <GlobalStyle colors={settings.theme} />
-      <Header page={page} setPage={setPage} onBack={goBack} cartCount={cartCount} onOpenCart={() => setCartOpen(true)} logoImage={settings.logoImage} logoText={settings.logoText} customer={customer} themeMode={themeMode} onToggleThemeMode={toggleThemeMode} fontStep={fontStep} onDecreaseFont={decreaseFont} onIncreaseFont={increaseFont} socialLinks={{ instagram: settings.socialInstagram, facebook: settings.socialFacebook, tiktok: settings.socialTiktok }} showAdminMenu={hasAdminAccess} onGoAdminTab={jumpToAdminTab} onPreviewAsCustomer={() => { setPreviewAsCustomer(true); setPage("home"); }} productsMenuItems={settings.productsMenuItems || []} onGoCatalog={goToCatalog} products={sellableProducts} />
+      <Header page={page} setPage={setPage} onBack={goBack} cartCount={cartCount} onOpenCart={() => setCartOpen(true)} logoImage={settings.logoImage} logoText={settings.logoText} customer={customer} themeMode={themeMode} onToggleThemeMode={toggleThemeMode} fontStep={fontStep} onDecreaseFont={decreaseFont} onIncreaseFont={increaseFont} socialLinks={{ instagram: settings.socialInstagram, facebook: settings.socialFacebook, tiktok: settings.socialTiktok }} showAdminMenu={hasAdminAccess} onGoAdminTab={jumpToAdminTab} onPreviewAsCustomer={() => { setPreviewAsCustomer(true); setPage("home"); }} productsMenuItems={settings.productsMenuItems || []} onGoCatalog={goToCatalog} onSearch={(q) => { setCatalogInitialGroup(""); setCatalogSearchQuery(q); setPage("catalog"); }} products={sellableProducts} />
       {hasAdminAccess && previewAsCustomer && (
         <div className="sticky top-16 z-30 flex items-center justify-center gap-3 px-4 py-2 text-sm font-semibold" style={{ background: "var(--sun)", color: "var(--ink)" }}>
           <span>Estás viendo la web como la vería un cliente.</span>
@@ -20574,7 +20589,7 @@ export default function App() {
         </div>
       )}
       <InstallAppBanner />
-      <MarqueeStrip />
+      {page !== "home" && <MarqueeStrip />}
       {showAbandonedBanner && (
         <AbandonedCartBanner
           hours={Math.floor(hoursSince(cartSavedAt))}
