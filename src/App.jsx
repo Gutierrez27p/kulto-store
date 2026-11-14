@@ -1,5 +1,6 @@
 import { escapeEmailHtml, secureSixDigitCode } from "./email-safety.js";
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { renderGarmentColor } from "./utils/garmentColor.js";
 import {
   ShoppingBag, X, Menu, Plus, Minus, Trash2, Pencil, ChevronRight, ChevronLeft, ChevronDown,
   MessageCircle, Lock, Check, Shirt, Upload, Package, Star, Sparkles, ArrowRight,
@@ -1203,6 +1204,29 @@ function tintedMockupCanvas(src, prep, hex) {
   return cv;
 }
 
+// Biblioteca compartida de prendas base: una plantilla PNG por tipo, estampado por producto.
+const GARMENT_TEMPLATES_KEY = "garment-base-templates-v1";
+let garmentTemplatesPromise = null;
+function readGarmentTemplates() {
+  if (!garmentTemplatesPromise) garmentTemplatesPromise = storageGet(GARMENT_TEMPLATES_KEY, true)
+    .then((raw) => { try { return JSON.parse(raw || "{}") || {}; } catch { return {}; } })
+    .catch(() => ({}));
+  return garmentTemplatesPromise;
+}
+function useGarmentTemplates() {
+  const [templates, setTemplates] = useState({});
+  useEffect(() => { let live = true; const update = (e) => { if (live) setTemplates(e.detail); }; readGarmentTemplates().then((v) => { if (live) setTemplates(v); }); window.addEventListener("kulto-garment-templates", update); return () => { live = false; window.removeEventListener("kulto-garment-templates", update); }; }, []);
+  return templates;
+}
+function resolveGarmentMockup(product, templates, side = "front") {
+  const root = product?.mockup;
+  if (!root?.enabled) return null;
+  const m = side === "back" ? root.back : root;
+  if (!m || !(m.design || m.logoLight || m.logoDark)) return null;
+  const template = m.templateId ? templates?.[m.templateId] : null;
+  const base = template?.base || m.base;
+  return base ? { ...m, base, ar: template?.ar || m.ar, cover: m.cover || (side === "front" ? root.cover : null) } : null;
+}
 function activeMockup(product) {
   const m = product?.mockup;
   return m && m.enabled && m.base && (m.design || m.logoLight || m.logoDark) ? m : null;
@@ -1379,8 +1403,20 @@ async function detectDesignPlacement(baseSrc, exampleSrc, designSrc) {
 // Editor del admin: sube mockup vacío, diseño PNG y portada, y acomoda el
 // diseño arrastrándolo (o con los deslizadores) viendo cómo queda en un color.
 function AdminMockupEditor({ draft, setDraft, inputStyle }) {
-  const m = draft.mockup || { enabled: true, base: null, ar: 0.8, design: null, x: 50, y: 38, w: 40, rot: 0, cover: null };
-  const set = (patch) => setDraft((d) => ({ ...d, mockup: { ...(d.mockup || { enabled: true, base: null, ar: 0.8, design: null, x: 50, y: 38, w: 40, rot: 0, cover: null }), ...patch } }));
+  const templates = useGarmentTemplates();
+  const [side, setSide] = useState("front");
+  const [templateName, setTemplateName] = useState("");
+  const [templateStatus, setTemplateStatus] = useState("");
+  const root = draft.mockup || { enabled: true, base: null, ar: 0.8, design: null, x: 50, y: 38, w: 40, rot: 0, cover: null };
+  const m = side === "back" ? (root.back || { base: null, design: null, ar: 0.8, x: 50, y: 38, w: 40, rot: 0 }) : root;
+  const selectedTemplate = m.templateId ? templates[m.templateId] : null;
+  const displayMockup = selectedTemplate ? { ...m, base: selectedTemplate.base, ar: selectedTemplate.ar } : m;
+  const set = (patch) => setDraft((d) => {
+    const existing = d.mockup || { enabled: true };
+    return { ...d, mockup: side === "back"
+      ? { ...existing, back: { ...(existing.back || {}), ...patch } }
+      : { ...existing, ...patch } };
+  });
   const [previewHex, setPreviewHex] = useState(draft.colors?.[0]?.hex || "#E8452C");
   const [busy, setBusy] = useState(false);
   const innerRef = useRef(null);
@@ -1390,11 +1426,11 @@ function AdminMockupEditor({ draft, setDraft, inputStyle }) {
   const [showExample, setShowExample] = useState(false);
   const [target, setTarget] = useState("design"); // qué se mueve: "design" o "logo"
   const autoPlace = async () => {
-    if (!m.base || !m.design || !m.cover) return;
+    if (!displayMockup.base || !m.design || !m.cover) return;
     setDetecting(true);
     setDetectMsg("");
     try {
-      const r = await detectDesignPlacement(m.base, m.cover, m.design);
+      const r = await detectDesignPlacement(displayMockup.base, m.cover, m.design);
       if (r.ok) { set({ x: r.x, y: r.y, w: r.w, rot: r.rot }); setDetectMsg("Listo: acomodé el diseño como en el ejemplo. Podés ajustarlo a mano si hace falta."); }
       else setDetectMsg(r.error);
     } catch {
@@ -1454,25 +1490,69 @@ function AdminMockupEditor({ draft, setDraft, inputStyle }) {
     </div>
   );
 
-  const canPreview = !!m.base;
+  const saveTemplate = async (file) => {
+    if (!file || !templateName.trim()) { setTemplateStatus("Escribí un nombre y elegí un PNG."); return; }
+    if (file.type !== "image/png") { setTemplateStatus("La plantilla debe ser PNG con fondo transparente."); return; }
+    setBusy(true);
+    try {
+      const b64 = await new Promise((resolve) => fileToBase64(file, resolve, 1400, 1, "image/png"));
+      const url = (await uploadDataUrlToStorage(b64)) || b64;
+      const ar = await new Promise((resolve) => { const i = new Image(); i.onload = () => resolve(i.naturalWidth / i.naturalHeight); i.onerror = () => resolve(0.8); i.src = b64; });
+      const id = templateName.trim().toLowerCase().replace(/[^a-z0-9áéíóúñ-]+/gi, "-");
+      const next = { ...await readGarmentTemplates(), [id]: { name: templateName.trim(), base: url, ar } };
+      const ok = await storageSet(GARMENT_TEMPLATES_KEY, JSON.stringify(next), true);
+      if (!ok) throw new Error("No se pudo guardar la plantilla compartida.");
+      garmentTemplatesPromise = Promise.resolve(next);
+      window.dispatchEvent(new CustomEvent("kulto-garment-templates", { detail: next }));
+      set({ templateId: id, enabled: true });
+      setTemplateStatus("Plantilla compartida guardada. Guardá también el producto.");
+    } catch (err) { setTemplateStatus(err.message || "Error guardando plantilla."); }
+    finally { setBusy(false); }
+  };
+  const canPreview = !!displayMockup.base;
   return (
     <div className="rounded-2xl p-3 flex flex-col gap-3" style={{ background: "var(--ink-3)", border: "1px dashed var(--line)" }}>
       <div>
-        <p className="text-sm font-semibold" style={{ color: "var(--bone)" }}>Mockup con diseño (los colores se generan solos)</p>
+        <p className="text-sm font-semibold" style={{ color: "var(--bone)" }}>Mockup delantero y trasero (los colores se generan solos)</p>
         <p className="text-xs mt-1" style={{ color: "var(--slate)" }}>
-          Subí la prenda vacía (mejor blanca o muy clara), el diseño en PNG sin fondo y una foto de portada de cómo querés que se vea. Cuando el cliente cambie de color, solo se pinta la prenda y el diseño queda en el mismo lugar.
+          Configura por separado la delantera y la espalda. Cada cara tiene su propio mockup PNG, estampado transparente y posición. Ambas cambian de color al seleccionar una variante, sin alterar la estampa.
         </p>
       </div>
+      <div className="flex gap-2" role="tablist" aria-label="Cara de la prenda">
+        {[[ "front", "Delantera" ], [ "back", "Trasera" ]].map(([value, label]) => (
+          <button type="button" key={value} role="tab" aria-selected={side === value}
+            className="kulto-btn flex-1 rounded-xl px-3 py-2.5 text-sm font-semibold"
+            style={{ background: side === value ? "var(--sun)" : "var(--ink)", color: side === value ? "var(--ink)" : "var(--bone)", border: "1px solid var(--line)" }}
+            onClick={() => { setSide(value); setDetectMsg(""); setTemplateStatus(""); }}>{label}</button>
+        ))}
+      </div>
+      <p className="text-xs" style={{ color: "var(--slate)" }}>
+        {side === "front" ? "Configura el mockup y el estampado delantero." : "Configura un segundo mockup y PNG para la espalda. Si no tiene estampado trasero, puedes dejarlo vacío."}
+      </p>
       <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer" style={{ color: "var(--bone)" }}>
-        <input type="checkbox" checked={!!m.enabled} onChange={(e) => set({ enabled: e.target.checked })} />
+        <input type="checkbox" checked={!!root.enabled} onChange={(e) => setDraft((d) => ({ ...d, mockup: { ...(d.mockup || {}), enabled: e.target.checked } }))} />
         Usar el mockup en este producto
       </label>
-      {slot("1. Mockup vacío", "La prenda sin estampa, de frente.", "base", m.base)}
+      <div className="rounded-xl p-3 flex flex-col gap-2" style={{ background: "var(--ink)", border: "1px solid var(--line)" }}>
+        <p className="text-xs font-semibold" style={{ color: "var(--bone)" }}>Plantilla reutilizable para varios productos</p>
+        <select value={m.templateId || ""} onChange={(e) => set({ templateId: e.target.value || null, enabled: true })} className="w-full rounded-lg p-2 text-sm" style={{ background: "var(--ink-3)", color: "var(--bone)" }}>
+          <option value="">Usar mockup propio de este producto</option>
+          {Object.entries(templates).map(([id, item]) => <option key={id} value={id}>{item.name}</option>)}
+        </select>
+        <input type="text" placeholder="Nombre de plantilla, ej. Oversize" value={templateName} onChange={(e) => setTemplateName(e.target.value)} className="rounded-lg p-2 text-sm" style={{ background: "var(--ink-3)", color: "var(--bone)" }} />
+        <label className="kulto-btn text-xs px-3 py-2 rounded-full cursor-pointer text-center" style={{ background: "var(--sun)", color: "var(--ink)" }}>
+          Crear plantilla compartida (PNG transparente)
+          <input type="file" accept="image/png" className="hidden" onChange={(e) => { saveTemplate(e.target.files?.[0]); e.target.value = ""; }} />
+        </label>
+        {templateStatus && <p className="text-xs" style={{ color: "var(--bone)" }}>{templateStatus}</p>}
+      </div>
+      {m.templateId && selectedTemplate && <p className="text-xs" style={{ color: "var(--sun)" }}>Plantilla activa: {selectedTemplate.name}. Solo necesitás subir el estampado de este producto.</p>}
+      {slot("1. Mockup vacío", side === "front" ? "Camiseta vista de frente, sin estampado." : "Camiseta vista por detrás, sin estampado.", "base", m.base)}
       {slot("2. Diseño (PNG)", "La estampa con fondo transparente.", "design", m.design)}
-      {slot("3. Ejemplo / portada", "Foto de cómo debe quedar: el mismo mockup con el diseño ya puesto en su lugar. Se ve en las tarjetas y sirve para acomodar el diseño solo.", "cover", m.cover)}
+      {slot(side === "front" ? "3. Imagen de portada" : "3. Imagen trasera (opcional)", "Foto final de esta cara de la prenda. En la delantera será la portada del catálogo.", "cover", m.cover)}
       {slot("4. Texto para prendas claras (negro)", "Opcional: el texto o logo en negro, PNG sin fondo (ej. Kulto en el frente).", "logoLight", m.logoLight)}
       {slot("5. Texto para prendas oscuras (blanco)", "Opcional: el mismo texto en blanco. Se usa solo en las prendas oscuras.", "logoDark", m.logoDark)}
-      {m.base && m.design && m.cover && (
+      {displayMockup.base && m.design && m.cover && (
         <div className="flex flex-col gap-1.5">
           <button type="button" onClick={autoPlace} disabled={detecting} className="kulto-btn text-xs font-semibold px-4 py-2.5 rounded-full self-start" style={{ background: "var(--sun)", color: "var(--ink)", opacity: detecting ? 0.6 : 1 }}>
             {detecting ? "Comparando…" : "Acomodar el diseño solo, según el ejemplo"}
@@ -1493,7 +1573,7 @@ function AdminMockupEditor({ draft, setDraft, inputStyle }) {
             )}
             <p className="text-xs mb-1" style={{ color: "var(--slate)" }}>Tocá o arrastrá sobre la prenda para mover {target === "logo" ? "el texto" : "el diseño"}:</p>
             <div className="rounded-xl overflow-hidden mx-auto relative" style={{ aspectRatio: "4 / 5", maxWidth: 280, background: "var(--ink-2)", border: "1px solid var(--line)" }}>
-              <MockupComposite mockup={m} hex={previewHex} innerRef={innerRef} designProps={designProps} />
+              <MockupComposite mockup={displayMockup} hex={previewHex} innerRef={innerRef} designProps={designProps} />
               {showExample && m.cover && <img src={m.cover} alt="" draggable={false} className="absolute inset-0 w-full h-full object-contain" style={{ opacity: 0.45, pointerEvents: "none" }} />}
             </div>
             {m.cover && (
@@ -1526,7 +1606,7 @@ function AdminMockupEditor({ draft, setDraft, inputStyle }) {
           </div>
         </div>
       )}
-      <p className="text-[11px]" style={{ color: "var(--slate)" }}>Recordá guardar el producto. Los colores que tengan su propia foto siguen usando esa foto.</p>
+      <p className="text-[11px]" style={{ color: "var(--slate)" }}>Guardá el producto para conservar las dos caras. El mockup delantero ya configurado se mantiene intacto al añadir la trasera.</p>
     </div>
   );
 }
@@ -1799,7 +1879,7 @@ function autoColorSource(product, imgIdx = 0) {
   if (base) return { src: base, clean: true };
   const lum = (hex) => { const { r, g, b } = hexToRgb(hex); return 0.299 * r + 0.587 * g + 0.114 * b; };
   // Repintar fotos que ya traen el diseño no es confiable (se confunde con el fondo): solo si el admin lo activó en el producto.
-  if (product?.autoRecolor !== true) return null;
+  if (product?.autoRecolor !== true && !product?.fabricMask) return null;
   const withImg = (product?.colors || []).filter((c) => getColorImages(c).length > 0).sort((a, b) => lum(b.hex) - lum(a.hex));
   if (withImg.length) { const li = getColorImages(withImg[0]); return { src: li[imgIdx] || li[0], clean: false, refHex: withImg[0].hex }; }
   if (product?.photoPool?.length && product?.colors?.length) {
@@ -1851,14 +1931,28 @@ async function guessRefColorHex(src, colors) {
 const autoRecolorCache = new Map();
 // Foto generada para un color que no tiene foto propia (ver arriba).
 function useAutoColorImage(product, color, enabled, imgIdx = 0) {
-  const info = enabled && color && getColorImages(color).length === 0 && !activeMockup(product) ? autoColorSource(product, imgIdx) : null;
-  const key = info ? `${info.src}|${info.refHex || ""}|${info.guessFrom ? "g" : ""}|${info.clean ? 1 : 0}|${color.hex}` : null;
+  const info = enabled && color && getColorImages(color).length === 0 ? autoColorSource(product, imgIdx) : null;
+  const key = info ? `${product.fabricMask || ""}|${info.src}|${info.refHex || ""}|${info.guessFrom ? "g" : ""}|${info.clean ? 1 : 0}|${color.hex}` : null;
   const [url, setUrl] = useState(() => (key ? autoRecolorCache.get(key) || null : null));
   useEffect(() => {
     if (!key) { setUrl(null); return; }
     if (autoRecolorCache.has(key)) { setUrl(autoRecolorCache.get(key)); return; }
     let alive = true;
     (async () => {
+      if (product.fabricMask && info.src) {
+        try {
+          const [photo, fabricMask] = await Promise.all([
+            loadMockupImg(info.src),
+            loadMockupImg(product.fabricMask),
+          ]);
+          const canvas = document.createElement("canvas");
+          renderGarmentColor({ canvas, photo, fabricMask, color: color.hex });
+          return canvas.toDataURL("image/png");
+        } catch (error) {
+          console.warn("[Kulto] Máscara de tela no válida; se conserva la foto original.", error);
+          return null;
+        }
+      }
       if (info.clean) return tintImageToColor(info.src, color.hex);
       const ref = info.guessFrom ? (await guessRefColorHex(info.src, info.guessFrom)) || info.refHex : info.refHex;
       // la foto ya es de este color: se muestra tal cual
@@ -3458,7 +3552,11 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
     combined = product.photoPool;
   }
   const images = combined;
-  const mock = activeMockup(product);
+  const garmentTemplates = useGarmentTemplates();
+  const mock = resolveGarmentMockup(product, garmentTemplates);
+  const backMock = resolveGarmentMockup(product, garmentTemplates, "back");
+  const [cardSide, setCardSide] = useState("front");
+  const currentMock = cardSide === "back" && backMock ? backMock : (mock || backMock);
   const [mockColor, setMockColor] = useState(null);
   const [autoColorIdx, setAutoColorIdx] = useState(null);
 
@@ -3467,20 +3565,20 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
   // punto correspondiente aunque se haya llegado ahí con las flechitas.
   let activeColorIdx = -1;
   starts.forEach((s, i) => { if (s !== null && s <= idx) activeColorIdx = i; });
-  if (mock) activeColorIdx = mockColor === null ? -1 : mockColor;
+  if (currentMock) activeColorIdx = mockColor === null ? -1 : mockColor;
   else if (autoColorIdx !== null) activeColorIdx = autoColorIdx;
   const activeColor = activeColorIdx >= 0 ? colors[activeColorIdx] : colors[0];
 
   const onSale = product.tags?.oferta && product.salePrice;
   const isCover = product.imageFit === "cover";
-  const bg = product.imageBackground || (activeColor && !mock ? activeColor.hex : "var(--ink-3)");
+  const bg = product.imageBackground || (activeColor && !currentMock ? activeColor.hex : "var(--ink-3)");
 
   const prev = (e) => { e.stopPropagation(); setIdx((i) => (i - 1 + images.length) % images.length); };
   const next = (e) => { e.stopPropagation(); setIdx((i) => (i + 1) % images.length); };
   const cardAutoImg = useAutoColorImage(product, autoColorIdx !== null ? colors[autoColorIdx] : null, autoColorIdx !== null);
   const pickColor = (e, i) => {
     e.stopPropagation();
-    if (mock) { setMockColor(i); return; }
+    if (currentMock) { setMockColor(i); return; }
     if (starts[i] !== null) { setAutoColorIdx(null); setIdx(starts[i]); return; }
     if (autoColorSource(product)) setAutoColorIdx(i);
   };
@@ -3540,7 +3638,7 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
       qty: quickQty,
       unitPrice: onSale ? product.salePrice : product.price,
       points: product.points ?? null,
-      previewImage: (mock ? mock.cover : images[idx]) || null,
+      previewImage: (currentMock ? currentMock.cover : images[idx]) || null,
     };
     onAddToCart(item);
     setQuickJustAdded(true);
@@ -3560,11 +3658,11 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
         className="relative overflow-hidden"
         style={{ background: bg, aspectRatio: "4 / 5" }}
       >
-        {mock ? (
-          mockColor === null && mock.cover ? (
-            <FastImg loading="lazy" src={mock.cover} alt={product.name} className="kulto-card-img w-full h-full object-cover" />
+        {currentMock ? (
+          mockColor === null && currentMock.cover ? (
+            <FastImg loading="lazy" src={currentMock.cover} alt={product.name} className="kulto-card-img w-full h-full object-cover" />
           ) : (
-            <MockupComposite mockup={mock} hex={colors[mockColor ?? 0]?.hex || "#ffffff"} />
+            <MockupComposite mockup={currentMock} hex={colors[mockColor ?? 0]?.hex || "#ffffff"} />
           )
         ) : autoColorIdx !== null && cardAutoImg ? (
           <FastImg loading="lazy" src={cardAutoImg} alt={product.name} className="kulto-card-img w-full h-full object-contain" />
@@ -3573,6 +3671,17 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
         ) : (
           <div className="w-full h-full flex items-center justify-center">
             <Shirt size={36} style={{ color: "rgba(243,239,230,0.35)" }} />
+          </div>
+        )}
+        {mock && backMock && (
+          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1 rounded-full p-1"
+            style={{ background: "rgba(15,15,15,.85)" }} role="group" aria-label="Vista de la camiseta">
+            {[[ "front", "Delante" ], [ "back", "Detrás" ]].map(([v, label]) => (
+              <button key={v} type="button" onClick={(event) => { event.stopPropagation(); setCardSide(v); }}
+                className="kulto-btn px-2.5 py-1 rounded-full text-[11px] font-semibold"
+                aria-pressed={cardSide === v}
+                style={{ color: cardSide === v ? "#111" : "#fff", background: cardSide === v ? "#fff" : "transparent" }}>{label}</button>
+            ))}
           </div>
         )}
         <div className="absolute top-2 left-2 flex flex-col gap-1 items-start max-w-[68%]">
@@ -3590,7 +3699,7 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
             <Heart size={16} style={{ color: isFavorite ? "var(--signal)" : "var(--bone)" }} fill={isFavorite ? "var(--signal)" : "none"} />
           </button>
         )}
-        {!mock && images.length > 1 && (
+        {!currentMock && images.length > 1 && (
           <>
             <button
               onClick={prev}
@@ -3891,6 +4000,7 @@ function ProductReviewsBlock({ product, reviews }) {
 function ProductConfigurator({ product, settings, onAddToCart, compact, reviews = [] }) {
   const [colorIdx, setColorIdx] = useState(0);
   const [imgIdx, setImgIdx] = useState(0);
+  const [mockSide, setMockSide] = useState("front");
   const [sizeIdx, setSizeIdx] = useState(0);
   const [aud, setAud] = useState(() => audsOf(product)[0] || "h");
   const [designMode, setDesignMode] = useState(product.designs && product.designs.length ? "design" : "custom");
@@ -3912,6 +4022,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
   useEffect(() => {
     setColorIdx(0);
     setImgIdx(0);
+    setMockSide("front");
     setSizeIdx(0);
     setAud(audsOf(product)[0] || "h");
     setDesignMode(product.designs && product.designs.length ? "design" : "custom");
@@ -3936,11 +4047,20 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
   // el color elegido (ver recolorExistingPhoto).
   const colorImages = color ? getColorImages(color) : [];
   const images = colorImages.length > 0 ? colorImages : (product.photoPool || []);
-  const mock = activeMockup(product);
-  const mockActive = !!mock && colorImages.length === 0;
+  const garmentTemplates = useGarmentTemplates();
+  const mock = resolveGarmentMockup(product, garmentTemplates);
+  const backMock = resolveGarmentMockup(product, garmentTemplates, "back");
+  const previewMock = mockSide === "back" && backMock ? backMock : (mock || backMock);
+  // La primera variante conserva las fotos originales subidas por el administrador.
+  // En otras variantes, un mockup configurado permite mostrar el nuevo color;
+  // nunca sustituimos la foto original por una camiseta vacía.
+  // Si el administrador activó el mockup de dos capas, mostrarlo SIEMPRE: camiseta base + PNG independiente.
+  // La galería original sigue almacenada, pero no debe tapar la previsualización dinámica.
+  const mockActive = !!previewMock;
   const mockHex = color?.hex || "#ffffff";
-  const autoImage = useAutoColorImage(product, color, colorImages.length === 0, imgIdx);
-  const activeImage = (colorImages.length === 0 && autoImage) || images[imgIdx] || null;
+  const canRecolor = colorImages.length === 0 && !mockActive && (Boolean(product.fabricMask) || product.autoRecolor === true) && (colorIdx > 0 || images.length === 0);
+  const autoImage = useAutoColorImage(product, color, canRecolor, imgIdx);
+  const activeImage = (canRecolor && autoImage) || images[imgIdx] || null;
   const isCover = product.imageFit === "cover";
   const previewBg = product.imageBackground || (color && !mock && colorImages.length > 0 ? color.hex : "var(--ink-3)");
   const hasSizes = product.sizes && product.sizes.length > 0;
@@ -4035,7 +4155,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
           }}
         >
           {mockActive ? (
-            <MockupComposite mockup={mock} hex={mockHex} />
+            <MockupComposite mockup={previewMock} hex={mockHex} />
           ) : activeImage ? (
             <img
               src={activeImage}
@@ -4104,6 +4224,16 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
             </button>
           )}
         </div>
+        {(mock || backMock) && (
+          <div className="flex gap-2 mt-3" role="group" aria-label="Vista de la camiseta">
+            {mock && <button type="button" onClick={() => setMockSide("front")}
+              className="kulto-btn rounded-lg px-4 py-2 text-xs font-semibold"
+              style={{ background: mockSide === "front" ? "var(--sun)" : "var(--ink-2)", color: mockSide === "front" ? "var(--ink)" : "var(--bone)", border: "1px solid var(--line)" }}>Delante</button>}
+            {backMock && <button type="button" onClick={() => setMockSide("back")}
+              className="kulto-btn rounded-lg px-4 py-2 text-xs font-semibold"
+              style={{ background: mockSide === "back" ? "var(--sun)" : "var(--ink-2)", color: mockSide === "back" ? "var(--ink)" : "var(--bone)", border: "1px solid var(--line)" }}>Detrás</button>}
+          </div>
+        )}
         {images.length > 1 && (
           <div className="flex gap-2 mt-2 overflow-x-auto kulto-scrollbar pb-1">
             {images.map((img, i) => (
@@ -4624,126 +4754,51 @@ function ClampText({ text, lines = 3, className = "", style = {}, buttonStyle = 
   );
 }
 
-function Hero({ onGoCatalog, onGoWizard, onSearch, heroTitle, heroSubtitle, heroImage, heroImages, banners = [] }) {
-  const [query, setQuery] = useState("");
-  const submit = (e) => {
-    e.preventDefault();
-    if (query.trim()) onSearch(query.trim());
-  };
-
+function Hero({ onGoCatalog, onGoWizard, onSearch, heroTitle, heroSubtitle, heroImage, heroImages, banners = [], featuredPhoto = null }) {
   const activeBanners = (banners || []).filter((b) => b.active !== false && b.placement !== "section");
   const [slide, setSlide] = useState(0);
-
+  const images = heroImages?.length ? heroImages : (heroImage ? [heroImage] : []);
+  const [imageIndex, setImageIndex] = useState(0);
   useEffect(() => { setSlide(0); }, [activeBanners.length]);
-
   useEffect(() => {
     if (activeBanners.length < 2) return;
-    const t = setInterval(() => setSlide((s) => (s + 1) % activeBanners.length), 5500);
-    return () => clearInterval(t);
+    const id = setInterval(() => setSlide((i) => (i + 1) % activeBanners.length), 5500);
+    return () => clearInterval(id);
   }, [activeBanners.length]);
-
-  // Cuando no hay ningún banner activo arriba de todo, la imagen decorativa
-  // puede tener varias fotos cargadas — van rotando solas cada tantos
-  // segundos, cada una tal cual se subió (sin recortarla ni deformarla).
-  const heroImgList = heroImages && heroImages.length ? heroImages : (heroImage ? [heroImage] : []);
-  const [heroImgIdx, setHeroImgIdx] = useState(0);
-  useEffect(() => { setHeroImgIdx(0); }, [heroImgList.length]);
   useEffect(() => {
-    if (activeBanners.length > 0 || heroImgList.length < 2) return;
-    const t = setInterval(() => setHeroImgIdx((i) => (i + 1) % heroImgList.length), 4000);
-    return () => clearInterval(t);
-  }, [activeBanners.length, heroImgList.length]);
-
-  const runCta = (banner) => {
-    if (!banner || banner.ctaAction === "none") return;
-    if (banner.ctaAction === "wizard") onGoWizard();
-    else if (banner.ctaAction === "url" && banner.ctaUrl) window.open(banner.ctaUrl, "_blank", "noreferrer");
-    else if (banner.ctaAction === "group" && banner.ctaGroup) onGoCatalog(banner.ctaGroup);
-    else onGoCatalog();
+    if (activeBanners.length || images.length < 2) return;
+    const id = setInterval(() => setImageIndex((i) => (i + 1) % images.length), 5000);
+    return () => clearInterval(id);
+  }, [activeBanners.length, images.length]);
+  const banner = activeBanners.length ? activeBanners[slide % activeBanners.length] : null;
+  const backgroundImage = banner?.image || images[imageIndex % (images.length || 1)] || featuredPhoto;
+  const headline = banner?.title || "STREETWEAR\nSIN LÍMITES";
+  const subtitle = banner?.subtitle || "Camisetas, oversize y sudaderas con diseños únicos. Descubre tu estilo en KULTO STORE.";
+  const runPrimary = () => {
+    if (!banner || !banner.ctaAction || banner.ctaAction === "catalog") { onGoCatalog({}); return; }
+    if (banner.ctaAction === "wizard") { onGoWizard(); return; }
+    if (banner.ctaAction === "url" && banner.ctaUrl) { window.open(banner.ctaUrl, "_blank", "noopener,noreferrer"); return; }
+    if (banner.ctaAction === "group" && banner.ctaGroup) { onGoCatalog({ group: banner.ctaGroup }); return; }
+    onGoCatalog({});
   };
-
-  const current = activeBanners.length ? activeBanners[slide % activeBanners.length] : null;
-  const title = current ? current.title : heroTitle;
-  const subtitle = current ? current.subtitle : heroSubtitle;
-  const image = current ? current.image : (heroImgList[heroImgIdx] || null);
-
-  const prevSlide = () => setSlide((s) => (s - 1 + activeBanners.length) % activeBanners.length);
-  const nextSlide = () => setSlide((s) => (s + 1) % activeBanners.length);
-
   return (
-    <section className="relative overflow-hidden" style={{ borderBottom: "1px solid var(--line)" }}>
-      <div className="max-w-6xl mx-auto px-4 md:px-6 py-14 md:py-24 grid md:grid-cols-2 gap-10 items-center">
-        <div>
-          <div key={`text-${slide}`} className="kulto-hero-fade">
-            <h1 className="kulto-display leading-[0.95] text-4xl sm:text-5xl md:text-6xl whitespace-pre-line" style={{ color: "var(--bone)", ...textOutlineStyle(current?.textOutlineWidth, current?.textOutlineColor) }}>
-              {title}
-            </h1>
-            <div className="mt-5 flex flex-col gap-1 max-w-md">
-              <ClampText text={subtitle} lines={4} className="text-base md:text-lg" style={{ color: "var(--slate)", ...subtitleOutline(current) }} />
-            </div>
-          </div>
-          <form onSubmit={submit} className="mt-6 max-w-sm relative">
-            <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2" style={{ color: "var(--slate)" }} />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Buscar productos..."
-              className="w-full rounded-full pl-10 pr-4 py-3 text-sm"
-              style={{ background: "var(--ink-2)", color: "var(--bone)", border: "1px solid var(--line)" }}
-            />
-          </form>
-          <div className="mt-5 flex flex-wrap gap-3">
-            {current ? (
-              <button onClick={() => runCta(current)} className="kulto-btn rounded-full px-6 py-3 font-semibold" style={{ background: "var(--signal)", color: "var(--bone)" }}>
-                {current.ctaLabel || "Ver catálogo"}
-              </button>
-            ) : (
-              <button onClick={onGoCatalog} className="kulto-btn rounded-full px-6 py-3 font-semibold" style={{ background: "var(--signal)", color: "var(--bone)" }}>
-                Ver catálogo
-              </button>
-            )}
-            <button onClick={onGoWizard} className="kulto-btn rounded-full px-6 py-3 font-semibold flex items-center gap-2" style={{ background: "transparent", color: "var(--bone)", border: "1px solid var(--line)" }}>
-              Personalizar mi prenda <ArrowRight size={16} />
-            </button>
-          </div>
+    <section className="kulto-editorial-hero" aria-label="Descubre KULTO STORE">
+      {backgroundImage && <img src={backgroundImage} alt="" className="kulto-editorial-hero-photo" fetchPriority="high" />}
+      <div className="kulto-editorial-hero-overlay" />
+      <div className="kulto-editorial-hero-inner">
+        <div className="kulto-editorial-hero-copy">
+          <span className="kulto-editorial-kicker">KULTO STORE · ESTILO URBANO</span>
+          <h1>{headline}</h1>
+          <p>{subtitle}</p>
+          <button type="button" onClick={runPrimary} className="kulto-editorial-primary">
+            {banner?.ctaLabel || "Descubrir colección"} <ArrowRight size={20}/>
+          </button>
           {activeBanners.length > 1 && (
-            <div className="mt-6 flex items-center gap-3">
-              <button onClick={prevSlide} aria-label="Banner anterior" className="kulto-btn w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "var(--ink-2)", border: "1px solid var(--line)", color: "var(--bone)" }}>
-                <ChevronLeft size={14} />
-              </button>
-              <div className="flex items-center gap-2">
-                {activeBanners.map((b, i) => (
-                  <button
-                    key={b.id || i}
-                    onClick={() => setSlide(i)}
-                    aria-label={`Banner ${i + 1}`}
-                    className="kulto-btn rounded-full"
-                    style={{ width: i === slide ? 22 : 8, height: 8, background: i === slide ? "var(--signal)" : "var(--line)", transition: "width .2s" }}
-                  />
-                ))}
-              </div>
-              <button onClick={nextSlide} aria-label="Banner siguiente" className="kulto-btn w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "var(--ink-2)", border: "1px solid var(--line)", color: "var(--bone)" }}>
-                <ChevronRight size={14} />
-              </button>
+            <div className="kulto-editorial-hero-dots" aria-label="Banners destacados">
+              {activeBanners.map((item, i) => <button key={item.id || i} type="button" onClick={() => setSlide(i)}
+                aria-label={`Ver banner ${i + 1}`} aria-pressed={slide === i}
+                className={slide === i ? "is-active" : ""} />)}
             </div>
-          )}
-        </div>
-        <div className="relative h-64 md:h-96 flex items-center justify-center">
-          {image ? (
-            <img key={`img-${slide}-${heroImgIdx}`} src={image} alt="" className="w-full h-full object-contain kulto-hero-fade" />
-          ) : (
-            <>
-              <div className="absolute rounded-3xl" style={{ width: "70%", height: "70%", background: "var(--ink-2)", border: "1px solid var(--line)", transform: "rotate(-6deg)" }} />
-              <div className="absolute rounded-3xl flex items-center justify-center" style={{ width: "58%", height: "58%", background: "var(--signal)", transform: "rotate(8deg)" }}>
-                <Shirt size={64} color="var(--bone)" />
-              </div>
-              <div className="absolute rounded-full px-4 py-2 font-semibold text-sm kulto-display" style={{ top: "6%", right: "8%", background: "var(--sun)", color: "var(--ink)", transform: "rotate(-10deg)" }}>
-                Diseños originales
-              </div>
-              <div className="absolute rounded-full px-4 py-2 font-semibold text-sm kulto-display" style={{ bottom: "8%", left: "2%", background: "var(--bone)", color: "var(--ink)", transform: "rotate(6deg)" }}>
-                Pide por WhatsApp
-              </div>
-            </>
           )}
         </div>
       </div>
@@ -5353,10 +5408,45 @@ function Home({ products, settings, reviews, customWorkGallery, onOpen, onGoCata
     }
   }
 
-  return (
-    <div>
-      <Hero onGoCatalog={onGoCatalog} onGoWizard={onGoWizard} onSearch={onSearch} heroTitle={settings.heroTitle} heroSubtitle={settings.heroSubtitle} heroImage={settings.heroImage} heroImages={settings.heroImages} banners={settings.banners} />
+  // Categorías derivadas de los productos ya publicados: no se cambian nombres ni imágenes.
+  const featuredCategories = [...new Set((products || []).map((p) => p.category).filter(Boolean))]
+    .slice(0, 6)
+    .map((name) => ({ name, product: products.find((p) => p.category === name) }));
 
+  return (
+    <div className="kulto-editorial-home">
+      <Hero onGoCatalog={onGoCatalog} onGoWizard={onGoWizard} onSearch={onSearch} heroTitle={settings.heroTitle} heroSubtitle={settings.heroSubtitle} heroImage={settings.heroImage} heroImages={settings.heroImages} banners={settings.banners}
+        featuredPhoto={(products || []).map((p) => p.photoPool?.[0] || (p.colors || []).flatMap((c) => getColorImages(c))[0]).find(Boolean) || null} />
+
+      <div className="kulto-editorial-benefits" aria-label="Ventajas de comprar en KULTO STORE">
+        <span>✦ Diseños con personalidad</span><span>✦ Compra online en España</span><span>✦ Personaliza tu estilo</span>
+      </div>
+      {featuredCategories.length > 0 && (
+        <section className="kulto-editorial-categories max-w-6xl mx-auto px-4 md:px-6 w-full" aria-label="Explora las categorías">
+          <div className="kulto-editorial-section-head"><h2>Explora <em>KULTO</em></h2><button onClick={() => onGoCatalog({})}>Ver todo el catálogo <ArrowRight size={18}/></button></div>
+          <div className="kulto-editorial-category-grid">
+            {featuredCategories.map(({ name, product }) => {
+              const photo = product?.photoPool?.[0] || (product?.colors || []).flatMap((c) => getColorImages(c))[0];
+              return <button key={name} className="kulto-editorial-category" onClick={() => onGoCatalog({ category: name })} aria-label={`Ver ${name}`}>
+                {photo && <img loading="lazy" src={photo} alt={name} />}
+                <span>{name}<ArrowRight size={17}/></span>
+              </button>;
+            })}
+          </div>
+        </section>
+      )}
+      {(products || []).length > 0 && (
+        <section className="kulto-editorial-new-arrivals max-w-6xl mx-auto px-4 md:px-6 w-full">
+          <div className="kulto-editorial-section-head">
+            <h2>Novedades</h2>
+            <button onClick={() => onGoCatalog({})}>Ver productos <ArrowRight size={18}/></button>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-5">
+            {products.slice(0, 4).map((p) => <ProductCard key={p.id} product={p} onOpen={onOpen} isFavorite={favorites?.includes(p.id)}
+              onToggleFavorite={onToggleFavorite} onAddToCart={onAddToCart} />)}
+          </div>
+        </section>
+      )}
       <div className="flex flex-col gap-14 py-12">
         {renderGroups.map((g) => {
           if (g.type === "tiles") {
@@ -10016,6 +10106,19 @@ function AdminProductForm({ categories, groups, onAddCategory, onAddGroup, saved
               >
                 {draft.colors.map((c, i) => <option key={i} value={i}>{c.name || `Color ${i + 1}`}</option>)}
               </select>
+            </div>
+          )}
+
+          {draft.photoPool?.length > 0 && draft.colors?.length > 1 && (
+            <div className="rounded-2xl p-3 mb-3" style={{ background: "var(--ink-3)", border: "1px dashed var(--line)" }}>
+              <label className="text-sm font-semibold block mb-1" style={{ color: "var(--bone)" }}>
+                Máscara de tela para colores dinámicos (opcional)
+              </label>
+              <p className="text-xs mb-2" style={{ color: "var(--slate)" }}>
+                Pegá la URL pública de una máscara PNG del mismo tamaño que la foto base. La parte opaca debe cubrir solo la tela, nunca el estampado. Sin máscara se mantiene el sistema anterior.
+              </p>
+              <input type="url" value={draft.fabricMask || ""} onChange={(e) => setDraft({ ...draft, fabricMask: e.target.value.trim() })}
+                placeholder="https://.../mascara-tela.png" className="w-full rounded-xl p-2 text-sm" style={inputStyle} />
             </div>
           )}
 
@@ -18081,8 +18184,10 @@ function NavLink({ label, active, onClick }) {
   );
 }
 
-function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, customer, themeMode, onToggleThemeMode, fontStep, onDecreaseFont, onIncreaseFont, socialLinks = {}, showAdminMenu = false, onGoAdminTab, onPreviewAsCustomer, productsMenuItems = [], onGoCatalog, products = [], onBack }) {
+function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, customer, themeMode, onToggleThemeMode, fontStep, onDecreaseFont, onIncreaseFont, socialLinks = {}, showAdminMenu = false, onGoAdminTab, onPreviewAsCustomer, productsMenuItems = [], onGoCatalog, onSearch, products = [], onBack }) {
   const [open, setOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const [adminMenuOpen, setAdminMenuOpen] = useState(false);
   const adminMenuRef = useRef(null);
   // Menú flotante de "Productos" (desktop) — lista "Catálogo" + los accesos
@@ -18147,6 +18252,11 @@ function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, cus
     }
     return ps.slice(0, 4).map((p) => ({ key: p.id, label: p.name, img: tileImage(p), onClick: () => goCatalog(it) }));
   };
+  // Accesos editoriales al catálogo: se construyen únicamente con categorías reales.
+  const editorialCategories = Array.from(new Set((products || []).map((p) => p.category).filter(Boolean)));
+  const navCategory = (term) => editorialCategories.find((c) => c.toLocaleLowerCase("es").includes(term));
+  const navLabels = ["camiseta", "oversize", "sudadera", "top"].map((term) => navCategory(term)).filter(Boolean);
+  const navUnique = Array.from(new Set(navLabels)).slice(0, 4);
   const go = (p) => { setPage(p); setOpen(false); };
   useEffect(() => {
     if (!catalogMenuOpen) return;
@@ -18180,7 +18290,10 @@ function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, cus
   // empuja el header (y sus botones) para abajo de esa franja, sin perder
   // el fondo que llega hasta el borde.
   return (
-    <header className="sticky top-0 z-40" style={{ background: "var(--ink)", borderBottom: "1px solid var(--line)", paddingTop: "env(safe-area-inset-top)" }}>
+    <header className="kulto-editorial-header sticky top-0 z-40" style={{ background: "var(--ink)", borderBottom: "1px solid var(--line)", paddingTop: "env(safe-area-inset-top)" }}>
+      <div className="kulto-editorial-announcement">
+        <span>DISEÑOS ORIGINALES</span><span>ROPA URBANA EN ESPAÑA</span><span>PERSONALIZA TU PRENDA</span>
+      </div>
       <div className="max-w-6xl mx-auto px-4 md:px-6 flex items-center justify-between h-16">
         <div className="flex items-center min-w-0">
         {page !== "home" && onBack && (
@@ -18200,14 +18313,14 @@ function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, cus
         </button>
         </div>
         <nav className="hidden md:flex items-center gap-8">
-          <NavLink label="Inicio" active={page === "home"} onClick={() => go("home")} />
+          <NavLink label="Novedades" active={page === "home"} onClick={() => go("home")} />
           <div ref={catalogMenuRef}>
             <button
               onClick={() => setCatalogMenuOpen((o) => !o)}
               className="kulto-btn kulto-nav text-sm font-semibold pb-1 flex items-center gap-1"
               style={{ color: "var(--bone)", borderBottom: page === "catalog" ? "2px solid var(--signal)" : "2px solid transparent" }}
             >
-              Productos <ChevronDown size={14} />
+              Camisetas <ChevronDown size={14} />
             </button>
             {catalogMenuOpen && (() => {
               const activeItem = productsMenuItems.find((x) => x.id === megaItemId) || productsMenuItems[0] || null;
@@ -18267,6 +18380,10 @@ function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, cus
               );
             })()}
           </div>
+          {navUnique.map((category) => (
+            <NavLink key={category} label={category} active={false} onClick={() => { onGoCatalog?.({ category }); closeMenus(); }} />
+          ))}
+          <NavLink label="Ofertas" active={false} onClick={() => { onGoCatalog?.({ collection: "ofertas" }); closeMenus(); }} />
           <NavLink label="Personalizar" active={page === "wizard"} onClick={() => go("wizard")} />
           <NavLink label="Mi pedido" active={page === "seguimiento"} onClick={() => go("seguimiento")} />
           {customer && <NavLink label="Favoritos" active={page === "favoritos"} onClick={() => go("favoritos")} />}
@@ -18357,6 +18474,21 @@ function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, cus
               )}
             </div>
           )}
+          <div className="relative">
+            <button type="button" aria-label="Buscar prendas" title="Buscar productos"
+              onClick={() => setSearchOpen((v) => !v)} className="kulto-btn p-2 rounded-full" style={{ color: "var(--bone)" }}>
+              <Search size={21} />
+            </button>
+            {searchOpen && (
+              <form onSubmit={(e) => { e.preventDefault(); if (searchQuery.trim()) { onSearch?.(searchQuery.trim()); setSearchOpen(false); } }}
+                className="absolute right-0 top-full mt-3 p-3 rounded-xl shadow-xl flex gap-2" style={{ background: "#161616", width: "min(87vw,350px)", zIndex: 80, border: "1px solid #555" }}>
+                <input autoFocus value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Buscar camisetas, sudaderas..." aria-label="Buscar productos"
+                  className="min-w-0 flex-1 px-3 py-2 rounded-lg text-sm" style={{ color: "#111", background: "white" }} />
+                <button type="submit" aria-label="Buscar" className="rounded-lg px-3 py-2" style={{ background: "#fff", color: "#111" }}><Search size={17}/></button>
+              </form>
+            )}
+          </div>
           <button onClick={onOpenCart} className="kulto-btn relative p-2 rounded-full" style={{ color: "var(--bone)" }}>
             <ShoppingBag size={21} />
             {cartCount > 0 && (
@@ -20502,7 +20634,7 @@ export default function App() {
   return (
     <div className="kulto-root min-h-screen flex flex-col" data-mode={themeMode}>
       <GlobalStyle colors={settings.theme} />
-      <Header page={page} setPage={setPage} onBack={goBack} cartCount={cartCount} onOpenCart={() => setCartOpen(true)} logoImage={settings.logoImage} logoText={settings.logoText} customer={customer} themeMode={themeMode} onToggleThemeMode={toggleThemeMode} fontStep={fontStep} onDecreaseFont={decreaseFont} onIncreaseFont={increaseFont} socialLinks={{ instagram: settings.socialInstagram, facebook: settings.socialFacebook, tiktok: settings.socialTiktok }} showAdminMenu={hasAdminAccess} onGoAdminTab={jumpToAdminTab} onPreviewAsCustomer={() => { setPreviewAsCustomer(true); setPage("home"); }} productsMenuItems={settings.productsMenuItems || []} onGoCatalog={goToCatalog} products={sellableProducts} />
+      <Header page={page} setPage={setPage} onBack={goBack} cartCount={cartCount} onOpenCart={() => setCartOpen(true)} logoImage={settings.logoImage} logoText={settings.logoText} customer={customer} themeMode={themeMode} onToggleThemeMode={toggleThemeMode} fontStep={fontStep} onDecreaseFont={decreaseFont} onIncreaseFont={increaseFont} socialLinks={{ instagram: settings.socialInstagram, facebook: settings.socialFacebook, tiktok: settings.socialTiktok }} showAdminMenu={hasAdminAccess} onGoAdminTab={jumpToAdminTab} onPreviewAsCustomer={() => { setPreviewAsCustomer(true); setPage("home"); }} productsMenuItems={settings.productsMenuItems || []} onGoCatalog={goToCatalog} onSearch={(q) => { setCatalogInitialGroup(""); setCatalogSearchQuery(q); setPage("catalog"); }} products={sellableProducts} />
       {hasAdminAccess && previewAsCustomer && (
         <div className="sticky top-16 z-30 flex items-center justify-center gap-3 px-4 py-2 text-sm font-semibold" style={{ background: "var(--sun)", color: "var(--ink)" }}>
           <span>Estás viendo la web como la vería un cliente.</span>
@@ -20516,7 +20648,7 @@ export default function App() {
         </div>
       )}
       <InstallAppBanner />
-      <MarqueeStrip />
+      {page !== "home" && <MarqueeStrip />}
       {showAbandonedBanner && (
         <AbandonedCartBanner
           hours={Math.floor(hoursSince(cartSavedAt))}
