@@ -74,6 +74,7 @@ const ADMIN_NOTIFICATION_EMAIL = "pablo.gutcha@gmail.com";
 // handleSetAdminPermissions. El dueño (ADMIN_EMAIL) siempre las tiene todas.
 const ADMIN_TABS = [
   ["productos", "Productos"],
+  ["mockups", "Biblioteca de prendas"],
   ["personalizar", "Personalizar"],
   ["pedidos", "Pedidos"],
   ["ventas", "Ventas"],
@@ -89,6 +90,7 @@ const ADMIN_TABS = [
 const ADMIN_TAB_KEYS = ADMIN_TABS.map(([key]) => key);
 const ADMIN_TAB_META = {
   productos: { icon: Shirt, hint: "Fotos, precios y stock" },
+  mockups: { icon: Layers, hint: "Modelos y asignación masiva" },
   personalizar: { icon: Sparkles, hint: "Banners, colores y textos" },
   pedidos: { icon: Package, hint: "Pedidos que llegan" },
   ventas: { icon: TrendingUp, hint: "Ofertas y ventas" },
@@ -1040,6 +1042,17 @@ function tintImageToColor(src, hex) {
 // en el mismo lugar. Las posiciones están en % de la foto del mockup (no de la
 // caja donde se muestra), así se ve igual en la ficha, la tarjeta y el editor.
 // ---------------------------------------------------------------------------
+let GARMENT_MOCKUP_LIBRARY = [];
+// A library model shares the base garment across any number of products.
+// Individual design art and placement remain attached to the product.
+function resolveProductMockup(product) {
+  const original = product?.mockup;
+  const model = GARMENT_MOCKUP_LIBRARY.find((entry) => entry.id === product?.garmentMockupId);
+  if (!model?.base) return original;
+  const design = original?.design || (product?.designs?.length === 1 ? product.designs[0]?.image : null);
+  if (!design) return original; // Never hide an existing product photo if its art cannot be recovered.
+  return { ...model, ...original, base: model.base, backBase: model.backBase || null, ar: model.ar || original?.ar, backAr: model.backAr || original?.backAr, design, enabled: true };
+}
 const mockupPrepCache = new Map(); // src -> Promise<prep>
 const mockupTintedCache = new Map(); // `${src}|${hex}` -> canvas
 const mockupImgCache = new Map(); // src -> Promise<Image>
@@ -1211,7 +1224,7 @@ function tintedMockupCanvas(src, prep, hex) {
 }
 
 function activeMockup(product) {
-  const m = product?.mockup;
+  const m = resolveProductMockup(product);
   return m && m.enabled && m.base && (m.design || m.logoLight || m.logoDark) ? m : null;
 }
 
@@ -9053,6 +9066,7 @@ const emptyDraft = {
   // Mockup con diseño (ver AdminMockupEditor): prenda vacía + diseño PNG +
   // posición; los colores se generan repintando la prenda.
   mockup: null,
+  garmentMockupId: null,
 };
 
 function AdminProductForm({ categories, groups, onAddCategory, onAddGroup, savedColors, onSaveColorToLibrary, onRemoveColorFromLibrary, onSave, editing, onCancelEdit, defaultTemplate = false, allProducts = [] }) {
@@ -16854,6 +16868,99 @@ function AdminCustomWorkGallery({ items, onAdd, onRemove, speed = 0.5, onSpeedCh
   );
 }
 
+
+// Central model library; contains no individual design artworks or duplicated garments.
+function AdminGarmentMockupLibrary({ products, categories, groups, models, onSaveSettings, onSaveProductsBulk }) {
+  const [name, setName] = useState("");
+  const [front, setFront] = useState(null);
+  const [back, setBack] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState("");
+  const [modelId, setModelId] = useState("");
+  const [category, setCategory] = useState("");
+  const [group, setGroup] = useState("");
+  const [onlyUnassigned, setOnlyUnassigned] = useState(true);
+  const [progress, setProgress] = useState("");
+  const [previewColor, setPreviewColor] = useState("#1761A0");
+  const [testModel, setTestModel] = useState(null);
+  const pick = async (file, side) => {
+    if (!file) return;
+    if (!["image/png", "image/webp"].includes(file.type)) { setStatus("Subí un PNG o WebP sin fondo."); return; }
+    setSaving(true);
+    setStatus("");
+    try {
+      const b64 = await new Promise((resolve) => fileToBase64(file, resolve, 1400, 1, "image/png"));
+      const url = (await uploadDataUrlToStorage(b64)) || b64;
+      const image = await loadMockupImg(url);
+      const info = { url, ar: image.naturalWidth / image.naturalHeight };
+      if (side === "front") setFront(info); else setBack(info);
+    } catch (e) { setStatus("No se pudo leer la imagen: " + (e?.message || "error")); }
+    finally { setSaving(false); }
+  };
+  const add = async () => {
+    if (!name.trim() || !front?.url || !back?.url) { setStatus("Indicá el nombre y subí delante y detrás."); return; }
+    setSaving(true);
+    try {
+      const next = [...models, { id: genId("garment"), name: name.trim(), base: front.url, ar: front.ar, backBase: back.url, backAr: back.ar, enabled: true, x: 50, y: 38, w: 38, backX: 50, backY: 38, backW: 40 }];
+      await onSaveSettings({ garmentMockupLibrary: next });
+      setName(""); setFront(null); setBack(null); setStatus("Modelo guardado. Ya podés asignarlo a productos.");
+    } catch (e) { setStatus("Error al guardar: " + (e?.message || "sin conexión")); }
+    finally { setSaving(false); }
+  };
+  const matching = products.filter((p) => (!category || p.category === category) && (!group || p.group === group) && (!onlyUnassigned || !p.garmentMockupId));
+  const compatible = matching.filter((p) => p.mockup?.design || (p.designs?.length === 1 && p.designs[0]?.image));
+  const assign = async () => {
+    if (!modelId) { setStatus("Seleccioná un modelo."); return; }
+    if (!compatible.length) { setStatus("No hay productos compatibles con PNG de diseño para asignar."); return; }
+    if (!window.confirm(`Asignar el modelo a ${compatible.length} productos? Los demás conservarán sus imágenes originales.`)) return;
+    setSaving(true); setStatus(""); setProgress(`0 / ${compatible.length}`);
+    try {
+      const updates = compatible.map((p) => ({ ...p, garmentMockupId: modelId }));
+      const outcome = await onSaveProductsBulk(updates, (done, total) => setProgress(`${done} / ${total}`));
+      setStatus(`Asignados: ${outcome.ok}. Fallidos: ${outcome.failed}. Sin PNG individual: ${matching.length - compatible.length}. Publicá los cambios desde Productos cuando hayas revisado los resultados.`);
+    } catch (e) { setStatus("Error al asignar: " + (e?.message || "desconocido")); }
+    finally { setSaving(false); setProgress(""); }
+  };
+  return (
+    <section className="space-y-5">
+      <div><h2 className="kulto-display text-2xl" style={{ color: "var(--bone)" }}>Biblioteca de prendas</h2><p className="text-sm mt-2" style={{ color: "var(--slate)" }}>Subí una única vez cada modelo limpio, delantero y trasero. Las categorías de diseños permanecen intactas.</p></div>
+      <div className="rounded-2xl p-5 space-y-3" style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}>
+        <p className="font-semibold">Nuevo modelo reutilizable</p>
+        <input aria-label="Nombre del modelo" placeholder="Ej. Camiseta Premium Oversize" value={name} onChange={(e) => setName(e.target.value)} className="w-full rounded-lg p-3" style={{ background: "var(--ink-3)", color: "var(--bone)" }}/>
+        <div className="grid grid-cols-2 gap-3">
+          {[[front, "Delante", "front"], [back, "Detrás", "back"]].map(([img, label, side]) => <label key={side} className="rounded-xl p-3 text-sm cursor-pointer text-center" style={{ border: "1px dashed var(--line)" }}>
+            <p className="mb-2 font-semibold">{label}</p>
+            {img ? <img src={img.url} alt={label} className="mx-auto h-36 object-contain" /> : <div className="h-36 flex items-center justify-center" style={{ color: "var(--slate)" }}>Subir mockup limpio</div>}
+            <input type="file" accept="image/png,image/webp" onChange={(e) => { pick(e.target.files?.[0], side); e.target.value = ""; }} className="sr-only" />
+          </label>)}
+        </div>
+        <button type="button" onClick={add} disabled={saving} className="kulto-btn rounded-full px-5 py-2.5 font-semibold" style={{ background: "var(--sun)", color: "var(--ink)" }}>{saving ? "Guardando…" : "Guardar modelo"}</button>
+      </div>
+      {models.length > 0 && <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        {models.map((m) => <div key={m.id} className="rounded-xl p-3" style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}>
+          <p className="font-semibold text-sm mb-2">{m.name}</p>
+          <div className="grid grid-cols-2 gap-2"><img src={m.base} alt="Delante" className="h-32 w-full object-contain"/><img src={m.backBase} alt="Detrás" className="h-32 w-full object-contain"/></div>
+          <p className="text-xs mt-2" style={{ color: "var(--slate)" }}>{products.filter((p) => p.garmentMockupId === m.id).length} productos asignados</p>
+          <button type="button" onClick={() => setTestModel(testModel === m.id ? null : m.id)} className="text-xs underline mt-2">Probar colores</button>
+          {testModel === m.id && <div className="mt-2 space-y-2"><input type="color" value={previewColor} onChange={(e) => setPreviewColor(e.target.value)} aria-label="Color de prueba"/><div className="grid grid-cols-2 h-44 gap-2"><MockupComposite mockup={{ ...m, design: null }} hex={previewColor}/><MockupComposite mockup={{ ...m, base: m.backBase, design: null }} hex={previewColor}/></div></div>}
+        </div>)}
+      </div>}
+      <div className="rounded-2xl p-5 space-y-3" style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}>
+        <h3 className="font-semibold">Asignar modelos a muchos productos</h3>
+        <select aria-label="Modelo" value={modelId} onChange={(e) => setModelId(e.target.value)} className="w-full p-3 rounded-lg" style={{ background: "var(--ink-3)", color: "var(--bone)" }}><option value="">Elegí un modelo</option>{models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select>
+        <div className="grid sm:grid-cols-2 gap-3">
+          <select aria-label="Categoría" value={category} onChange={(e) => setCategory(e.target.value)} className="w-full p-3 rounded-lg" style={{ background: "var(--ink-3)", color: "var(--bone)" }}><option value="">Todas las categorías</option>{categories.map((c) => <option key={c} value={c}>{c}</option>)}</select>
+          <select aria-label="Grupo" value={group} onChange={(e) => setGroup(e.target.value)} className="w-full p-3 rounded-lg" style={{ background: "var(--ink-3)", color: "var(--bone)" }}><option value="">Todos los grupos</option>{groups.map((g) => <option key={g} value={g}>{g}</option>)}</select>
+        </div>
+        <label className="text-sm flex items-center gap-2"><input type="checkbox" checked={onlyUnassigned} onChange={(e) => setOnlyUnassigned(e.target.checked)}/> Solo sin modelo asignado</label>
+        <p className="text-sm" style={{ color: "var(--slate)" }}>{matching.length} productos encontrados · {compatible.length} con PNG reutilizable · {matching.length - compatible.length} requieren recuperar su diseño PNG. Ninguna foto original se borra.</p>
+        <button type="button" onClick={assign} disabled={saving || !modelId || !compatible.length} className="kulto-btn rounded-full px-5 py-2.5 font-semibold" style={{ background: "var(--sun)", color: "var(--ink)", opacity: saving ? 0.6 : 1 }}>{saving ? `Asignando ${progress}…` : `Asignar a ${compatible.length} productos`}</button>
+      </div>
+      {status && <p role="status" className="text-sm rounded-xl p-3" style={{ border: "1px solid var(--line)", color: "var(--bone)" }}>{status}</p>}
+    </section>
+  );
+}
+
 function AdminPanel({ products, categories, groups, orders, customers, onAdjustCustomerPoints, onDeleteCustomer, onCreateCustomer, onUpdateCustomerInfo, onSetInstagramStatus, onSendPasswordHelp, reviews, settings, hasDraftChanges, publishing, onPublishChanges, onDiscardChanges, photoInbox, onAddToInbox, onCreateProductFromInbox, onAddInboxToExisting, onRemoveFromInbox, savedColors, onSaveColorToLibrary, onRemoveColorFromLibrary, designLibrary, onAddDesignToLibrary, onRemoveDesignFromLibrary, designFolders, onAddDesignFolder, onRenameDesignFolder, onRemoveDesignFolder, onToggleDesignFolderCover, onAssignDesignToFolder, onSetDesignFolderCategory, onSetDesignFolderGarments, customWorkGallery, onAddCustomWork, onRemoveCustomWork, onAddCategory, onRenameCategory, onDeleteCategory, onMergeCategoryAsType, onAddGroup, onRenameGroup, onDeleteGroup, onSaveProduct, onSaveProductVerbose, onSaveProductsBulk, onQuickRestock, onDeleteProduct, onToggleOrderStatus, onSetLocalStatus, onSetLocalTracking, onUpdateTracking, onApplyDiscount, onRequestReview, onBulkComplete, onBulkArchive, onBulkDelete, onSaveReview, onDeleteReview, onReorderReview, onSaveSettings, onSetPaymentStatus, onLogout, permissions, isOwner, onSetAdminPermissions, jumpTo }) {
   // El dueño (isOwner) siempre ve todas las pestañas. Una cuenta de admin con
   // permisos limitados solo ve — y solo puede abrir — las que le dieron.
@@ -17278,6 +17385,10 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
         })}
       </nav>
       <div className="flex-1 min-w-0">
+
+      {tab === "mockups" && (
+        <AdminGarmentMockupLibrary products={sellableProducts} categories={categories} groups={groups} models={settings?.garmentMockupLibrary || []} onSaveSettings={onSaveSettings} onSaveProductsBulk={onSaveProductsBulk} />
+      )}
 
       {tab === "productos" && (
         <>
@@ -19124,6 +19235,7 @@ export default function App() {
   const [publishing, setPublishing] = useState(false);
   const [reviews, setReviews] = useState([]);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  GARMENT_MOCKUP_LIBRARY = Array.isArray(settings?.garmentMockupLibrary) ? settings.garmentMockupLibrary : [];
   FABRIC_MAP = settings?.fabricByType || {};
   {
     const gt = {};
