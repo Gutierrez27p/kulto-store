@@ -1382,6 +1382,7 @@ function AdminMockupEditor({ draft, setDraft, inputStyle }) {
   const m = draft.mockup || { enabled: true, base: null, ar: 0.8, design: null, x: 50, y: 38, w: 40, rot: 0, cover: null };
   const set = (patch) => setDraft((d) => ({ ...d, mockup: { ...(d.mockup || { enabled: true, base: null, ar: 0.8, design: null, x: 50, y: 38, w: 40, rot: 0, cover: null }), ...patch } }));
   const [previewHex, setPreviewHex] = useState(draft.colors?.[0]?.hex || "#E8452C");
+  const [editorSide, setEditorSide] = useState("front");
   const [busy, setBusy] = useState(false);
   const innerRef = useRef(null);
   const dragging = useRef(false);
@@ -1409,9 +1410,9 @@ function AdminMockupEditor({ draft, setDraft, inputStyle }) {
     const isPng = file.type === "image/png";
     const b64 = await new Promise((resolve) => fileToBase64(file, resolve, 1400, isPng ? 1 : 0.9, isPng ? "image/png" : "image/jpeg"));
     const url = (await uploadDataUrlToStorage(b64)) || b64;
-    if (kind === "base") {
+    if (kind === "base" || kind === "backBase") {
       const ar = await new Promise((resolve) => { const i = new Image(); i.onload = () => resolve(i.naturalWidth / i.naturalHeight); i.onerror = () => resolve(0.8); i.src = b64; });
-      set({ base: url, ar });
+      set(kind === "base" ? { base: url, ar } : { backBase: url, backAr: ar });
     } else if (kind === "design") set({ design: url });
     else if (kind === "logoLight") set({ logoLight: url });
     else if (kind === "logoDark") set({ logoDark: url });
@@ -1424,7 +1425,8 @@ function AdminMockupEditor({ draft, setDraft, inputStyle }) {
     if (!r) return;
     const x = Math.max(0, Math.min(100, ((e.clientX - r.left) / r.width) * 100));
     const y = Math.max(0, Math.min(100, ((e.clientY - r.top) / r.height) * 100));
-    if (target === "logo") set({ lx: Math.round(x * 10) / 10, ly: Math.round(y * 10) / 10 });
+    if (editorSide === "back") set({ backX: Math.round(x * 10) / 10, backY: Math.round(y * 10) / 10 });
+    else if (target === "logo") set({ lx: Math.round(x * 10) / 10, ly: Math.round(y * 10) / 10 });
     else set({ x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 });
   };
   const designProps = {
@@ -1467,11 +1469,12 @@ function AdminMockupEditor({ draft, setDraft, inputStyle }) {
         <input type="checkbox" checked={!!m.enabled} onChange={(e) => set({ enabled: e.target.checked })} />
         Usar el mockup en este producto
       </label>
-      {slot("1. Mockup vacío", "La prenda sin estampa, de frente.", "base", m.base)}
-      {slot("2. Diseño (PNG)", "La estampa con fondo transparente.", "design", m.design)}
-      {slot("3. Ejemplo / portada", "Foto de cómo debe quedar: el mismo mockup con el diseño ya puesto en su lugar. Se ve en las tarjetas y sirve para acomodar el diseño solo.", "cover", m.cover)}
-      {slot("4. Texto para prendas claras (negro)", "Opcional: el texto o logo en negro, PNG sin fondo (ej. Kulto en el frente).", "logoLight", m.logoLight)}
-      {slot("5. Texto para prendas oscuras (blanco)", "Opcional: el mismo texto en blanco. Se usa solo en las prendas oscuras.", "logoDark", m.logoDark)}
+      {slot("1. Mockup delantero vacío", "Prenda sin estampado, vista frontal.", "base", m.base)}
+      {slot("2. Mockup trasero vacío", "La misma prenda sin estampado, vista trasera.", "backBase", m.backBase)}
+      {slot("3. Diseño (PNG)", "Se utiliza el mismo diseño delante y detrás.", "design", m.design)}
+      {slot("4. Ejemplo / portada", "Foto de cómo debe quedar: el mismo mockup con el diseño ya puesto en su lugar. Se ve en las tarjetas y sirve para acomodar el diseño solo.", "cover", m.cover)}
+      {slot("5. Texto para prendas claras (negro)", "Opcional: el texto o logo en negro, PNG sin fondo (ej. Kulto en el frente).", "logoLight", m.logoLight)}
+      {slot("6. Texto para prendas oscuras (blanco)", "Opcional: el mismo texto en blanco. Se usa solo en las prendas oscuras.", "logoDark", m.logoDark)}
       {m.base && m.design && m.cover && (
         <div className="flex flex-col gap-1.5">
           <button type="button" onClick={autoPlace} disabled={detecting} className="kulto-btn text-xs font-semibold px-4 py-2.5 rounded-full self-start" style={{ background: "var(--sun)", color: "var(--ink)", opacity: detecting ? 0.6 : 1 }}>
@@ -1481,8 +1484,13 @@ function AdminMockupEditor({ draft, setDraft, inputStyle }) {
         </div>
       )}
       {busy && <p className="text-xs" style={{ color: "var(--sun)" }}>Subiendo…</p>}
-      {canPreview && m.design && (
+      {(canPreview || m.backBase) && m.design && (
         <div className="grid sm:grid-cols-2 gap-4">
+          <div className="sm:col-span-2 flex flex-wrap gap-2">
+            {[["front", "Delante"], ["back", "Detrás"]].filter(([side]) => side === "front" ? !!m.base : !!m.backBase).map(([side, label]) => (
+              <button key={side} type="button" onClick={() => setEditorSide(side)} className="kulto-btn rounded-full px-4 py-2 text-xs font-semibold" style={{ background: editorSide === side ? "var(--sun)" : "var(--ink)", color: editorSide === side ? "var(--ink)" : "var(--bone)", border: "1px solid var(--line)" }}>{label}</button>
+            ))}
+          </div>
           <div>
             {(m.logoLight || m.logoDark) && (
               <div className="flex gap-2 mb-2">
@@ -1493,7 +1501,7 @@ function AdminMockupEditor({ draft, setDraft, inputStyle }) {
             )}
             <p className="text-xs mb-1" style={{ color: "var(--slate)" }}>Tocá o arrastrá sobre la prenda para mover {target === "logo" ? "el texto" : "el diseño"}:</p>
             <div className="rounded-xl overflow-hidden mx-auto relative" style={{ aspectRatio: "4 / 5", maxWidth: 280, background: "var(--ink-2)", border: "1px solid var(--line)" }}>
-              <MockupComposite mockup={m} hex={previewHex} innerRef={innerRef} designProps={designProps} />
+              <MockupComposite mockup={editorSide === "back" && m.backBase ? { ...m, base: m.backBase, ar: m.backAr, x: m.backX ?? 50, y: m.backY ?? 38, w: m.backW ?? 40, rot: m.backRot ?? 0, logoLight: null, logoDark: null } : m} hex={previewHex} innerRef={innerRef} designProps={designProps} />
               {showExample && m.cover && <img src={m.cover} alt="" draggable={false} className="absolute inset-0 w-full h-full object-contain" style={{ opacity: 0.45, pointerEvents: "none" }} />}
             </div>
             {m.cover && (
@@ -1505,8 +1513,8 @@ function AdminMockupEditor({ draft, setDraft, inputStyle }) {
           </div>
           <div className="flex flex-col gap-3">
             {[["Tamaño", "w", 10, 90], ["Izquierda ↔ derecha", "x", 0, 100], ["Arriba ↕ abajo", "y", 0, 100], ["Giro (inclinación)", "rot", -45, 45]].map(([label, k0, min, max]) => {
-              const key = target === "logo" ? (k0 === "rot" ? "lrot" : "l" + k0) : k0;
-              const dflt = { w: 40, x: 50, y: 38, rot: 0, lw: 15, lx: 30, ly: 20, lrot: 0 }[key];
+              const key = editorSide === "back" ? ({ w: "backW", x: "backX", y: "backY", rot: "backRot" }[k0]) : target === "logo" ? (k0 === "rot" ? "lrot" : "l" + k0) : k0;
+              const dflt = { w: 40, x: 50, y: 38, rot: 0, lw: 15, lx: 30, ly: 20, lrot: 0, backW: 40, backX: 50, backY: 38, backRot: 0 }[key];
               return (
               <label key={key} className="text-xs" style={{ color: "var(--bone)" }}>
                 {label}: {Math.round(m[key] ?? dflt)}{k0 === "rot" ? "°" : "%"}
@@ -1526,7 +1534,7 @@ function AdminMockupEditor({ draft, setDraft, inputStyle }) {
           </div>
         </div>
       )}
-      <p className="text-[11px]" style={{ color: "var(--slate)" }}>Recordá guardar el producto. Los colores que tengan su propia foto siguen usando esa foto.</p>
+      <p className="text-[11px]" style={{ color: "var(--slate)" }}>Guardá el producto para publicar ambos lados. Elegir un color actualizará frente y espalda a la vez. Los productos anteriores siguen funcionando.</p>
     </div>
   );
 }
@@ -3938,6 +3946,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
   const images = colorImages.length > 0 ? colorImages : (product.photoPool || []);
   const mock = activeMockup(product);
   const mockActive = !!mock && colorImages.length === 0;
+  const backMock = mockActive && mock.backBase ? { ...mock, base: mock.backBase, ar: mock.backAr, x: mock.backX ?? 50, y: mock.backY ?? 38, w: mock.backW ?? 40, rot: mock.backRot ?? 0, logoLight: null, logoDark: null } : null;
   const mockHex = color?.hex || "#ffffff";
   const autoImage = useAutoColorImage(product, color, colorImages.length === 0, imgIdx);
   const activeImage = (colorImages.length === 0 && autoImage) || images[imgIdx] || null;
@@ -4035,7 +4044,12 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
           }}
         >
           {mockActive ? (
-            <MockupComposite mockup={mock} hex={mockHex} />
+            backMock ? (
+              <div className="grid grid-cols-2 gap-2 w-full h-full p-2 sm:p-3">
+                <div className="relative min-w-0 rounded-xl overflow-hidden" style={{ background: "var(--ink-2)" }}><MockupComposite mockup={mock} hex={mockHex} /><span className="absolute bottom-2 left-2 text-[10px] font-bold px-2 py-1 rounded-full" style={{ background: "var(--ink)", color: "var(--bone)" }}>DELANTE</span></div>
+                <div className="relative min-w-0 rounded-xl overflow-hidden" style={{ background: "var(--ink-2)" }}><MockupComposite mockup={backMock} hex={mockHex} /><span className="absolute bottom-2 left-2 text-[10px] font-bold px-2 py-1 rounded-full" style={{ background: "var(--ink)", color: "var(--bone)" }}>DETRÁS</span></div>
+              </div>
+            ) : <MockupComposite mockup={mock} hex={mockHex} />
           ) : activeImage ? (
             <img
               src={activeImage}
