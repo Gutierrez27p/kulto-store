@@ -3952,10 +3952,14 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
   const colorImages = color ? getColorImages(color) : [];
   const images = colorImages.length > 0 ? colorImages : (product.photoPool || []);
   const mock = activeMockup(product);
-  const mockActive = !!mock && colorImages.length === 0;
+  // La primera variante conserva las fotos originales subidas por el administrador.
+  // En otras variantes, un mockup configurado permite mostrar el nuevo color;
+  // nunca sustituimos la foto original por una camiseta vacía.
+  const mockActive = !!mock && colorImages.length === 0 && (images.length === 0 || colorIdx > 0);
   const mockHex = color?.hex || "#ffffff";
-  const autoImage = useAutoColorImage(product, color, colorImages.length === 0, imgIdx);
-  const activeImage = (colorImages.length === 0 && autoImage) || images[imgIdx] || null;
+  const canRecolor = colorImages.length === 0 && !mockActive && (Boolean(product.fabricMask) || product.autoRecolor === true) && (colorIdx > 0 || images.length === 0);
+  const autoImage = useAutoColorImage(product, color, canRecolor, imgIdx);
+  const activeImage = (canRecolor && autoImage) || images[imgIdx] || null;
   const isCover = product.imageFit === "cover";
   const previewBg = product.imageBackground || (color && !mock && colorImages.length > 0 ? color.hex : "var(--ink-3)");
   const hasSizes = product.sizes && product.sizes.length > 0;
