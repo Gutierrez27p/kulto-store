@@ -3955,7 +3955,9 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
   // La primera variante conserva las fotos originales subidas por el administrador.
   // En otras variantes, un mockup configurado permite mostrar el nuevo color;
   // nunca sustituimos la foto original por una camiseta vacía.
-  const mockActive = !!mock && !product.fabricMask && colorImages.length === 0 && (images.length === 0 || colorIdx > 0);
+  // Si el administrador activó el mockup de dos capas, mostrarlo SIEMPRE: camiseta base + PNG independiente.
+  // La galería original sigue almacenada, pero no debe tapar la previsualización dinámica.
+  const mockActive = !!mock;
   const mockHex = color?.hex || "#ffffff";
   const canRecolor = colorImages.length === 0 && !mockActive && (Boolean(product.fabricMask) || product.autoRecolor === true) && (colorIdx > 0 || images.length === 0);
   const autoImage = useAutoColorImage(product, color, canRecolor, imgIdx);
