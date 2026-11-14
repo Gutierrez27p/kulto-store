@@ -1058,13 +1058,15 @@ const mockupTintedCache = new Map(); // `${src}|${hex}` -> canvas
 const mockupImgCache = new Map(); // src -> Promise<Image>
 function loadMockupImg(src) {
   if (!mockupImgCache.has(src)) {
-    mockupImgCache.set(src, new Promise((resolve, reject) => {
+    const promise = new Promise((resolve, reject) => {
       const i = new Image();
       i.crossOrigin = "anonymous";
       i.onload = () => resolve(i);
-      i.onerror = reject;
+      i.onerror = () => reject(new Error("No se pudo leer la foto del mockup"));
       i.src = src;
-    }));
+    });
+    mockupImgCache.set(src, promise);
+    promise.catch(() => mockupImgCache.delete(src));
   }
   return mockupImgCache.get(src);
 }
@@ -1172,9 +1174,9 @@ function prepareMockupBase(src, explicitMask = null) {
     }
     let count = 0;
     for (let i = 0; i < n; i++) count += mask[i];
-    if (count < n * 0.03) {
-      // no se pudo distinguir la prenda: se trata toda la foto como prenda
-      for (let i = 0; i < n; i++) mask[i] = d[i * 4 + 3] >= 10 ? 1 : 0;
+    if (!maskAlpha && !isCutout && count < n * 0.03) {
+      // Sin recorte ni máscara: no recolorear el fondo entero a ciegas.
+      throw new Error("No se pudo detectar la silueta: añadí una máscara PNG transparente en la Biblioteca de prendas.");
     }
     // borde suave (desenfoque simple de 3x3, dos veces)
     let soft = maskAlpha ? maskAlpha : (isCutout ? Float32Array.from({ length: n }, (_, i) => d[i * 4 + 3] / 255) : Float32Array.from(mask));
@@ -16902,6 +16904,7 @@ function AdminGarmentMockupLibrary({ products, categories, groups, models, onSav
   const [progress, setProgress] = useState("");
   const [previewColor, setPreviewColor] = useState("#1761A0");
   const [testModel, setTestModel] = useState(null);
+  const [updatingModel, setUpdatingModel] = useState(null);
   const pick = async (file, side) => {
     if (!file) return;
     if (!["image/png", "image/webp"].includes(file.type)) { setStatus("Subí un PNG o WebP sin fondo."); return; }
@@ -16928,6 +16931,24 @@ function AdminGarmentMockupLibrary({ products, categories, groups, models, onSav
       await onSaveSettings({ garmentMockupLibrary: next });
       setName(""); setFront(null); setBack(null); setFrontMask(null); setBackMask(null); setStatus("Modelo guardado. Ya podés asignarlo a productos.");
     } catch (e) { setStatus("Error al guardar: " + (e?.message || "sin conexión")); }
+    finally { setSaving(false); }
+  };
+  const updateExistingModel = async (model, file, field) => {
+    if (!file) return;
+    setSaving(true); setStatus("");
+    try {
+      if (!["image/png", "image/webp"].includes(file.type)) throw new Error("Solo PNG o WebP, con fondo transparente.");
+      const b64 = await new Promise((resolve) => fileToBase64(file, resolve, 1400, 1, "image/png"));
+      const url = await uploadDataUrlToStorage(b64);
+      if (!url) throw new Error("No se pudo subir a Storage.");
+      const img = await loadMockupImg(url);
+      const patch = { [field]: url };
+      if (field === "base") patch.ar = img.naturalWidth / img.naturalHeight;
+      if (field === "backBase") patch.backAr = img.naturalWidth / img.naturalHeight;
+      const next = models.map((m) => m.id === model.id ? { ...m, ...patch } : m);
+      await onSaveSettings({ garmentMockupLibrary: next });
+      setStatus("Modelo actualizado: " + model.name);
+    } catch (e) { setStatus("No se pudo actualizar: " + (e?.message || "Error")); }
     finally { setSaving(false); }
   };
   const matching = products.filter((p) => (!category || p.category === category) && (!group || p.group === group) && (!onlyUnassigned || !p.garmentMockupId));
@@ -16972,7 +16993,8 @@ function AdminGarmentMockupLibrary({ products, categories, groups, models, onSav
           <p className="font-semibold text-sm mb-2">{m.name}</p>
           <div className="grid grid-cols-2 gap-2"><img src={m.base} alt="Delante" className="h-32 w-full object-contain"/><img src={m.backBase} alt="Detrás" className="h-32 w-full object-contain"/></div>
           <p className="text-xs mt-2" style={{ color: "var(--slate)" }}>{products.filter((p) => p.garmentMockupId === m.id).length} productos asignados</p>
-          <button type="button" onClick={() => setTestModel(testModel === m.id ? null : m.id)} className="text-xs underline mt-2">Probar colores</button>
+          <div className="flex flex-wrap gap-3 mt-2"><button type="button" onClick={() => setTestModel(testModel === m.id ? null : m.id)} className="text-xs underline">Probar colores</button><button type="button" onClick={() => setUpdatingModel(updatingModel === m.id ? null : m.id)} className="text-xs underline">Editar fotos y máscaras</button></div>
+          {updatingModel === m.id && <div className="grid grid-cols-2 gap-2 mt-3">{[["base", "Frente"], ["backBase", "Espalda"], ["mask", "Máscara frente"], ["backMask", "Máscara espalda"]].map(([field, label]) => <label key={field} className="cursor-pointer rounded-lg p-2 text-xs text-center" style={{ border: "1px dashed var(--line)" }}><span className="block mb-1">{label}</span><input aria-label={label} type="file" accept="image/png,image/webp" disabled={saving} onChange={(e) => { updateExistingModel(m, e.target.files?.[0], field); e.target.value = ""; }} className="w-full text-[10px]" /></label>)}</div>}
           {testModel === m.id && <div className="mt-2 space-y-2"><input type="color" value={previewColor} onChange={(e) => setPreviewColor(e.target.value)} aria-label="Color de prueba"/><div className="grid grid-cols-2 h-44 gap-2"><MockupComposite mockup={{ ...m, design: null }} hex={previewColor}/><MockupComposite mockup={{ ...m, base: m.backBase, mask: m.backMask, design: null }} hex={previewColor}/></div></div>}
         </div>)}
       </div>}
