@@ -5246,12 +5246,21 @@ function CustomWorkCarousel({ items = [], speed = 0.5 }) {
    are replaced. The existing product editor and cart continue to own state. */
 function EditorialHomeIntro({ products, settings, onGoCatalog, onGoWizard }) {
   const uniqueCategories = [...new Set((products || []).flatMap(p => [p.category, ...(p.extraCategories || [])]).filter(Boolean))];
-  const preferred = ["Camisetas", "Oversize", "Sudaderas", "Tops", "Ofertas", "Personaliza"];
-  const categories = preferred.map(label => {
-    const name = uniqueCategories.find(c => c.toLowerCase() === label.toLowerCase() || c.toLowerCase().includes(label.toLowerCase()));
-    const item = name && products.find(p => p.category === name || (p.extraCategories || []).includes(name));
+  // Grupo visual de prendas: los cortes oversize son modelos de camiseta,
+  // y con/sin capucha son modelos de sudadera, no categorías hermanas.
+  const definitions = [
+    { label: "Camisetas", hint: "Clásicas · Oversize", match: c => /camiseta|oversize/i.test(c) },
+    { label: "Sudaderas", hint: "Con capucha · Sin capucha", match: c => /sudadera|hoodie/i.test(c) },
+    { label: "Tops", hint: "Tops deportivos", match: c => /top/i.test(c) },
+    { label: "Tote bags", hint: "Bolsas de tela", match: c => /tote|bolsa/i.test(c) },
+    { label: "Accesorios", hint: "Complementos", match: c => /llavero|lanyard|accesorio/i.test(c) },
+    { label: "Personaliza", hint: "Tu diseño en tu prenda", match: () => false },
+  ];
+  const categories = definitions.map(({label, hint, match}) => {
+    const matches = uniqueCategories.filter(match);
+    const item = products.find(p => matches.includes(p.category) || (p.extraCategories || []).some(c => matches.includes(c)));
     const image = item?.photoPool?.[0] || getColorImages(item?.colors?.[0])[0] || null;
-    return { label, name, image };
+    return { label, hint, name: matches[0] || "", image };
   });
   const fallbackHero = "https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=1800&q=85";
   const hero = settings?.heroImage || settings?.heroImages?.[0] || fallbackHero;
@@ -5282,12 +5291,12 @@ function EditorialHomeIntro({ products, settings, onGoCatalog, onGoWizard }) {
           <button type="button" className="kulto-editorial-textlink" onClick={() => onGoCatalog({})}>Ver todas las categorías →</button>
         </div>
         <div className="kulto-editorial-cats">
-          {categories.map(({ label, name, image }) => (
+          {categories.map(({ label, hint, name, image }) => (
             <button type="button" key={label} className="kulto-editorial-cat"
-              onClick={() => label === "Personaliza" ? onGoWizard() : label === "Ofertas" ? onGoCatalog({ collection:"ofertas" }) : onGoCatalog(name ? { category:name } : {})}
+              onClick={() => label === "Personaliza" ? onGoWizard() : onGoCatalog(name ? { category:name } : {})}
               aria-label={`Explorar ${label}`}>
               {image ? <img src={image} alt="" loading="lazy"/> : <span aria-hidden="true" style={{fontSize:34,position:"absolute",inset:0,display:"grid",placeItems:"center",opacity:.22}}>K.</span>}
-              <span>{label} <ArrowRight size={13} style={{display:"inline"}}/></span>
+              <span>{label} <ArrowRight size={13} style={{display:"inline"}}/><small className="kulto-editorial-cat-hint">{hint}</small></span>
             </button>
           ))}
         </div>
