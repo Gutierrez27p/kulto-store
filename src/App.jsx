@@ -3325,8 +3325,9 @@ function GlobalStyle({ colors }) {
 /* ------------------------------------------------------------------ */
 
 function Badge({ children, tone = "signal" }) {
+  if (children == null || (typeof children === "string" && !children.trim())) return null;
   const bg = tone === "signal" ? "var(--signal)" : tone === "sun" ? "var(--sun)" : "var(--ink-3)";
-  const color = tone === "sun" ? "var(--ink)" : "var(--bone)";
+  const color = tone === "signal" ? "#fff" : tone === "sun" ? "var(--ink)" : "var(--bone)";
   return (
     <span
       className="text-xs font-semibold px-2 py-1 rounded-full"
@@ -3640,11 +3641,13 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
             <Shirt size={36} style={{ color: "rgba(243,239,230,0.35)" }} />
           </div>
         )}
-        <div className="absolute top-2 left-2 flex flex-col gap-1 items-start max-w-[68%]">
-          {product.tags?.oferta && <Badge tone="signal">Oferta</Badge>}
-          {product.tags?.bestseller && <Badge tone="sun">Más vendido</Badge>}
-          {(product.stock ?? 0) <= 0 && <Badge tone="neutral">Sin stock</Badge>}
-        </div>
+        {(product.tags?.oferta || product.tags?.bestseller || (product.stock ?? 0) <= 0) && (
+          <div className="kulto-product-badges absolute top-2 left-2 flex flex-col gap-1 items-start max-w-[68%]">
+            {product.tags?.oferta && <Badge tone="signal">Oferta</Badge>}
+            {product.tags?.bestseller && <Badge tone="sun">Más vendido</Badge>}
+            {(product.stock ?? 0) <= 0 && <Badge tone="neutral">Sin stock</Badge>}
+          </div>
+        )}
         {onToggleFavorite && (
           <button
             onClick={(e) => { e.stopPropagation(); onToggleFavorite(product.id); }}
