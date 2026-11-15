@@ -5819,7 +5819,9 @@ function Catalog({ settings, initialCollection, products, categories, groups, on
     const ids = computeTrendingIds(products, settings);
     products = products.filter((p) => p.tags?.tendencia || ids.has(p.id));
   } else if (activeCollection === "ofertas") {
-    products = products.filter((p) => p.tags?.oferta);
+    const campaign = settings?.storefrontPromotion || {};
+    const ids = new Set(campaign.enabled ? campaign.productIds || [] : []);
+    products = products.filter(p => p.tags?.oferta || (ids.has(p.id) && (!campaign.excludeOversize || !isOversizeGarment(p, {}, settings.garmentMockupLibrary || []))));
   } else if (activeCollection === "bestsellers") {
     const ids = computeBestsellerIds(products, settings);
     products = products.filter((p) => p.tags?.bestseller || ids.has(p.id));
@@ -17185,6 +17187,8 @@ function AdminPromotionsPanel({ products, settings, onSaveSettings }) {
   const current = settings.storefrontPromotion || {};
   const [draft, setDraft] = useState(() => ({enabled:false,title:"",description:"",productIds:[],excludeOversize:true,quantity:2,unitPrice:10,...current}));
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [savingCampaign, setSavingCampaign] = useState(false);
   const [term, setTerm] = useState("");
   useEffect(() => { setDraft({enabled:false,title:"",description:"",productIds:[],excludeOversize:true,quantity:2,unitPrice:10,...(settings.storefrontPromotion || {})}); }, [settings.storefrontPromotion]);
   const eligible = products.filter(p => !p.tags?.template && (!draft.excludeOversize || !isOversizeGarment(p, {}, settings.garmentMockupLibrary || [])));
@@ -17192,9 +17196,15 @@ function AdminPromotionsPanel({ products, settings, onSaveSettings }) {
   const chosen = new Set(draft.productIds || []);
   const toggle = id => setDraft(prev => ({...prev,productIds:chosen.has(id)?prev.productIds.filter(x=>x!==id):[...(prev.productIds||[]),id]}));
   const save = async () => {
-    if (draft.enabled && !draft.title.trim()) return;
-    await onSaveSettings({storefrontPromotion:{...draft,productIds:(draft.productIds || []).filter(id=>eligible.some(p=>p.id===id))}});
-    setSaved(true);
+    setSaveError(""); setSaved(false);
+    if (draft.enabled && !draft.title.trim()) { setSaveError("Escribí un título antes de activar la promoción."); return; }
+    if (draft.enabled && !(draft.productIds||[]).some(id=>eligible.some(p=>p.id===id))) { setSaveError("Seleccioná al menos una prenda elegible."); return; }
+    setSavingCampaign(true);
+    try {
+      await onSaveSettings({storefrontPromotion:{...draft,productIds:(draft.productIds || []).filter(id=>eligible.some(p=>p.id===id))}});
+      setSaved(true);
+    } catch(e) {setSaveError(e?.message || "No se pudo guardar.");}
+    finally {setSavingCampaign(false);}
   };
   return <section className="space-y-5">
     <div><h2 className="kulto-display text-2xl" style={{color:"var(--bone)"}}>Promociones de temporada</h2>
@@ -17223,7 +17233,8 @@ function AdminPromotionsPanel({ products, settings, onSaveSettings }) {
         <button type="button" className="kulto-btn text-xs rounded-full px-3 py-2" style={{background:"var(--ink-3)",color:"var(--bone)",border:"1px solid var(--line)"}} onClick={()=>setDraft(prev=>({...prev,productIds:[]}))}>Limpiar selección</button>
       </div>
       <p className="text-xs" style={{color:"var(--slate)"}}>{[...chosen].filter(id=>eligible.some(p=>p.id===id)).length} productos incluidos · {products.length-eligible.length} excluidos o no vendibles</p>
-      <button type="button" onClick={save} className="kulto-btn px-5 py-3 rounded-xl font-semibold" style={{background:"var(--sun)",color:"var(--ink)"}}>Guardar promoción</button>
+      <button type="button" disabled={savingCampaign} onClick={save} className="kulto-btn px-5 py-3 rounded-xl font-semibold" style={{background:"var(--sun)",color:"var(--ink)"}}>{savingCampaign ? "Guardando…" : "Guardar promoción"}</button>
+      {saveError && <p role="alert" className="text-sm" style={{color:"var(--signal)"}}>{saveError}</p>}
       {saved && <p role="status" className="text-sm">Promoción guardada. Comprueba su vista en Inicio.</p>}
     </div>
   </section>;
@@ -20884,6 +20895,14 @@ export default function App() {
   };
 
   const handleSaveSettings = async (partial) => {
+    if (Object.prototype.hasOwnProperty.call(partial, "storefrontPromotion")) {
+      // A campaign is not announced as saved until persistent storage confirms it.
+      const next = {...settings, ...partial};
+      const saved = await storageSetVerbose("kulto:settings", JSON.stringify(next), true);
+      if (!saved?.ok) throw new Error(saved?.error || "No se pudo guardar la campaña");
+      setSettings(prev => ({...prev,...partial}));
+      return;
+    }
     setSettings((prev) => {
       const next = { ...prev, ...partial };
       persistSettings(next);
