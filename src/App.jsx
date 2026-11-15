@@ -1278,7 +1278,7 @@ function tintedMockupCanvas(src, prep, hex) {
 
 function activeMockup(product) {
   const m = resolveProductMockup(product);
-  return m && m.enabled && m.base && (m.design || m.logoLight || m.logoDark) ? m : null;
+  return m && m.enabled && m.base && (m.design || m.backDesign || m.logoLight || m.logoDark) ? m : null;
 }
 
 function MockupComposite({ mockup, hex, innerRef, designProps }) {
@@ -17290,11 +17290,13 @@ function AdminGarmentMockupLibrary({ products, categories, groups, models, desig
   const [name, setName] = useState("");
   const [garmentKind, setGarmentKind] = useState("camiseta-clasica");
   const [artProductId, setArtProductId] = useState("");
+  const [artSide, setArtSide] = useState("front");
   const [applyToGroup, setApplyToGroup] = useState(true);
   const [artSearch, setArtSearch] = useState("");
   const [front, setFront] = useState(null);
   const [back, setBack] = useState(null);
   const [frontMask, setFrontMask] = useState(null);
+  const [glbDraft, setGlbDraft] = useState("");
   const [backMask, setBackMask] = useState(null);
   const [saving, setSaving] = useState(false);
   const [cleanGarmentBackground, setCleanGarmentBackground] = useState(false);
@@ -17319,7 +17321,7 @@ function AdminGarmentMockupLibrary({ products, categories, groups, models, desig
         if (!cleaned) throw Error("No se pudo quitar el fondo automáticamente. Subí un PNG transparente o una máscara.");
         b64 = cleaned;
       }
-      const url = await uploadDataUrlToStorage(b64);
+      const url = b64?.startsWith("https://") ? b64 : await uploadDataUrlToStorage(b64);
       if (!url) throw new Error("No se pudo subir a Storage; no se guarda el modelo para evitar fotos que desaparezcan.");
       const image = await loadMockupImg(url);
       const info = { url, ar: image.naturalWidth / image.naturalHeight };
@@ -17334,11 +17336,36 @@ function AdminGarmentMockupLibrary({ products, categories, groups, models, desig
     if (!name.trim() || !front?.url) { setStatus("Indicá el nombre y subí al menos el frente."); return; }
     setSaving(true);
     try {
-      const next = [...models, { id: genId("garment"), name: name.trim(), garmentKind, base: front.url, ar: front.ar, backBase: back?.url || null, backAr: back?.ar || null, mask: frontMask?.url || null, backMask: backMask?.url || null, enabled: true, x: 50, y: 38, w: 38, backX: 50, backY: 38, backW: 40 }];
+      const next = [...models, { id: genId("garment"), name: name.trim(), garmentKind, base: front.url, ar: front.ar, backBase: back?.url || null, backAr: back?.ar || null, mask: frontMask?.url || null, backMask: backMask?.url || null, glbUrl: glbDraft.trim() || null, enabled: true, x: 50, y: 38, w: 38, backX: 50, backY: 38, backW: 40 }];
       await onSaveModels(next);
-      setName(""); setFront(null); setBack(null); setFrontMask(null); setBackMask(null); setStatus("Modelo guardado. Ya podés asignarlo a productos.");
+      setName(""); setGlbDraft(""); setFront(null); setBack(null); setFrontMask(null); setBackMask(null); setStatus("Modelo guardado. Ya podés asignarlo a productos.");
     } catch (e) { setStatus("Error al guardar: " + (e?.message || "sin conexión")); }
     finally { setSaving(false); }
+  };
+  const upload3DForModel = async (model, file) => {
+    if (!file) return;
+    if (!/\.glb$/i.test(file.name) || file.size > 25 * 1024 * 1024) {
+      setStatus("Seleccioná un .glb válido de hasta 25 MB."); return;
+    }
+    setSaving(true); setStatus("");
+    try {
+      const path = "models/" + genId("model3d") + ".glb";
+      const result = await supabase.storage.from(STORAGE_BUCKET).upload(path,file,{contentType:"model/gltf-binary",upsert:false});
+      if(result.error)throw new Error(result.error.message || "El bucket no acepta modelos .glb");
+      const data = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path).data;
+      if(!data?.publicUrl)throw new Error("No se pudo obtener el enlace público");
+      await onSaveModels(models.map(m=>m.id===model.id?{...m,glbUrl:data.publicUrl}:m));
+      setStatus("Modelo 3D vinculado a "+model.name+". Probaló en la vista previa.");
+    }catch(err){setStatus("No se pudo subir GLB: "+(err?.message||"Error")+". Podés usar una URL HTTPS accesible.")}
+    finally {setSaving(false);}
+  };
+  const update3DUrl = async (model,raw) => {
+    const url=String(raw||"").trim();
+    if(url && !/^https:\/\//i.test(url)){setStatus("La URL del modelo debe comenzar por https://");return;}
+    setSaving(true);setStatus("");
+    try{await onSaveModels(models.map(m=>m.id===model.id?{...m,glbUrl:url||null}:m));setStatus("Referencia 3D actualizada.");}
+    catch(e){setStatus(e?.message||"No se pudo guardar el modelo 3D");}
+    finally{setSaving(false);}
   };
   const updateExistingModel = async (model, file, field) => {
     if (!file) return;
@@ -17346,7 +17373,7 @@ function AdminGarmentMockupLibrary({ products, categories, groups, models, desig
     try {
       if (!["image/png", "image/webp"].includes(file.type)) throw new Error("Solo PNG o WebP, con fondo transparente.");
       const b64 = await new Promise((resolve) => fileToBase64(file, resolve, 1400, 1, "image/png"));
-      const url = await uploadDataUrlToStorage(b64);
+      const url = b64?.startsWith("https://") ? b64 : await uploadDataUrlToStorage(b64);
       if (!url) throw new Error("No se pudo subir a Storage.");
       const img = await loadMockupImg(url);
       const patch = { [field]: url };
@@ -17400,10 +17427,10 @@ function AdminGarmentMockupLibrary({ products, categories, groups, models, desig
       if (corners.every(i=>rgba[i*4+3]>245)) throw Error("El arte parece tener fondo opaco. Elegí un PNG transparente.");
       const group = applyToGroup && artProduct.designGroup
         ? products.filter(p=>p.designGroup===artProduct.designGroup) : [artProduct];
-      const patched=group.map(p=>({...p,mockup:{...(p.mockup || {}),design:url,enabled:!!(p.mockup?.base || p.garmentMockupId)}}));
+      const patched=group.map(p=>({...p,mockup:{...(p.mockup || {}),[artSide==="back"?"backDesign":"design"]:url,enabled:!!(p.mockup?.base || p.garmentMockupId)}}));
       const outcome=await onSaveProductsBulk(patched);
       if(outcome.failed) throw Error("Guardados "+outcome.ok+"; fallidos "+outcome.failed+".");
-      setStatus("Estampado vinculado a "+outcome.ok+" prenda(s). Los modelos compatibles se aplicarán automáticamente cuando haya uno por tipo. Publicá los cambios en Productos.");
+      setStatus("Estampado "+(artSide==="back"?"trasero":"delantero")+" vinculado a "+outcome.ok+" prenda(s). Los modelos compatibles se aplicarán automáticamente cuando haya uno por tipo. Publicá los cambios en Productos.");
     } catch(e){setStatus("No se pudo vincular: "+(e?.message || "Error"))}
     finally{setSaving(false)}
   };
@@ -17413,7 +17440,7 @@ function AdminGarmentMockupLibrary({ products, categories, groups, models, desig
     setSaving(true);setStatus("");
     try {
       const b64=await new Promise(resolve=>fileToBase64(file,resolve,1400,1,"image/png"));
-      const url=await uploadDataUrlToStorage(b64);
+      const url=b64?.startsWith("https://")?b64:await uploadDataUrlToStorage(b64);
       if(!url) throw Error("No se pudo subir a Storage");
       await linkTransparentDesign(url);
     } catch(e){setStatus("No se pudo subir: "+(e?.message || "Error"))}
@@ -17442,6 +17469,10 @@ function AdminGarmentMockupLibrary({ products, categories, groups, models, desig
           </select>
         </label>
         <input aria-label="Nombre del modelo" placeholder="Ej. Camiseta Premium Oversize" value={name} onChange={(e) => setName(e.target.value)} className="w-full rounded-lg p-3" style={{ background: "var(--ink-3)", color: "var(--bone)" }}/>
+        <label className="block text-xs">URL del modelo 3D real .glb (opcional)
+          <input value={glbDraft} onChange={e=>setGlbDraft(e.target.value)} placeholder="https://.../camiseta.glb" className="block w-full rounded-lg p-3 mt-1" style={{background:"var(--ink-3)",color:"var(--bone)"}}/>
+        </label>
+        <p className="text-xs" style={{color:"var(--slate)"}}>Sin GLB se utiliza la prenda 3D integrada. Un archivo GLB permite sustituirla por el modelo de tu proveedor.</p>
         <div className="grid grid-cols-2 gap-3">
           {[[front, "Delante (obligatorio)", "front"], [back, "Detrás (opcional)", "back"]].map(([img, label, side]) => <label key={side} className="rounded-xl p-3 text-sm cursor-pointer text-center" style={{ border: "1px dashed var(--line)" }}>
             <p className="mb-2 font-semibold">{label}</p>
@@ -17467,6 +17498,16 @@ function AdminGarmentMockupLibrary({ products, categories, groups, models, desig
           <label className="block text-xs mb-2">Tipo de prenda<select value={m.garmentKind || ""} onChange={async e=> { setSaving(true); try { await onSaveModels(models.map(old=>old.id===m.id?{...old,garmentKind:e.target.value || null}:old)); } catch(err) {setStatus(err?.message || "Error");} finally {setSaving(false);} }} className="block w-full p-2 rounded-lg mt-1" style={{background:"var(--ink-3)",color:"var(--bone)"}}><option value="">Antiguo (sin clasificación)</option>{GARMENT_MODEL_TYPES.map(k=><option key={k.id} value={k.id}>{k.label}</option>)}</select></label>
           <div className="grid grid-cols-2 gap-2"><img src={m.base} alt="Delante" className="h-32 w-full object-contain"/>{m.backBase ? <img src={m.backBase} alt="Detrás" className="h-32 w-full object-contain"/> : <div className="h-32 flex items-center justify-center text-xs" style={{color:"var(--slate)"}}>Sin vista trasera</div>}</div>
           <p className="text-xs mt-2" style={{ color: "var(--slate)" }}>{products.filter((p) => p.garmentMockupId === m.id).length} productos asignados</p>
+          <div className="mt-3 space-y-2">
+            <p className="text-xs font-semibold">Modelo 3D (GLB opcional)</p>
+            <p className="text-[11px]" style={{color:"var(--slate)"}}>{m.glbUrl?"Usando archivo 3D personalizado":"Usando geometría 3D integrada por tipo de prenda"}</p>
+            <label className="text-xs block cursor-pointer rounded-lg px-3 py-2" style={{border:"1px dashed var(--line)"}}>Subir .glb para este modelo
+              <input type="file" accept=".glb,model/gltf-binary" disabled={saving} className="block w-full text-[10px]" onChange={e=>{upload3DForModel(m,e.target.files?.[0]);e.target.value="";}}/>
+            </label>
+            <label className="text-xs block">O pegar URL GLB HTTPS
+              <input key={m.glbUrl||"empty"} defaultValue={m.glbUrl||""} placeholder="https://.../modelo.glb" onBlur={e=>{if(e.target.value.trim()!==(m.glbUrl||""))update3DUrl(m,e.target.value);}} className="block w-full rounded-lg mt-1 p-2 text-xs" style={{background:"var(--ink-3)",border:"1px solid var(--line)",color:"var(--bone)"}}/>
+            </label>
+          </div>
           <div className="flex flex-wrap gap-3 mt-2"><button type="button" onClick={() => setTestModel(testModel === m.id ? null : m.id)} className="text-xs underline">Probar colores</button><button type="button" onClick={() => setUpdatingModel(updatingModel === m.id ? null : m.id)} className="text-xs underline">Editar fotos y máscaras</button></div>
           {updatingModel === m.id && <div className="grid grid-cols-2 gap-2 mt-3">{[["base", "Frente"], ["backBase", "Espalda"], ["mask", "Máscara frente"], ["backMask", "Máscara espalda"]].map(([field, label]) => <label key={field} className="cursor-pointer rounded-lg p-2 text-xs text-center" style={{ border: "1px dashed var(--line)" }}><span className="block mb-1">{label}</span><input aria-label={label} type="file" accept="image/png,image/webp" disabled={saving} onChange={(e) => { updateExistingModel(m, e.target.files?.[0], field); e.target.value = ""; }} className="w-full text-[10px]" /></label>)}</div>}
           {testModel === m.id && <div className="mt-2 space-y-2"><input type="color" value={previewColor} onChange={(e) => setPreviewColor(e.target.value)} aria-label="Color de prueba"/><div className="grid grid-cols-2 h-44 gap-2"><MockupComposite mockup={{ ...m, design: null }} hex={previewColor}/>{m.backBase ? <MockupComposite mockup={{ ...m, base: m.backBase, mask: m.backMask, design: null }} hex={previewColor}/> : <div className="flex items-center justify-center text-xs">Sin reverso</div>}</div></div>}
@@ -17485,7 +17526,16 @@ function AdminGarmentMockupLibrary({ products, categories, groups, models, desig
           <option value="">Seleccioná un producto</option>
           {products.filter(p=>[p.name,p.sku,p.category].join(" ").toLowerCase().includes(artSearch.toLowerCase())).map(p=><option key={p.id} value={p.id}>{p.name} · {p.category}{p.designGroup?" · grupo vinculado":""}</option>)}
         </select>
+        <div className="flex flex-wrap gap-3 items-center">
+          <label className="text-xs font-semibold">¿En qué cara se imprime?
+            <select aria-label="Cara para el estampado" value={artSide} onChange={e=>setArtSide(e.target.value)} className="block mt-1 rounded-lg p-2 text-xs" style={{background:"var(--ink-3)",color:"var(--bone)",border:"1px solid var(--line)"}}>
+              <option value="front">Delante</option>
+              <option value="back">Detrás</option>
+            </select>
+          </label>
+        </div>
         <label className="flex gap-2 text-sm items-center"><input type="checkbox" checked={applyToGroup} onChange={e=>setApplyToGroup(e.target.checked)}/> Reutilizar el mismo estampado en las prendas que comparten este diseño</label>
+        <p className="text-xs" style={{color:"var(--slate)"}}>Para la espalda subí el PNG del estampado, no la fotografía de la camiseta ya estampada. El diseño frontal no se copiará automáticamente al reverso.</p>
         {designLibrary.length > 0 && (
           <div className="space-y-1">
             <p className="text-xs" style={{color:"var(--slate)"}}>O elegí el estampado que ya está subido en tu Biblioteca de diseños:</p>
