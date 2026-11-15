@@ -53,3 +53,14 @@
   .kulto-banner-touch-reveal{display:flex;align-items:center;justify-content:center;align-self:flex-end;width:34px;height:34px;margin:0 12px 5px 0;border-radius:50%;background:rgba(0,0,0,.72);color:#fff;z-index:5}
 }
 @media(prefers-reduced-motion:reduce){.kulto-editorial-banner .kulto-tile-desc{transition:none}}
+
+/* Garment families: short descriptions under each main group. */
+.kulto-editorial-cat span{display:block;width:100%}
+.kulto-editorial-cat-hint{display:block;margin-top:4px;font-size:11px;line-height:1.25;font-weight:500;color:#f1f1f1;opacity:.95}
+.kulto-seasonal-promo-head{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:24px;padding:26px;border-radius:14px;background:#181818;color:#fff}
+.kulto-seasonal-promo-head h2{color:#fff!important;margin:8px 0 14px}
+.kulto-seasonal-promo-head p{color:#ededed;max-width:650px;line-height:1.5}
+.kulto-seasonal-promo-head small{font-size:11px;font-weight:800;letter-spacing:.13em;color:#f4ce53}
+.kulto-seasonal-promo-note{font-size:11px!important;opacity:.78;margin-top:12px}
+.kulto-seasonal-promo .kulto-editorial-action{margin-top:0}
+@media(max-width:520px){.kulto-editorial-cat-hint{font-size:9px}.kulto-seasonal-promo-head{padding:20px}}
