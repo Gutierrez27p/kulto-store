@@ -3397,8 +3397,8 @@ function ColorSwatch({ hex, selected, onClick, title }) {
       className="kulto-btn kulto-tip rounded-full"
       style={{
         width: 34, height: 34, background: hex,
-        border: selected ? "3px solid var(--sun)" : "2px solid rgba(243,239,230,0.35)",
-        boxShadow: selected ? "0 0 0 2px var(--ink-2)" : "none",
+        border: "2px solid #737373",
+        boxShadow: selected ? "0 0 0 3px var(--sun), 0 0 0 5px var(--ink-2)" : "0 0 0 1px rgba(255,255,255,.6)",
       }}
     />
   );
@@ -3713,7 +3713,8 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
                   width: 14,
                   height: 14,
                   background: c.hex,
-                  border: i === activeColorIdx ? "2px solid var(--sun)" : "1px solid rgba(243,239,230,0.3)",
+                  border: "1.5px solid #737373",
+                  boxShadow: i === activeColorIdx ? "0 0 0 2px var(--sun)" : "0 0 0 1px rgba(255,255,255,.55)",
                 }}
                 data-tip={c.name}
                 aria-label={`Ver ${product.name} en color ${c.name}`}
