@@ -17096,7 +17096,7 @@ function AdminGarmentMockupLibrary({ products, categories, groups, models, desig
   const chosenModel = models.find(m=>m.id===modelId);
   const matching = products.filter((p) => (!category || p.category === category) && (!group || p.group === group) && (!onlyUnassigned || !p.garmentMockupId) && (!chosenModel || modelMatchesProduct(chosenModel,p)));
   const compatible = matching.filter((p) => p.mockup?.design || (p.designs?.length === 1 && p.designs[0]?.image));
-  const normArtName = value => String(value || "").normalize("NFD").replace(/[\\u0300-\\u036f]/g,"").replace(/\\.(png|webp|jpg|jpeg)$/i,"").replace(/[^a-zA-Z0-9]+/g,"").toLowerCase();
+  const normArtName = value => String(value || "").normalize("NFD").replace(/[^\p{L}\p{N}]/gu,"").toLowerCase().replace(/(png|webp|jpg|jpeg)$/i,"");
   const artByName = new Map();
   designLibrary.filter(d=>d.image).forEach(d=>{
     const key=normArtName(d.name);
