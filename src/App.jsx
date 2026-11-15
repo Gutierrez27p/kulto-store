@@ -4883,6 +4883,7 @@ function FocalCropImage({ src, box, focalX = 50, focalY = 50, zoom = 1, alt = ""
 const BANNER_FOCUS_POSITIONS = { center: "center center", top: "center top", bottom: "center bottom", left: "left center", right: "right center" };
 
 function PromoBanner({ banner, onGoCatalog, onGoWizard }) {
+  const [descriptionOpen, setDescriptionOpen] = useState(false);
   if (!banner || banner.active === false) return null;
 
   const clickable = banner.ctaAction && banner.ctaAction !== "none";
@@ -4910,7 +4911,7 @@ function PromoBanner({ banner, onGoCatalog, onGoWizard }) {
     return (
       <div
         {...interactiveProps}
-        className={`kulto-banner-tile kulto-editorial-banner relative rounded-2xl overflow-hidden flex items-end ${clickable ? "cursor-pointer kulto-banner-clickable" : ""}`}
+        className={`kulto-banner-tile kulto-editorial-banner ${descriptionOpen ? "kulto-desc-open" : ""} relative rounded-2xl overflow-hidden flex items-end ${clickable ? "cursor-pointer kulto-banner-clickable" : ""}`}
         style={{ minHeight, background: "var(--ink-3)", border: "1px solid var(--line)", "--banner-glow": banner.highlightColor || "transparent" }}
       >
         {banner.image && (
@@ -4927,6 +4928,12 @@ function PromoBanner({ banner, onGoCatalog, onGoWizard }) {
             pasar el mouse. En el celular, donde no hay mouse, queda a la vista
             en 3 líneas. */}
         <div className="absolute left-0 right-0 bottom-0 flex flex-col">
+          {banner.subtitle && (
+            <button type="button" className="kulto-banner-touch-reveal" aria-label={descriptionOpen ? "Ocultar descripción" : "Mostrar descripción"} aria-expanded={descriptionOpen}
+              onClick={(e) => { e.stopPropagation(); setDescriptionOpen(v => !v); }}>
+              {descriptionOpen ? <ChevronDown size={17} /> : <ChevronUp size={17} />}
+            </button>
+          )}
           {banner.title && (
             <h3 className="kulto-display text-xl md:text-2xl leading-[0.95] whitespace-pre-line px-5 pt-5 pb-4" style={{ color: "var(--bone)", ...textOutlineStyle(banner.textOutlineWidth, banner.textOutlineColor) }}>
               {banner.title}
