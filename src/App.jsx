@@ -5516,6 +5516,7 @@ function Home({ products, settings, reviews, customWorkGallery, onOpen, onGoCata
       {settings.storefrontPromotion?.enabled && settings.storefrontPromotion?.title?.trim() && (
         <section className="kulto-editorial-section kulto-seasonal-promo" aria-label="Promoción activa">
           <div className="kulto-seasonal-promo-head">
+            {settings.storefrontPromotion.image && <img src={settings.storefrontPromotion.image} className="kulto-seasonal-promo-bg" alt="" />}
             <div><small>OFERTA ESPECIAL</small><h2>{settings.storefrontPromotion.title}</h2>
               {settings.storefrontPromotion.description && <p>{settings.storefrontPromotion.description}</p>}
               <p className="kulto-seasonal-promo-note">Las condiciones y el precio final se confirman al finalizar el pedido.</p>
@@ -17197,7 +17198,20 @@ function AdminPromotionsPanel({ products, settings, onSaveSettings }) {
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [savingCampaign, setSavingCampaign] = useState(false);
+  const [uploadingCampaignImage, setUploadingCampaignImage] = useState(false);
   const [term, setTerm] = useState("");
+  const uploadCampaignImage = async file => {
+    if (!file) return;
+    setSaveError(""); setUploadingCampaignImage(true);
+    try {
+      if (!file.type.startsWith("image/")) throw Error("Elegí una imagen JPG, PNG o WebP.");
+      const base64=await new Promise(resolve=>fileToBase64(file,resolve,1600,0.88,"image/jpeg"));
+      const url=await uploadDataUrlToStorage(base64);
+      if(!url) throw Error("No se pudo guardar la portada.");
+      setDraft(prev=>({...prev,image:url}));
+    } catch(e){setSaveError(e?.message || "Error al subir portada")}
+    finally{setUploadingCampaignImage(false)}
+  };
   useEffect(() => { setDraft({enabled:false,title:"",description:"",productIds:[],excludeOversize:true,quantity:2,unitPrice:10,...(settings.storefrontPromotion || {})}); }, [settings.storefrontPromotion]);
   const eligible = products.filter(p => !p.tags?.template && (!draft.excludeOversize || !isOversizeGarment(p, {}, settings.garmentMockupLibrary || [])));
   const visible = eligible.filter(p => [p.name,p.sku,p.category].filter(Boolean).join(" ").toLowerCase().includes(term.toLowerCase()));
@@ -17221,6 +17235,14 @@ function AdminPromotionsPanel({ products, settings, onSaveSettings }) {
     <div className="rounded-2xl p-5 space-y-4" style={{background:"var(--ink-2)",border:"1px solid var(--line)"}}>
       <label className="flex gap-3 items-center font-semibold"><input type="checkbox" checked={!!draft.enabled} onChange={e=>setDraft({...draft,enabled:e.target.checked})}/> Mostrar promoción en Inicio</label>
       <label className="block text-sm">Título de la campaña<input className="block w-full rounded-lg p-3 mt-1" style={{background:"var(--ink-3)",color:"var(--bone)"}} value={draft.title} onChange={e=>setDraft({...draft,title:e.target.value})} placeholder="BLACK FRIDAY KULTO"/></label>
+      <div className="space-y-2">
+        <p className="text-sm">Imagen de campaña (opcional)</p>
+        {draft.image && <div className="relative"><img src={draft.image} alt="Portada de la promoción" className="max-h-44 w-full object-cover rounded-xl"/><button type="button" onClick={()=>setDraft({...draft,image:null})} className="underline text-xs mt-2">Quitar imagen</button></div>}
+        <label className="block cursor-pointer p-3 text-sm text-center rounded-xl" style={{border:"1px dashed var(--line)"}}>
+          {uploadingCampaignImage?"Subiendo foto…":"Subir imagen de Black Friday, temporada o campaña"}
+          <input type="file" accept="image/jpeg,image/png,image/webp" disabled={uploadingCampaignImage} className="sr-only" onChange={e=>{uploadCampaignImage(e.target.files?.[0]);e.target.value="";}}/>
+        </label>
+      </div>
       <label className="block text-sm">Texto de la campaña<textarea className="block w-full rounded-lg p-3 mt-1" rows={3} style={{background:"var(--ink-3)",color:"var(--bone)"}} value={draft.description} onChange={e=>setDraft({...draft,description:e.target.value})} placeholder="Llevando 2 camisetas clásicas, cada una queda a 10 €"/></label>
       <div className="grid grid-cols-2 gap-4">
         <label className="text-sm">Cantidad mínima<input type="number" min="1" max="20" className="block rounded-lg p-2 w-full mt-1" value={draft.quantity} onChange={e=>setDraft({...draft,quantity:Math.max(1,Number(e.target.value)||1)})} style={{background:"var(--ink-3)",color:"var(--bone)"}}/></label>
