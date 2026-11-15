@@ -4939,7 +4939,7 @@ function PromoBanner({ banner, onGoCatalog, onGoWizard }) {
             </button>
           )}
           {banner.title && (
-            <h3 className="kulto-display text-xl md:text-2xl leading-[0.95] whitespace-pre-line px-5 pt-5 pb-4" style={{ color: "var(--bone)", ...textOutlineStyle(banner.textOutlineWidth, banner.textOutlineColor) }}>
+            <h3 className="kulto-display text-xl md:text-2xl leading-[0.95] whitespace-pre-line px-5 pt-5 pb-4" style={{ color: (Number(banner.textOutlineWidth) > 0 && !/^(#000000|#000|black)$/i.test(banner.textOutlineColor || "#000000")) ? "#171717" : "#ffffff", ...textOutlineStyle(banner.textOutlineWidth, banner.textOutlineColor) }}>
               {banner.title}
             </h3>
           )}
@@ -4985,13 +4985,13 @@ function PromoBanner({ banner, onGoCatalog, onGoWizard }) {
       <div className="relative w-full max-w-6xl mx-auto px-4 md:px-6 py-10">
         <div className="flex flex-col gap-3 max-w-lg">
           {banner.title && (
-            <h3 className="kulto-display text-2xl md:text-4xl leading-[0.95] whitespace-pre-line" style={{ color: "var(--bone)", ...textOutlineStyle(banner.textOutlineWidth, banner.textOutlineColor) }}>
+            <h3 className="kulto-display text-2xl md:text-4xl leading-[0.95] whitespace-pre-line" style={{ color: (Number(banner.textOutlineWidth) > 0 && !/^(#000000|#000|black)$/i.test(banner.textOutlineColor || "#000000")) ? "#171717" : "#ffffff", ...textOutlineStyle(banner.textOutlineWidth, banner.textOutlineColor) }}>
               {banner.title}
             </h3>
           )}
-          {banner.subtitle && <ClampText text={banner.subtitle} lines={3} className="text-sm md:text-base" style={{ color: "var(--bone)", ...subtitleOutline(banner) }} />}
+          {banner.subtitle && <ClampText text={banner.subtitle} lines={3} className="text-sm md:text-base" style={{ color: "#ffffff", ...subtitleOutline(banner) }} />}
           {clickable && (
-            <span className="kulto-btn rounded-full px-6 py-3 font-semibold w-fit mt-1 inline-block" style={{ background: "var(--signal)", color: "var(--bone)" }}>
+            <span className="kulto-btn rounded-full px-6 py-3 font-semibold w-fit mt-1 inline-block" style={{ background: "#ffffff", color: "#181818" }}>
               {banner.ctaLabel || "Ver catálogo"}
             </span>
           )}
@@ -5516,6 +5516,24 @@ function Home({ products, settings, reviews, customWorkGallery, onOpen, onGoCata
         </div>
         <FeaturedGrid list={dedupeByDesign([...products].reverse()).slice(0, 4)} collection="novedades" />
       </section>
+      {settings.storefrontPromotion?.enabled && settings.storefrontPromotion?.title?.trim() && (
+        <section className="kulto-editorial-section kulto-seasonal-promo" aria-label="Promoción activa">
+          <div className="kulto-seasonal-promo-head">
+            <div><small>OFERTA ESPECIAL</small><h2>{settings.storefrontPromotion.title}</h2>
+              {settings.storefrontPromotion.description && <p>{settings.storefrontPromotion.description}</p>}
+              <p className="kulto-seasonal-promo-note">Las condiciones y el precio final se confirman al finalizar el pedido.</p>
+            </div>
+            <button type="button" className="kulto-editorial-action" onClick={() => onGoCatalog({collection:"ofertas"})}>Ver ofertas <ArrowRight size={15}/></button>
+          </div>
+          {(() => {
+            const promo = settings.storefrontPromotion;
+            const selection = products.filter(p => (promo.productIds || []).includes(p.id) && (!promo.excludeOversize || !/oversize/i.test([p.name,p.category,p.subcategory,p.garmentType,p.model].filter(Boolean).join(" "))));
+            return selection.length ? <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-5">{selection.slice(0,4).map(p =>
+              <ProductCard key={p.id} product={p} onOpen={onOpen} isFavorite={favorites?.includes(p.id)} onToggleFavorite={onToggleFavorite} onAddToCart={onAddToCart}/>
+            )}</div> : null;
+          })()}
+        </section>
+      )}
       <div className="kulto-editorial-extra flex flex-col gap-14 py-12">
         {renderGroups.map((g) => {
           if (g.type === "tiles") {
