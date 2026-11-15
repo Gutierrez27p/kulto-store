@@ -17027,10 +17027,10 @@ function AdminGarmentMockupLibrary({ products, categories, groups, models, onSav
     finally { setSaving(false); }
   };
   const add = async () => {
-    if (!name.trim() || !front?.url || !back?.url) { setStatus("Indicá el nombre y subí delante y detrás."); return; }
+    if (!name.trim() || !front?.url) { setStatus("Indicá el nombre y subí al menos el frente."); return; }
     setSaving(true);
     try {
-      const next = [...models, { id: genId("garment"), name: name.trim(), base: front.url, ar: front.ar, backBase: back.url, backAr: back.ar, mask: frontMask?.url || null, backMask: backMask?.url || null, enabled: true, x: 50, y: 38, w: 38, backX: 50, backY: 38, backW: 40 }];
+      const next = [...models, { id: genId("garment"), name: name.trim(), base: front.url, ar: front.ar, backBase: back?.url || null, backAr: back?.ar || null, mask: frontMask?.url || null, backMask: backMask?.url || null, enabled: true, x: 50, y: 38, w: 38, backX: 50, backY: 38, backW: 40 }];
       await onSaveModels(next);
       setName(""); setFront(null); setBack(null); setFrontMask(null); setBackMask(null); setStatus("Modelo guardado. Ya podés asignarlo a productos.");
     } catch (e) { setStatus("Error al guardar: " + (e?.message || "sin conexión")); }
@@ -17070,12 +17070,12 @@ function AdminGarmentMockupLibrary({ products, categories, groups, models, onSav
   };
   return (
     <section className="space-y-5">
-      <div><h2 className="kulto-display text-2xl" style={{ color: "var(--bone)" }}>Biblioteca de prendas</h2><p className="text-sm mt-2" style={{ color: "var(--slate)" }}>Subí una única vez cada modelo limpio, delantero y trasero. Las categorías de diseños permanecen intactas.</p></div>
+      <div><h2 className="kulto-display text-2xl" style={{ color: "var(--bone)" }}>Biblioteca de prendas</h2><p className="text-sm mt-2" style={{ color: "var(--slate)" }}>Subí una sola imagen limpia del frente por modelo de prenda (camiseta clásica, oversize, sudadera con/sin capucha, tote bag...). La imagen trasera es opcional. Los diseños y categorías existentes no se borran.</p></div>
       <div className="rounded-2xl p-5 space-y-3" style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}>
         <p className="font-semibold">Nuevo modelo reutilizable</p>
         <input aria-label="Nombre del modelo" placeholder="Ej. Camiseta Premium Oversize" value={name} onChange={(e) => setName(e.target.value)} className="w-full rounded-lg p-3" style={{ background: "var(--ink-3)", color: "var(--bone)" }}/>
         <div className="grid grid-cols-2 gap-3">
-          {[[front, "Delante", "front"], [back, "Detrás", "back"]].map(([img, label, side]) => <label key={side} className="rounded-xl p-3 text-sm cursor-pointer text-center" style={{ border: "1px dashed var(--line)" }}>
+          {[[front, "Delante (obligatorio)", "front"], [back, "Detrás (opcional)", "back"]].map(([img, label, side]) => <label key={side} className="rounded-xl p-3 text-sm cursor-pointer text-center" style={{ border: "1px dashed var(--line)" }}>
             <p className="mb-2 font-semibold">{label}</p>
             {img ? <img src={img.url} alt={label} className="mx-auto h-36 object-contain" /> : <div className="h-36 flex items-center justify-center" style={{ color: "var(--slate)" }}>Subir mockup limpio</div>}
             <input type="file" accept="image/png,image/webp" onChange={(e) => { pick(e.target.files?.[0], side); e.target.value = ""; }} className="sr-only" />
@@ -17094,11 +17094,11 @@ function AdminGarmentMockupLibrary({ products, categories, groups, models, onSav
       {models.length > 0 && <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {models.map((m) => <div key={m.id} className="rounded-xl p-3" style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}>
           <p className="font-semibold text-sm mb-2">{m.name}</p>
-          <div className="grid grid-cols-2 gap-2"><img src={m.base} alt="Delante" className="h-32 w-full object-contain"/><img src={m.backBase} alt="Detrás" className="h-32 w-full object-contain"/></div>
+          <div className="grid grid-cols-2 gap-2"><img src={m.base} alt="Delante" className="h-32 w-full object-contain"/>{m.backBase ? <img src={m.backBase} alt="Detrás" className="h-32 w-full object-contain"/> : <div className="h-32 flex items-center justify-center text-xs" style={{color:"var(--slate)"}}>Sin vista trasera</div>}</div>
           <p className="text-xs mt-2" style={{ color: "var(--slate)" }}>{products.filter((p) => p.garmentMockupId === m.id).length} productos asignados</p>
           <div className="flex flex-wrap gap-3 mt-2"><button type="button" onClick={() => setTestModel(testModel === m.id ? null : m.id)} className="text-xs underline">Probar colores</button><button type="button" onClick={() => setUpdatingModel(updatingModel === m.id ? null : m.id)} className="text-xs underline">Editar fotos y máscaras</button></div>
           {updatingModel === m.id && <div className="grid grid-cols-2 gap-2 mt-3">{[["base", "Frente"], ["backBase", "Espalda"], ["mask", "Máscara frente"], ["backMask", "Máscara espalda"]].map(([field, label]) => <label key={field} className="cursor-pointer rounded-lg p-2 text-xs text-center" style={{ border: "1px dashed var(--line)" }}><span className="block mb-1">{label}</span><input aria-label={label} type="file" accept="image/png,image/webp" disabled={saving} onChange={(e) => { updateExistingModel(m, e.target.files?.[0], field); e.target.value = ""; }} className="w-full text-[10px]" /></label>)}</div>}
-          {testModel === m.id && <div className="mt-2 space-y-2"><input type="color" value={previewColor} onChange={(e) => setPreviewColor(e.target.value)} aria-label="Color de prueba"/><div className="grid grid-cols-2 h-44 gap-2"><MockupComposite mockup={{ ...m, design: null }} hex={previewColor}/><MockupComposite mockup={{ ...m, base: m.backBase, mask: m.backMask, design: null }} hex={previewColor}/></div></div>}
+          {testModel === m.id && <div className="mt-2 space-y-2"><input type="color" value={previewColor} onChange={(e) => setPreviewColor(e.target.value)} aria-label="Color de prueba"/><div className="grid grid-cols-2 h-44 gap-2"><MockupComposite mockup={{ ...m, design: null }} hex={previewColor}/>{m.backBase ? <MockupComposite mockup={{ ...m, base: m.backBase, mask: m.backMask, design: null }} hex={previewColor}/> : <div className="flex items-center justify-center text-xs">Sin reverso</div>}</div></div>}
         </div>)}
       </div>}
       <div className="rounded-2xl p-5 space-y-3" style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}>
