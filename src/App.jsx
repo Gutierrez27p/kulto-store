@@ -17096,6 +17096,32 @@ function AdminGarmentMockupLibrary({ products, categories, groups, models, desig
   const chosenModel = models.find(m=>m.id===modelId);
   const matching = products.filter((p) => (!category || p.category === category) && (!group || p.group === group) && (!onlyUnassigned || !p.garmentMockupId) && (!chosenModel || modelMatchesProduct(chosenModel,p)));
   const compatible = matching.filter((p) => p.mockup?.design || (p.designs?.length === 1 && p.designs[0]?.image));
+  const normArtName = value => String(value || "").normalize("NFD").replace(/[\\u0300-\\u036f]/g,"").replace(/\\.(png|webp|jpg|jpeg)$/i,"").replace(/[^a-zA-Z0-9]+/g,"").toLowerCase();
+  const artByName = new Map();
+  designLibrary.filter(d=>d.image).forEach(d=>{
+    const key=normArtName(d.name);
+    const current=artByName.get(key)||[];
+    artByName.set(key,[...current,d]);
+  });
+  const exactArtMatches = products.filter(p=>!p.mockup?.design && !(p.designs?.length===1 && p.designs[0]?.image)).map(p=>{
+    const byName=artByName.get(normArtName(p.name))||[];
+    const bySku=artByName.get(normArtName(p.sku))||[];
+    const candidates=[...new Map([...byName,...bySku].map(d=>[d.id,d])).values()];
+    return {product:p,art:candidates.length===1?candidates[0]:null};
+  }).filter(entry=>entry.art);
+  const applyExactMatches = async () => {
+    if(!exactArtMatches.length)return;
+    if(!window.confirm(`¿Vincular ${exactArtMatches.length} productos a PNG de tu biblioteca con nombre/SKU exactamente coincidente? No se borrará ninguna fotografía; tendrás que publicar los cambios desde Productos.`))return;
+    setSaving(true);setStatus("");setProgress(`0 / ${exactArtMatches.length}`);
+    try {
+      const updates=exactArtMatches.map(({product:p,art})=>({
+        ...p,mockup:{...(p.mockup || {}),design:art.image,enabled:!!(p.mockup?.base || p.garmentMockupId)}
+      }));
+      const result=await onSaveProductsBulk(updates,(done,total)=>setProgress(`${done} / ${total}`));
+      setStatus(`Coincidencias guardadas: ${result.ok}. Fallidas: ${result.failed}. Revisá los modelos antes de publicar. Los nombres ambiguos no se han modificado.`);
+    }catch(e){setStatus(e?.message || "Error al asociar PNG")}
+    finally{setSaving(false);setProgress("")}
+  };
   const artProduct = products.find(p=>p.id===artProductId);
   const linkTransparentDesign = async url => {
     if (!artProduct || !url) {setStatus("Elegí el producto y el arte.");return;}
@@ -17183,6 +17209,11 @@ function AdminGarmentMockupLibrary({ products, categories, groups, models, desig
       </div>}
       <div className="rounded-2xl p-5 space-y-3" style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}>
         <h3 className="font-semibold">Recuperar un diseño para todos sus modelos</h3>
+        {exactArtMatches.length > 0 && <div className="rounded-xl p-3 space-y-2" style={{background:"var(--ink-3)",border:"1px solid var(--line)"}}>
+          <p className="font-semibold text-sm">{exactArtMatches.length} coincidencias exactas en tu Biblioteca de diseños</p>
+          <p className="text-xs" style={{color:"var(--slate)"}}>Se vinculará el PNG únicamente cuando el nombre del diseño o SKU coincida sin ambigüedad. Los diseños que ya tienen PNG no se sobrescriben.</p>
+          <button type="button" disabled={saving} onClick={applyExactMatches} className="kulto-btn rounded-lg px-4 py-2 text-sm font-semibold" style={{background:"var(--sun)",color:"var(--ink)"}}>Vincular coincidencias exactas</button>
+        </div>}
         <p className="text-xs" style={{color:"var(--slate)"}}>Si el diseño solo existe dentro de una foto de camiseta, necesitás su estampado PNG transparente para poder recolorear la prenda sin cambiar el estampado. Subilo una vez por diseño y lo compartimos con sus prendas vinculadas.</p>
         <input className="w-full p-3 rounded-lg text-sm" value={artSearch} onChange={e=>setArtSearch(e.target.value)} placeholder="Buscar diseño por nombre o SKU..." style={{background:"var(--ink-3)",color:"var(--bone)"}}/>
         <select className="w-full p-3 rounded-lg" aria-label="Diseño a vincular" value={artProductId} onChange={e=>setArtProductId(e.target.value)} style={{background:"var(--ink-3)",color:"var(--bone)"}}>
