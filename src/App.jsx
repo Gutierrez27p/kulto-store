@@ -4910,7 +4910,7 @@ function PromoBanner({ banner, onGoCatalog, onGoWizard }) {
     return (
       <div
         {...interactiveProps}
-        className={`kulto-banner-tile relative rounded-2xl overflow-hidden flex items-end ${clickable ? "cursor-pointer kulto-banner-clickable" : ""}`}
+        className={`kulto-banner-tile kulto-editorial-banner relative rounded-2xl overflow-hidden flex items-end ${clickable ? "cursor-pointer kulto-banner-clickable" : ""}`}
         style={{ minHeight, background: "var(--ink-3)", border: "1px solid var(--line)", "--banner-glow": banner.highlightColor || "transparent" }}
       >
         {banner.image && (
@@ -4928,14 +4928,14 @@ function PromoBanner({ banner, onGoCatalog, onGoWizard }) {
             en 3 líneas. */}
         <div className="absolute left-0 right-0 bottom-0 flex flex-col">
           {banner.title && (
-            <h3 className="kulto-display text-xl md:text-2xl leading-[0.95] whitespace-pre-line px-5 pt-5 pb-4" style={{ color: "var(--bone)", ...textOutlineStyle(banner.textOutlineWidth, banner.textOutlineColor) }}>
+            <h3 className="kulto-display text-xl md:text-2xl leading-[0.95] whitespace-pre-line px-5 pt-5 pb-4" style={{ color: "#ffffff", textShadow: "0 2px 8px rgba(0,0,0,0.85)" }}>
               {banner.title}
             </h3>
           )}
           {banner.subtitle && (
             <div className="kulto-tile-desc">
               <div>
-                <p className="kulto-tile-desc-text text-xs md:text-sm px-5 py-3 whitespace-pre-line" style={{ color: "#fff", background: "rgba(0,0,0,0.72)", maxHeight: "9rem", overflowY: "auto", ...subtitleOutline(banner) }}>
+                <p className="kulto-tile-desc-text text-xs md:text-sm px-5 py-3 whitespace-pre-line" style={{ color: "#fff", background: "rgba(0,0,0,0.82)", maxHeight: "9rem", overflowY: "auto" }}>
                   {banner.subtitle}
                 </p>
               </div>
@@ -4957,7 +4957,7 @@ function PromoBanner({ banner, onGoCatalog, onGoWizard }) {
   return (
     <section
       {...interactiveProps}
-      className={`kulto-banner-tile relative w-full overflow-hidden flex items-center ${rounded ? "rounded-2xl" : ""} ${clickable ? "cursor-pointer kulto-banner-clickable" : ""}`}
+      className={`kulto-banner-tile kulto-editorial-banner relative w-full overflow-hidden flex items-center ${rounded ? "rounded-2xl" : ""} ${clickable ? "cursor-pointer kulto-banner-clickable" : ""}`}
       style={{ minHeight, background: "var(--ink-2)", border: rounded ? "1px solid var(--line)" : "none", "--banner-glow": banner.highlightColor || "transparent" }}
     >
       {banner.image && (
@@ -4978,9 +4978,9 @@ function PromoBanner({ banner, onGoCatalog, onGoWizard }) {
               {banner.title}
             </h3>
           )}
-          {banner.subtitle && <ClampText text={banner.subtitle} lines={3} className="text-sm md:text-base" style={{ color: "var(--bone)", ...subtitleOutline(banner) }} />}
+          {banner.subtitle && <ClampText text={banner.subtitle} lines={3} className="text-sm md:text-base" style={{ color: "#fff", textShadow: "0 1px 5px rgba(0,0,0,.8)" }} />}
           {clickable && (
-            <span className="kulto-btn rounded-full px-6 py-3 font-semibold w-fit mt-1 inline-block" style={{ background: "var(--signal)", color: "var(--bone)" }}>
+            <span className="kulto-btn rounded-full px-6 py-3 font-semibold w-fit mt-1 inline-block" style={{ background: "#ffffff", color: "#181818" }}>
               {banner.ctaLabel || "Ver catálogo"}
             </span>
           )}
