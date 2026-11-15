@@ -37,3 +37,18 @@
 
 /* Product status pills must never be blank or have invisible dark-on-dark labels. */
 .kulto-editorial-home .kulto-product-badges > span{background:#171717!important;color:#ffffff!important;display:inline-flex;align-items:center;min-height:23px;white-space:normal;line-height:1.2}
+
+/* Image banners: white editorial copy and readable touch/hover descriptions. */
+.kulto-editorial-banner h3{color:#fff!important;text-shadow:0 2px 12px rgba(0,0,0,.85)!important}
+.kulto-editorial-banner .kulto-tile-desc-text{color:#fff!important;background:rgba(0,0,0,.82)!important;text-shadow:none!important;line-height:1.45}
+.kulto-editorial-banner .kulto-tile-desc{position:relative;z-index:2}
+.kulto-editorial-banner .kulto-tile-desc>div{background:rgba(0,0,0,.82)}
+.kulto-editorial-banner .kulto-btn{background:#fff!important;color:#181818!important}
+@media(hover:none),(pointer:coarse){
+  .kulto-editorial-banner .kulto-tile-desc{display:grid!important;grid-template-rows:1fr!important;opacity:1!important}
+  .kulto-editorial-banner .kulto-tile-desc-text{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden!important}
+}
+@media(hover:hover) and (pointer:fine){
+  .kulto-editorial-banner .kulto-tile-desc{grid-template-rows:0fr;opacity:0}
+  .kulto-editorial-banner:hover .kulto-tile-desc,.kulto-editorial-banner:focus-within .kulto-tile-desc{grid-template-rows:1fr;opacity:1}
+}
