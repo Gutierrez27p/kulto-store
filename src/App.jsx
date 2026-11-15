@@ -113,6 +113,7 @@ const DEFAULT_CATEGORIES = [
   "Sudaderas con capucha",
   "Sudaderas sin capucha",
   "Tops deportivos",
+  "Tote bags",
   "Llaveros y lanyards",
 ];
 
@@ -2213,7 +2214,11 @@ async function removeDraftProduct(id) { return removeProductFromPrefix(DRAFT_PRE
 
 async function loadCategories() {
   const raw = await storageGet("kulto:categories", true);
-  if (raw) return JSON.parse(raw);
+  if (raw) {
+    const current=JSON.parse(raw);
+    // Virtual addition until the admin next publishes, preserving every existing category.
+    return current.some(c=>/tote|bolsa de tela/i.test(c)) ? current : [...current,"Tote bags"];
+  }
   await storageSet("kulto:categories", JSON.stringify(DEFAULT_CATEGORIES), true);
   return DEFAULT_CATEGORIES;
 }
@@ -2263,7 +2268,8 @@ async function ensureDraftInitialized() {
 async function loadDraftCategories() {
   await ensureDraftInitialized();
   const cats = await loadDraftCategoriesRaw();
-  return cats || DEFAULT_CATEGORIES;
+  const list = cats || DEFAULT_CATEGORIES;
+  return list.some(c=>/tote|bolsa de tela/i.test(c)) ? list : [...list,"Tote bags"];
 }
 async function loadDraftGroups() {
   await ensureDraftInitialized();
@@ -17026,6 +17032,7 @@ function AdminGarmentMockupLibrary({ products, categories, groups, models, desig
   const [frontMask, setFrontMask] = useState(null);
   const [backMask, setBackMask] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [cleanGarmentBackground, setCleanGarmentBackground] = useState(false);
   const [status, setStatus] = useState("");
   const [modelId, setModelId] = useState("");
   const [category, setCategory] = useState("");
@@ -17041,7 +17048,12 @@ function AdminGarmentMockupLibrary({ products, categories, groups, models, desig
     setSaving(true);
     setStatus("");
     try {
-      const b64 = await new Promise((resolve) => fileToBase64(file, resolve, 1400, 1, "image/png"));
+      let b64 = await new Promise((resolve) => fileToBase64(file, resolve, 1400, 1, "image/png"));
+      if (cleanGarmentBackground && (side === "front" || side === "back")) {
+        const cleaned = await removeImageBackground(b64);
+        if (!cleaned) throw Error("No se pudo quitar el fondo automáticamente. Subí un PNG transparente o una máscara.");
+        b64 = cleaned;
+      }
       const url = await uploadDataUrlToStorage(b64);
       if (!url) throw new Error("No se pudo subir a Storage; no se guarda el modelo para evitar fotos que desaparezcan.");
       const image = await loadMockupImg(url);
@@ -17146,6 +17158,8 @@ function AdminGarmentMockupLibrary({ products, categories, groups, models, desig
             <input type="file" accept="image/png,image/webp" onChange={(e) => { pick(e.target.files?.[0], side); e.target.value = ""; }} className="sr-only" />
           </label>)}
         </div>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={cleanGarmentBackground} onChange={e=>setCleanGarmentBackground(e.target.checked)}/> Quitar fondo automáticamente al subir el mockup frontal/trasero</label>
+        <p className="text-xs" style={{color:"var(--slate)"}}>Revisá el resultado con «Probar colores» antes de asignarlo. La eliminación automática puede recortar partes finas de la tela; si sucede, utilizá una máscara PNG de la silueta.</p>
         <p className="text-xs" style={{ color: "var(--slate)" }}>Si tu camiseta tiene fondo o deja partes sin colorear, subí también una máscara PNG: prenda sólida y opaca, fondo totalmente transparente, misma silueta en la misma posición. Es opcional para mockups ya recortados.</p>
         <div className="grid grid-cols-2 gap-3">
           {[[frontMask, "Máscara delantera", "frontMask"], [backMask, "Máscara trasera", "backMask"]].map(([img, label, side]) => <label key={side} className="rounded-xl p-3 text-xs cursor-pointer text-center" style={{ border: "1px dashed var(--line)" }}>
