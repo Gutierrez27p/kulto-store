@@ -3576,6 +3576,12 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
   const prev = (e) => { e.stopPropagation(); setIdx((i) => (i - 1 + images.length) % images.length); };
   const next = (e) => { e.stopPropagation(); setIdx((i) => (i + 1) % images.length); };
   const cardAutoImg = useAutoColorImage(product, autoColorIdx !== null ? colors[autoColorIdx] : null, autoColorIdx !== null);
+  const openFromCard = () => onOpen({
+    ...product,
+    __entryFromCard: true,
+    __entryCardImage: mock ? (mockColor === null ? mock.cover || null : null) : (autoColorIdx !== null ? cardAutoImg || images[idx] || null : images[idx] || null),
+    __entryColorIdx: mock ? mockColor : autoColorIdx,
+  });
   const pickColor = (e, i) => {
     e.stopPropagation();
     if (mock) { setMockColor(i); return; }
@@ -3649,8 +3655,8 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
     <div
       role="button"
       tabIndex={0}
-      onClick={() => onOpen(product)}
-      onKeyDown={(e) => e.key === "Enter" && onOpen(product)}
+      onClick={openFromCard}
+      onKeyDown={(e) => e.key === "Enter" && openFromCard()}
       className="kulto-card kulto-btn text-left rounded-2xl overflow-hidden flex flex-col w-full h-full cursor-pointer"
       style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}
     >
@@ -3989,10 +3995,121 @@ function ProductReviewsBlock({ product, reviews }) {
   );
 }
 
+
+/* A single, accessible two-sided garment viewer. This is a photographic 3D
+   flip, not a polygon mesh: existing front/back art remains in sync. */
+function GarmentTurntable({ front, back, hex }) {
+  const [angle, setAngle] = useState(0);
+  const [zoom, setZoom] = useState(1);
+  const [dragging, setDragging] = useState(false);
+  const pointers = useRef(new Map());
+  const gesture = useRef(null);
+  const clampZoom = (z) => Math.max(1, Math.min(3, z));
+  const side = ((Math.round(angle / 180) % 2) + 2) % 2;
+  useEffect(() => { setAngle(0); setZoom(1); }, [front.base, back?.base]);
+  const rotate = (direction) => {
+    if (!back) return;
+    setAngle((a) => Math.round(a / 180) * 180 + 180 * direction);
+  };
+  const onDown = (e) => {
+    if (e.button !== 0 && e.pointerType === "mouse") return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const points = [...pointers.current.values()];
+    if (points.length === 1) gesture.current = { mode: "rotate", x: e.clientX, startAngle: angle };
+    if (points.length === 2) {
+      gesture.current = {
+        mode: "pinch",
+        distance: Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y) || 1,
+        startZoom: zoom,
+      };
+    }
+    setDragging(true);
+  };
+  const onMove = (e) => {
+    if (!pointers.current.has(e.pointerId)) return;
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const points = [...pointers.current.values()];
+    if (points.length === 2 && gesture.current?.mode === "pinch") {
+      const distance = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
+      setZoom(clampZoom(gesture.current.startZoom * distance / gesture.current.distance));
+    } else if (points.length === 1 && back && gesture.current?.mode === "rotate") {
+      setAngle(gesture.current.startAngle + (e.clientX - gesture.current.x) * 0.72);
+    }
+  };
+  const onEnd = (e) => {
+    pointers.current.delete(e.pointerId);
+    if (pointers.current.size === 0) {
+      if (back) setAngle((a) => Math.round(a / 180) * 180);
+      setDragging(false);
+      gesture.current = null;
+    } else if (pointers.current.size === 1) {
+      const point = [...pointers.current.values()][0];
+      gesture.current = { mode: "rotate", x: point.x, startAngle: angle };
+    }
+  };
+  const buttonStyle = { background: "rgba(21,19,26,.92)", color: "var(--bone)", border: "1px solid var(--line)" };
+  return (
+    <div className="kulto-garment-viewer w-full h-full relative" style={{ background: "var(--ink-3)" }}>
+      <div
+        role="group"
+        tabIndex={0}
+        aria-label={back ? "Visor de prenda giratorio. Arrastra para ver la otra cara. Usa las flechas o los botones de zoom." : "Vista ampliable de la prenda"}
+        onPointerDown={onDown}
+        onPointerMove={onMove}
+        onPointerUp={onEnd}
+        onPointerCancel={onEnd}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); rotate(e.key === "ArrowRight" ? 1 : -1); }
+          if (e.key === "+" || e.key === "=") { e.preventDefault(); setZoom(z=>clampZoom(z+.25)); }
+          if (e.key === "-") { e.preventDefault(); setZoom(z=>clampZoom(z-.25)); }
+          if (e.key === "0") { e.preventDefault(); setZoom(1); setAngle(0); }
+        }}
+        className="absolute inset-0"
+        style={{ perspective: 1150, touchAction: "none", cursor: back ? (dragging ? "grabbing" : "grab") : "zoom-in", outlineOffset: -3 }}
+      >
+        <div className="absolute inset-0" style={{
+          transformStyle: "preserve-3d",
+          transform: `rotateY(${angle}deg) scale(${zoom})`,
+          transition: dragging ? "none" : "transform .42s cubic-bezier(.2,.75,.2,1)",
+        }}>
+          <div className="absolute inset-0" style={{ backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden" }}>
+            <MockupComposite mockup={front} hex={hex}/>
+          </div>
+          {back && (
+            <div className="absolute inset-0" style={{ transform: "rotateY(180deg)", backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden" }}>
+              <MockupComposite mockup={back} hex={hex}/>
+            </div>
+          )}
+        </div>
+      </div>
+      <span aria-live="polite" className="absolute top-3 left-3 text-xs rounded-full px-3 py-1 font-semibold" style={buttonStyle}>
+        {back && side ? "ESPALDA" : "DELANTE"} · {Math.round(zoom * 100)}%
+      </span>
+      <div className="absolute bottom-3 left-2 right-2 flex flex-wrap items-center justify-between gap-2" style={{ pointerEvents: "none" }}>
+        <div className="flex gap-1.5" style={{ pointerEvents: "auto" }}>
+          {back && <button type="button" className="kulto-btn rounded-full px-3 py-2 text-xs font-semibold" style={buttonStyle} onClick={()=>rotate(1)} aria-label="Girar camiseta para ver la otra cara"><RotateCw size={16} className="inline mr-1"/> Girar</button>}
+          {back && <button type="button" className="kulto-btn rounded-full px-3 py-2 text-xs" style={buttonStyle} onClick={()=>setAngle(a=>Math.round(a/360)*360)} aria-label="Ver delante">Frente</button>}
+        </div>
+        <div className="flex gap-1.5" style={{ pointerEvents: "auto" }}>
+          <button type="button" className="kulto-btn rounded-full p-2" style={buttonStyle} onClick={()=>setZoom(z=>clampZoom(z-.25))} aria-label="Alejar" disabled={zoom<=1}><ZoomOut size={17}/></button>
+          <button type="button" className="kulto-btn rounded-full p-2" style={buttonStyle} onClick={()=>setZoom(z=>clampZoom(z+.25))} aria-label="Acercar" disabled={zoom>=3}><ZoomIn size={17}/></button>
+          <button type="button" className="kulto-btn rounded-full p-2" style={buttonStyle} onClick={()=>{setZoom(1);setAngle(0);}} aria-label="Restablecer vista"><RotateCcw size={17}/></button>
+        </div>
+      </div>
+      {back && <p className="absolute top-3 right-3 text-[10px] hidden sm:block" style={{color:"var(--slate)"}}>Arrastra para girar · pellizca para ampliar</p>}
+    </div>
+  );
+}
+
 function ProductConfigurator({ product, settings, onAddToCart, compact, reviews = [] }) {
-  const [colorIdx, setColorIdx] = useState(0);
+  const firstPhoto = product.__entryFromCard
+    ? (product.__entryCardImage || null)
+    : (activeMockup(product)?.cover || getColorImages(product.colors?.[0])[0] || product.photoPool?.[0] || null);
+  const [colorIdx, setColorIdx] = useState(product.__entryColorIdx ?? 0);
   const [imgIdx, setImgIdx] = useState(0);
-  const [showUploadedPhoto, setShowUploadedPhoto] = useState(false);
+  const [showUploadedPhoto, setShowUploadedPhoto] = useState(!!firstPhoto);
+  const [showEntryCover, setShowEntryCover] = useState(!!firstPhoto);
   const [sizeIdx, setSizeIdx] = useState(0);
   const [aud, setAud] = useState(() => audsOf(product)[0] || "h");
   const [designMode, setDesignMode] = useState(product.designs && product.designs.length ? "design" : "custom");
@@ -4012,9 +4129,10 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
   const [zoomOrigin, setZoomOrigin] = useState({ x: 50, y: 50 });
 
   useEffect(() => {
-    setColorIdx(0);
+    setColorIdx(product.__entryColorIdx ?? 0);
     setImgIdx(0);
-    setShowUploadedPhoto(false);
+    setShowUploadedPhoto(!!firstPhoto);
+    setShowEntryCover(!!firstPhoto);
     setSizeIdx(0);
     setAud(audsOf(product)[0] || "h");
     setDesignMode(product.designs && product.designs.length ? "design" : "custom");
@@ -4031,7 +4149,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
     setZoomOpen(false);
   }, [product.id]);
 
-  useEffect(() => { setImgIdx(0); setShowUploadedPhoto(false); }, [colorIdx]);
+  useEffect(() => { setImgIdx(0); }, [colorIdx]);
 
   const color = product.colors && product.colors[colorIdx];
   // Si el color no tiene fotos propias, se muestran las fotos generales del
@@ -4044,7 +4162,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
   const mockActive = !!mock;
   const mockHex = color?.hex || "#ffffff";
   const autoImage = useAutoColorImage(product, color, !mockActive && colorImages.length === 0, imgIdx);
-  const activeImage = (colorImages.length === 0 && autoImage) || images[imgIdx] || null;
+  const activeImage = (showEntryCover && firstPhoto) || (colorImages.length === 0 && autoImage) || images[imgIdx] || null;
   const isCover = product.imageFit === "cover";
   const previewBg = product.imageBackground || (color && !mock && colorImages.length > 0 ? color.hex : "var(--ink-3)");
   const hasSizes = product.sizes && product.sizes.length > 0;
@@ -4142,12 +4260,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
           }}
         >
           {mockActive && !showUploadedPhoto ? (
-            backMock ? (
-              <div className="grid grid-cols-2 gap-2 w-full h-full p-2 sm:p-3">
-                <div className="relative min-w-0 rounded-xl overflow-hidden" style={{ background: "var(--ink-2)" }}><MockupComposite mockup={productMockPreview} hex={mockHex} /><span className="absolute bottom-2 left-2 text-[10px] font-bold px-2 py-1 rounded-full" style={{ background: "var(--ink)", color: "var(--bone)" }}>DELANTE</span></div>
-                <div className="relative min-w-0 rounded-xl overflow-hidden" style={{ background: "var(--ink-2)" }}><MockupComposite mockup={backMock} hex={mockHex} /><span className="absolute bottom-2 left-2 text-[10px] font-bold px-2 py-1 rounded-full" style={{ background: "var(--ink)", color: "var(--bone)" }}>DETRÁS</span></div>
-              </div>
-            ) : <MockupComposite mockup={productMockPreview} hex={mockHex} />
+            <GarmentTurntable front={productMockPreview} back={backMock} hex={mockHex}/>
           ) : activeImage ? (
             <img
               src={activeImage}
@@ -4218,13 +4331,14 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
         </div>
         {(mockActive || images.length > 1) && (
           <div className="flex gap-2 mt-2 overflow-x-auto kulto-scrollbar pb-1">
-            {mockActive && <button type="button" onClick={() => setShowUploadedPhoto(false)} className="kulto-btn shrink-0 rounded-lg px-3 text-xs font-bold" style={{ minWidth: 85, height: 44, border: !showUploadedPhoto ? "2px solid var(--sun)" : "1px solid var(--line)", background: "var(--ink-3)", color: "var(--bone)" }}>Frente + espalda</button>}
+            {firstPhoto && <button type="button" onClick={() => { setShowUploadedPhoto(true); setShowEntryCover(true); }} className="kulto-btn shrink-0 rounded-lg px-3 text-xs font-bold" style={{ minWidth: 82, height: 44, border: showUploadedPhoto && showEntryCover ? "2px solid var(--sun)" : "1px solid var(--line)", background: "var(--ink-3)", color: "var(--bone)" }}>Portada</button>}
+            {mockActive && <button type="button" onClick={() => { setShowUploadedPhoto(false); setShowEntryCover(false); }} className="kulto-btn shrink-0 rounded-lg px-3 text-xs font-bold" style={{ minWidth: 104, height: 44, border: !showUploadedPhoto ? "2px solid var(--sun)" : "1px solid var(--line)", background: "var(--ink-3)", color: "var(--bone)" }}><RotateCw size={13} className="inline mr-1" /> Vista giratoria</button>}
             {images.map((img, i) => (
               <button
                 key={i}
-                onClick={() => { setImgIdx(i); setShowUploadedPhoto(true); }}
+                onClick={() => { setImgIdx(i); setShowUploadedPhoto(true); setShowEntryCover(false); }}
                 className="kulto-btn shrink-0 rounded-lg overflow-hidden"
-                style={{ width: 44, height: 44, border: i === imgIdx && (!mockActive || showUploadedPhoto) ? "2px solid var(--sun)" : "1px solid var(--line)", background: "var(--ink-3)" }}
+                style={{ width: 44, height: 44, border: i === imgIdx && showUploadedPhoto && !showEntryCover ? "2px solid var(--sun)" : "1px solid var(--line)", background: "var(--ink-3)" }}
               >
                 <FastImg loading="lazy" src={img} className="w-full h-full object-contain" alt="" />
               </button>
@@ -4278,7 +4392,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
           {product.colors && product.colors.length > 0 ? (
             <div className="flex flex-wrap gap-2">
               {product.colors.map((c, i) => !colorOkForAud(product, c, aud) ? null : (
-                <ColorSwatch key={i} hex={c.hex} title={c.name} selected={i === colorIdx} onClick={() => { setColorIdx(i); if (product.sizes && !sizeOkForColor(product, product.sizes[sizeIdx], product.colors[i])) setSizeIdx(firstOkSizeIdx(product, product.colors[i])); }} />
+                <ColorSwatch key={i} hex={c.hex} title={c.name} selected={i === colorIdx} onClick={() => { setColorIdx(i); setShowEntryCover(false); setShowUploadedPhoto(!mockActive); if (product.sizes && !sizeOkForColor(product, product.sizes[sizeIdx], product.colors[i])) setSizeIdx(firstOkSizeIdx(product, product.colors[i])); }} />
               ))}
             </div>
           ) : (
