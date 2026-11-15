@@ -38,22 +38,17 @@
 /* Product status pills must never be blank or have invisible dark-on-dark labels. */
 .kulto-editorial-home .kulto-product-badges > span{background:#171717!important;color:#ffffff!important;display:inline-flex;align-items:center;min-height:23px;white-space:normal;line-height:1.2}
 
-/* Banner headings keep their previously configured text and outline colors. */
-.kulto-editorial-banner h3{position:relative;z-index:2}
-.kulto-banner-touch-reveal{display:none}
-.kulto-editorial-banner .kulto-tile-desc{display:grid;grid-template-rows:0fr;opacity:0;transform:translateY(18px);transition:grid-template-rows .35s ease,opacity .35s ease,transform .35s ease}
-.kulto-editorial-banner .kulto-tile-desc>div{overflow:hidden;min-height:0}
-@media(hover:hover) and (pointer:fine){
-  .kulto-editorial-banner:hover .kulto-tile-desc,.kulto-editorial-banner:focus-within .kulto-tile-desc{grid-template-rows:1fr;opacity:1;transform:translateY(0)}
+/* Original promotional banners: give back the dark-theme typography used
+   before the editorial homepage, including admin-specified outline colors. */
+.kulto-editorial-extra .kulto-banner-tile{
+ --bone:#f3efe6;--slate:#ddd7d0;--sun:#facc15;--signal:#e8452c;--ink:#15131a;--ink-2:#242129;--ink-3:#322f35;--line:rgba(255,255,255,.18);
 }
-@media(hover:none),(pointer:coarse){
-  .kulto-editorial-banner .kulto-tile-desc{grid-template-rows:0fr!important;opacity:0!important;transform:translateY(18px)!important}
-  .kulto-editorial-banner.kulto-desc-open .kulto-tile-desc{grid-template-rows:1fr!important;opacity:1!important;transform:translateY(0)!important}
-  .kulto-editorial-banner .kulto-tile-desc-text{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden!important;color:#fff}
-  .kulto-banner-touch-reveal{display:flex;align-items:center;justify-content:center;align-self:flex-end;width:34px;height:34px;margin:0 12px 5px 0;border-radius:50%;background:rgba(0,0,0,.72);color:#fff;z-index:5}
+.kulto-editorial-extra .kulto-banner-tile .kulto-tile-desc{transform:translateY(14px);transition:grid-template-rows .35s ease,opacity .35s ease,transform .35s ease}
+.kulto-editorial-extra .kulto-banner-tile:hover .kulto-tile-desc,
+.kulto-editorial-extra .kulto-banner-tile:focus-within .kulto-tile-desc{transform:translateY(0)}
+@media(hover:none){
+ .kulto-editorial-extra .kulto-banner-tile .kulto-tile-desc{transform:translateY(0)}
 }
-@media(prefers-reduced-motion:reduce){.kulto-editorial-banner .kulto-tile-desc{transition:none}}
-
 /* Garment families: short descriptions under each main group. */
 .kulto-editorial-cat span{display:block;width:100%}
 .kulto-editorial-cat-hint{display:block;margin-top:4px;font-size:11px;line-height:1.25;font-weight:500;color:#f1f1f1;opacity:.95}
