@@ -59,3 +59,9 @@
 .kulto-seasonal-promo-note{font-size:11px!important;opacity:.78;margin-top:12px}
 .kulto-seasonal-promo .kulto-editorial-action{margin-top:0}
 @media(max-width:520px){.kulto-editorial-cat-hint{font-size:9px}.kulto-seasonal-promo-head{padding:20px}}
+
+/* Optional campaign artwork: keep the headline legible over any photo. */
+.kulto-seasonal-promo-head{position:relative;isolation:isolate;overflow:hidden}
+.kulto-seasonal-promo-bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:-2}
+.kulto-seasonal-promo-head:has(.kulto-seasonal-promo-bg):before{content:"";position:absolute;inset:0;background:linear-gradient(90deg,rgba(0,0,0,.86),rgba(0,0,0,.37));z-index:-1}
+.kulto-seasonal-promo-head > div,.kulto-seasonal-promo-head > button{position:relative;z-index:1}
