@@ -76,6 +76,7 @@ const ADMIN_NOTIFICATION_EMAIL = "pablo.gutcha@gmail.com";
 const ADMIN_TABS = [
   ["productos", "Productos"],
   ["mockups", "Biblioteca de prendas"],
+  ["promociones", "Promociones"],
   ["personalizar", "Personalizar"],
   ["pedidos", "Pedidos"],
   ["ventas", "Ventas"],
@@ -92,6 +93,7 @@ const ADMIN_TAB_KEYS = ADMIN_TABS.map(([key]) => key);
 const ADMIN_TAB_META = {
   productos: { icon: Shirt, hint: "Fotos, precios y stock" },
   mockups: { icon: Boxes, hint: "Modelos y asignación masiva" },
+  promociones: { icon: Gift, hint: "Campañas y productos incluidos" },
   personalizar: { icon: Sparkles, hint: "Banners, colores y textos" },
   pedidos: { icon: Package, hint: "Pedidos que llegan" },
   ventas: { icon: TrendingUp, hint: "Ofertas y ventas" },
@@ -2725,6 +2727,7 @@ const DEFAULT_SETTINGS = {
   localDeliveryAreas: [],
   customWorkSpeed: 0.3,
   banners: [],
+  storefrontPromotion: { enabled: false, title: "", description: "", productIds: [], excludeOversize: true, quantity: 2, unitPrice: 10 },
   homeSections: [],
   theme: DEFAULT_THEME,
   designFeedbackOptions: [
@@ -17096,6 +17099,50 @@ function AdminGarmentMockupLibrary({ products, categories, groups, models, onSav
   );
 }
 
+
+function AdminPromotionsPanel({ products, settings, onSaveSettings }) {
+  const current = settings.storefrontPromotion || {};
+  const [draft, setDraft] = useState(() => ({enabled:false,title:"",description:"",productIds:[],excludeOversize:true,quantity:2,unitPrice:10,...current}));
+  const [saved, setSaved] = useState(false);
+  const [term, setTerm] = useState("");
+  useEffect(() => { setDraft({enabled:false,title:"",description:"",productIds:[],excludeOversize:true,quantity:2,unitPrice:10,...(settings.storefrontPromotion || {})}); }, [settings.storefrontPromotion]);
+  const eligible = products.filter(p => !p.tags?.template && (!draft.excludeOversize || !/oversize/i.test([p.name,p.category,p.subcategory,p.garmentType,p.model].filter(Boolean).join(" "))));
+  const visible = eligible.filter(p => [p.name,p.sku,p.category].filter(Boolean).join(" ").toLowerCase().includes(term.toLowerCase()));
+  const chosen = new Set(draft.productIds || []);
+  const toggle = id => setDraft(prev => ({...prev,productIds:chosen.has(id)?prev.productIds.filter(x=>x!==id):[...(prev.productIds||[]),id]}));
+  const save = async () => {
+    if (draft.enabled && !draft.title.trim()) return;
+    await onSaveSettings({storefrontPromotion:{...draft,productIds:(draft.productIds || []).filter(id=>eligible.some(p=>p.id===id))}});
+    setSaved(true);
+  };
+  return <section className="space-y-5">
+    <div><h2 className="kulto-display text-2xl" style={{color:"var(--bone)"}}>Promociones de temporada</h2>
+      <p className="text-sm mt-2" style={{color:"var(--slate)"}}>Activa campañas para Black Friday, San Valentín o cambio de temporada sin sustituir imágenes ni modificar los precios originales.</p>
+    </div>
+    <div className="rounded-2xl p-5 space-y-4" style={{background:"var(--ink-2)",border:"1px solid var(--line)"}}>
+      <label className="flex gap-3 items-center font-semibold"><input type="checkbox" checked={!!draft.enabled} onChange={e=>setDraft({...draft,enabled:e.target.checked})}/> Mostrar promoción en Inicio</label>
+      <label className="block text-sm">Título de la campaña<input className="block w-full rounded-lg p-3 mt-1" style={{background:"var(--ink-3)",color:"var(--bone)"}} value={draft.title} onChange={e=>setDraft({...draft,title:e.target.value})} placeholder="BLACK FRIDAY KULTO"/></label>
+      <label className="block text-sm">Texto de la campaña<textarea className="block w-full rounded-lg p-3 mt-1" rows={3} style={{background:"var(--ink-3)",color:"var(--bone)"}} value={draft.description} onChange={e=>setDraft({...draft,description:e.target.value})} placeholder="Llevando 2 camisetas clásicas, cada una queda a 10 €"/></label>
+      <div className="grid grid-cols-2 gap-4">
+        <label className="text-sm">Cantidad mínima<input type="number" min="1" max="20" className="block rounded-lg p-2 w-full mt-1" value={draft.quantity} onChange={e=>setDraft({...draft,quantity:Math.max(1,Number(e.target.value)||1)})} style={{background:"var(--ink-3)",color:"var(--bone)"}}/></label>
+        <label className="text-sm">Precio orientativo por unidad (€)<input type="number" min="0" step=".01" className="block rounded-lg p-2 w-full mt-1" value={draft.unitPrice} onChange={e=>setDraft({...draft,unitPrice:Math.max(0,Number(e.target.value)||0)})} style={{background:"var(--ink-3)",color:"var(--bone)"}}/></label>
+      </div>
+      <label className="flex gap-3 items-center text-sm"><input type="checkbox" checked={!!draft.excludeOversize} onChange={e=>setDraft({...draft,excludeOversize:e.target.checked})}/> Excluir camisetas oversize aunque compartan diseño</label>
+      <p className="text-xs" style={{color:"var(--slate)"}}>La selección se hace por prenda/producto, no por ilustración. Una camiseta clásica puede participar aunque exista el mismo diseño en una oversize. Esta versión publica la campaña y su selección; no modifica automáticamente el precio del carrito hasta validar las reglas de descuento.</p>
+      <input aria-label="Buscar productos para promoción" placeholder="Buscar por nombre, SKU o categoría…" className="w-full p-3 rounded-lg" style={{background:"var(--ink-3)",color:"var(--bone)"}} value={term} onChange={e=>setTerm(e.target.value)} />
+      <div className="max-h-80 overflow-y-auto grid sm:grid-cols-2 gap-2">
+        {visible.map(p=><label key={p.id} className="flex gap-3 items-center p-2 rounded-xl text-sm" style={{border:"1px solid var(--line)"}}>
+          <input type="checkbox" checked={chosen.has(p.id)} onChange={()=>toggle(p.id)}/>
+          <span className="min-w-0 flex-1"><strong className="block truncate">{p.name}</strong><small style={{color:"var(--slate)"}}>{p.category}{p.subcategory ? " · "+p.subcategory : ""}</small></span>
+        </label>)}
+      </div>
+      <p className="text-xs" style={{color:"var(--slate)"}}>{[...chosen].filter(id=>eligible.some(p=>p.id===id)).length} productos incluidos · {products.length-eligible.length} excluidos o no vendibles</p>
+      <button type="button" onClick={save} className="kulto-btn px-5 py-3 rounded-xl font-semibold" style={{background:"var(--sun)",color:"var(--ink)"}}>Guardar promoción</button>
+      {saved && <p role="status" className="text-sm">Promoción guardada. Comprueba su vista en Inicio.</p>}
+    </div>
+  </section>;
+}
+
 function AdminPanel({ products, categories, groups, orders, customers, onAdjustCustomerPoints, onDeleteCustomer, onCreateCustomer, onUpdateCustomerInfo, onSetInstagramStatus, onSendPasswordHelp, reviews, settings, hasDraftChanges, publishing, onPublishChanges, onDiscardChanges, photoInbox, onAddToInbox, onCreateProductFromInbox, onAddInboxToExisting, onRemoveFromInbox, savedColors, onSaveColorToLibrary, onRemoveColorFromLibrary, designLibrary, onAddDesignToLibrary, onRemoveDesignFromLibrary, designFolders, onAddDesignFolder, onRenameDesignFolder, onRemoveDesignFolder, onToggleDesignFolderCover, onAssignDesignToFolder, onSetDesignFolderCategory, onSetDesignFolderGarments, customWorkGallery, onAddCustomWork, onRemoveCustomWork, onAddCategory, onRenameCategory, onDeleteCategory, onMergeCategoryAsType, onAddGroup, onRenameGroup, onDeleteGroup, onSaveProduct, onSaveProductVerbose, onSaveProductsBulk, onQuickRestock, onDeleteProduct, onToggleOrderStatus, onSetLocalStatus, onSetLocalTracking, onUpdateTracking, onApplyDiscount, onRequestReview, onBulkComplete, onBulkArchive, onBulkDelete, onSaveReview, onDeleteReview, onReorderReview, onSaveSettings, onSaveGarmentModels, onSetPaymentStatus, onLogout, permissions, isOwner, onSetAdminPermissions, jumpTo }) {
   // El dueño (isOwner) siempre ve todas las pestañas. Una cuenta de admin con
   // permisos limitados solo ve — y solo puede abrir — las que le dieron.
@@ -17520,6 +17567,8 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
         })}
       </nav>
       <div className="flex-1 min-w-0">
+
+      {tab === "promociones" && <AdminPromotionsPanel products={sellableProducts} settings={settings} onSaveSettings={onSaveSettings} />}
 
       {tab === "mockups" && (
         <AdminGarmentMockupLibrary products={sellableProducts} categories={categories} groups={groups} models={settings?.garmentMockupLibrary || []} onSaveModels={onSaveGarmentModels} onSaveProductsBulk={onSaveProductsBulk} />
