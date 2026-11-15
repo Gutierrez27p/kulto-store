@@ -1052,8 +1052,14 @@ let GARMENT_MOCKUP_LIBRARY = [];
 // Individual design art and placement remain attached to the product.
 function resolveProductMockup(product) {
   const original = product?.mockup;
-  const model = GARMENT_MOCKUP_LIBRARY.find((entry) => entry.id === product?.garmentMockupId);
-  if (!model?.base) return original;
+  const explicitlyAssigned = GARMENT_MOCKUP_LIBRARY.find(entry => entry.id === product?.garmentMockupId);
+  // One reusable base per garment cut can serve every design automatically.
+  // If several bases match, preserve explicit assignment instead of guessing.
+  const automaticCandidates = GARMENT_MOCKUP_LIBRARY.filter(entry =>
+    entry.enabled !== false && entry.base && entry.garmentKind && modelMatchesProduct(entry, product)
+  );
+  const model = explicitlyAssigned || (automaticCandidates.length === 1 ? automaticCandidates[0] : null);
+  if (!model?.base || model.enabled === false) return original;
   const design = original?.design || (product?.designs?.length === 1 ? product.designs[0]?.image : null);
   if (!design) return original; // Never hide an existing product photo if its art cannot be recovered.
   return { ...model, ...original, base: model.base, backBase: model.backBase || null, mask: model.mask || null, backMask: model.backMask || null, ar: model.ar || original?.ar, backAr: model.backAr || original?.backAr, design, enabled: true };
@@ -17181,7 +17187,7 @@ function AdminPromotionsPanel({ products, settings, onSaveSettings }) {
   const [saved, setSaved] = useState(false);
   const [term, setTerm] = useState("");
   useEffect(() => { setDraft({enabled:false,title:"",description:"",productIds:[],excludeOversize:true,quantity:2,unitPrice:10,...(settings.storefrontPromotion || {})}); }, [settings.storefrontPromotion]);
-  const eligible = products.filter(p => !p.tags?.template && (!draft.excludeOversize || !/oversize/i.test([p.name,p.category,p.subcategory,p.garmentType,p.model].filter(Boolean).join(" "))));
+  const eligible = products.filter(p => !p.tags?.template && (!draft.excludeOversize || !isOversizeGarment(p, {}, settings.garmentMockupLibrary || [])));
   const visible = eligible.filter(p => [p.name,p.sku,p.category].filter(Boolean).join(" ").toLowerCase().includes(term.toLowerCase()));
   const chosen = new Set(draft.productIds || []);
   const toggle = id => setDraft(prev => ({...prev,productIds:chosen.has(id)?prev.productIds.filter(x=>x!==id):[...(prev.productIds||[]),id]}));
@@ -17210,6 +17216,11 @@ function AdminPromotionsPanel({ products, settings, onSaveSettings }) {
           <input type="checkbox" checked={chosen.has(p.id)} onChange={()=>toggle(p.id)}/>
           <span className="min-w-0 flex-1"><strong className="block truncate">{p.name}</strong><small style={{color:"var(--slate)"}}>{p.category}{p.subcategory ? " · "+p.subcategory : ""}</small></span>
         </label>)}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className="kulto-btn text-xs rounded-full px-3 py-2" style={{background:"var(--ink-3)",color:"var(--bone)",border:"1px solid var(--line)"}} onClick={()=>setDraft(prev=>({...prev,productIds:eligible.filter(p=>garmentFamilyOf(p)==="camisetas").map(p=>p.id)}))}>Seleccionar todas las camisetas elegibles</button>
+        <button type="button" className="kulto-btn text-xs rounded-full px-3 py-2" style={{background:"var(--ink-3)",color:"var(--bone)",border:"1px solid var(--line)"}} onClick={()=>setDraft(prev=>({...prev,productIds:eligible.map(p=>p.id)}))}>Seleccionar todas las prendas elegibles</button>
+        <button type="button" className="kulto-btn text-xs rounded-full px-3 py-2" style={{background:"var(--ink-3)",color:"var(--bone)",border:"1px solid var(--line)"}} onClick={()=>setDraft(prev=>({...prev,productIds:[]}))}>Limpiar selección</button>
       </div>
       <p className="text-xs" style={{color:"var(--slate)"}}>{[...chosen].filter(id=>eligible.some(p=>p.id===id)).length} productos incluidos · {products.length-eligible.length} excluidos o no vendibles</p>
       <button type="button" onClick={save} className="kulto-btn px-5 py-3 rounded-xl font-semibold" style={{background:"var(--sun)",color:"var(--ink)"}}>Guardar promoción</button>
