@@ -34,3 +34,6 @@
 .kulto-editorial-home .kulto-editorial-extra section{color:#191919}
 @media(max-width:850px){.kulto-editorial-perks{grid-template-columns:repeat(2,minmax(0,1fr))}.kulto-editorial-cats{grid-template-columns:repeat(3,minmax(0,1fr))}.kulto-editorial-hero{min-height:460px}}
 @media(max-width:520px){.kulto-editorial-hero{min-height:420px}.kulto-editorial-hero-inner{padding:54px 22px}.kulto-editorial-hero h1{font-size:clamp(41px,12vw,65px)}.kulto-editorial-hero:before{background:linear-gradient(90deg,rgba(0,0,0,.83),rgba(0,0,0,.2))}.kulto-editorial-perks{padding:14px;gap:15px 10px}.kulto-editorial-perk{gap:7px;font-size:10px}.kulto-editorial-perk svg{width:20px;min-width:20px}.kulto-editorial-perk small{font-size:9px}.kulto-editorial-section{padding:30px 14px 8px}.kulto-editorial-section-head{align-items:center}.kulto-editorial-section h2{font-size:25px}.kulto-editorial-cats{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.kulto-editorial-cat span{font-size:11px;padding:9px}.kulto-editorial-home .kulto-card>div:nth-child(2){padding:9px!important}}
+
+/* Product status pills must never be blank or have invisible dark-on-dark labels. */
+.kulto-editorial-home .kulto-product-badges > span{background:#171717!important;color:#ffffff!important;display:inline-flex;align-items:center;min-height:23px;white-space:normal;line-height:1.2}
