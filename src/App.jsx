@@ -4257,7 +4257,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
             else if (delta < -40) setImgIdx((i) => (i + 1) % images.length);
             touchStartX.current = null;
           }}
-          onMouseEnter={() => { if (window.matchMedia?.("(hover: hover)").matches) setHoverZoom(true); }}
+          onMouseEnter={() => { if (!showEntryCover && window.matchMedia?.("(hover: hover)").matches) setHoverZoom(true); }}
           onMouseLeave={() => setHoverZoom(false)}
           onMouseMove={(e) => {
             if (!hoverZoom) return;
@@ -4271,7 +4271,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
             <img
               src={activeImage}
               alt={color?.name}
-              className={`w-full h-full ${isCover ? "object-cover" : "object-contain"}`}
+              className={`w-full h-full ${isCover || (showEntryCover && firstPhoto && firstPhoto === mock?.cover) ? "object-cover" : "object-contain"}`}
               style={{
                 transform: hoverZoom ? "scale(2.2)" : "scale(1)",
                 transformOrigin: `${zoomOrigin.x}% ${zoomOrigin.y}%`,
@@ -4282,7 +4282,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
           ) : (
             <Shirt size={64} style={{ color: "rgba(243,239,230,0.35)" }} />
           )}
-          {(!mockActive || showUploadedPhoto) && designMode === "design" && design && design.image && (
+          {!showEntryCover && (!mockActive || showUploadedPhoto) && designMode === "design" && design && design.image && (
             <img
               src={design.image}
               alt={design.name}
@@ -4290,7 +4290,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
               style={{ width: "48%", top: "26%", left: "26%", objectFit: "contain", filter: "drop-shadow(0 6px 14px rgba(0,0,0,0.35))" }}
             />
           )}
-          {(!mockActive || showUploadedPhoto) && designMode === "custom" && finalCustomImage && !removingBg && (
+          {!showEntryCover && (!mockActive || showUploadedPhoto) && designMode === "custom" && finalCustomImage && !removingBg && (
             <img
               src={finalCustomImage}
               alt="Tu diseño"
@@ -4337,12 +4337,12 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
         </div>
         {(mockActive || images.length > 1) && (
           <div className="flex gap-2 mt-2 overflow-x-auto kulto-scrollbar pb-1">
-            {firstPhoto && <button type="button" onClick={() => { setShowUploadedPhoto(true); setShowEntryCover(true); }} className="kulto-btn shrink-0 rounded-lg px-3 text-xs font-bold" style={{ minWidth: 82, height: 44, border: showUploadedPhoto && showEntryCover ? "2px solid var(--sun)" : "1px solid var(--line)", background: "var(--ink-3)", color: "var(--bone)" }}>Portada</button>}
+            {firstPhoto && <button type="button" onClick={() => { setShowUploadedPhoto(true); setShowEntryCover(true); setHoverZoom(false); }} className="kulto-btn shrink-0 rounded-lg px-3 text-xs font-bold" style={{ minWidth: 82, height: 44, border: showUploadedPhoto && showEntryCover ? "2px solid var(--sun)" : "1px solid var(--line)", background: "var(--ink-3)", color: "var(--bone)" }}>Portada</button>}
             {mockActive && <button type="button" onClick={() => { setShowUploadedPhoto(false); setShowEntryCover(false); }} className="kulto-btn shrink-0 rounded-lg px-3 text-xs font-bold" style={{ minWidth: 104, height: 44, border: !showUploadedPhoto ? "2px solid var(--sun)" : "1px solid var(--line)", background: "var(--ink-3)", color: "var(--bone)" }}><RotateCw size={13} className="inline mr-1" /> Vista giratoria</button>}
             {images.map((img, i) => (
               <button
                 key={i}
-                onClick={() => { setImgIdx(i); setShowUploadedPhoto(true); setShowEntryCover(false); }}
+                onClick={() => { setImgIdx(i); setShowUploadedPhoto(true); setShowEntryCover(false); setHoverZoom(false); }}
                 className="kulto-btn shrink-0 rounded-lg overflow-hidden"
                 style={{ width: 44, height: 44, border: i === imgIdx && showUploadedPhoto && !showEntryCover ? "2px solid var(--sun)" : "1px solid var(--line)", background: "var(--ink-3)" }}
               >
@@ -4359,7 +4359,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
       {zoomOpen && activeImage && (
         <ImageLightbox
           image={activeImage}
-          overlay={designMode === "design" ? design?.image : null}
+          overlay={!showEntryCover && designMode === "design" ? design?.image : null}
           background={previewBg}
           onClose={() => setZoomOpen(false)}
         />
@@ -13803,8 +13803,10 @@ function AdminHomeCategoryCovers({ settings, products, onSave }) {
     try {
       const b64 = await new Promise(resolve => fileToBase64(file, resolve, 1400, 0.86, "image/jpeg"));
       if (!b64) throw new Error("No se pudo procesar la imagen.");
-      const url = await uploadDataUrlToStorage(b64);
-      if (!url) throw new Error("No se pudo subir a Storage. No se modificó la portada.");
+      // fileToBase64 already uploads to Storage and normally returns its URL.
+      // Only upload again if resizing returned a local data URL.
+      const url = b64.startsWith("data:") ? await uploadDataUrlToStorage(b64) : b64;
+      if (!url || !/^https:\/\//i.test(url)) throw new Error("No se pudo subir a Storage. No se modificó la portada.");
       await saveCover(id, url);
       setMessage("Portada guardada. La imagen ya se usa en Inicio.");
     } catch (err) { setMessage("No se pudo guardar la portada: " + (err?.message || "error")); }
