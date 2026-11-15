@@ -1,3 +1,4 @@
+import { GARMENT_FAMILIES, GARMENT_MODEL_TYPES, garmentFamilyOf, garmentFitOf, modelMatchesProduct } from "./garment-families.js";
 import { seasonalPricing, isOversizeGarment } from "./promotion-pricing.js";
 import "./editorial.css";
 import { escapeEmailHtml, secureSixDigitCode } from "./email-safety.js";
@@ -5250,21 +5251,9 @@ function CustomWorkCarousel({ items = [], speed = 0.5 }) {
    are replaced. The existing product editor and cart continue to own state. */
 function EditorialHomeIntro({ products, settings, onGoCatalog, onGoWizard }) {
   const uniqueCategories = [...new Set((products || []).flatMap(p => [p.category, ...(p.extraCategories || [])]).filter(Boolean))];
-  // Grupo visual de prendas: los cortes oversize son modelos de camiseta,
-  // y con/sin capucha son modelos de sudadera, no categorías hermanas.
-  const definitions = [
-    { label: "Camisetas", hint: "Clásicas · Oversize", match: c => /camiseta|oversize/i.test(c) },
-    { label: "Sudaderas", hint: "Con capucha · Sin capucha", match: c => /sudadera|hoodie/i.test(c) },
-    { label: "Tops", hint: "Tops deportivos", match: c => /top/i.test(c) },
-    { label: "Tote bags", hint: "Bolsas de tela", match: c => /tote|bolsa/i.test(c) },
-    { label: "Accesorios", hint: "Complementos", match: c => /llavero|lanyard|accesorio/i.test(c) },
-    { label: "Personaliza", hint: "Tu diseño en tu prenda", match: () => false },
-  ];
-  const categories = definitions.map(({label, hint, match}) => {
-    const matches = uniqueCategories.filter(match);
-    const item = products.find(p => matches.includes(p.category) || (p.extraCategories || []).some(c => matches.includes(c)));
-    const image = item?.photoPool?.[0] || getColorImages(item?.colors?.[0])[0] || null;
-    return { label, hint, name: matches[0] || "", image };
+  const categories = [...GARMENT_FAMILIES, {id:"personalizar",title:"Personaliza",subtitle:"Crea tu propio diseño"}].map(({id,title,subtitle}) => {
+    const item = products.find(p => garmentFamilyOf(p) === id && (p.photoPool?.[0] || getColorImages(p.colors?.[0])[0]));
+    return {id,label:title,hint:subtitle,image:item?.photoPool?.[0] || getColorImages(item?.colors?.[0])[0] || null};
   });
   const fallbackHero = "https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=1800&q=85";
   const hero = settings?.heroImage || settings?.heroImages?.[0] || fallbackHero;
@@ -5295,9 +5284,9 @@ function EditorialHomeIntro({ products, settings, onGoCatalog, onGoWizard }) {
           <button type="button" className="kulto-editorial-textlink" onClick={() => onGoCatalog({})}>Ver todas las categorías →</button>
         </div>
         <div className="kulto-editorial-cats">
-          {categories.map(({ label, hint, name, image }) => (
+          {categories.map(({ id, label, hint, image }) => (
             <button type="button" key={label} className="kulto-editorial-cat"
-              onClick={() => label === "Personaliza" ? onGoWizard() : onGoCatalog(name ? { category:name } : {})}
+              onClick={() => id === "personalizar" ? onGoWizard() : onGoCatalog({ category:"__family_" + id })}
               aria-label={`Explorar ${label}`}>
               {image ? <img src={image} alt="" loading="lazy"/> : <span aria-hidden="true" style={{fontSize:34,position:"absolute",inset:0,display:"grid",placeItems:"center",opacity:.22}}>K.</span>}
               <span>{label} <ArrowRight size={13} style={{display:"inline"}}/><small className="kulto-editorial-cat-hint">{hint}</small></span>
@@ -5796,6 +5785,7 @@ function Catalog({ settings, initialCollection, products, categories, groups, on
   const [activeGroup, setActiveGroup] = useState(initialGroup || "Todas");
   const [activeCat, setActiveCat] = useState(initialCategory || "Todas");
   const [activeSubcat, setActiveSubcat] = useState(initialSubcategory || "Todas");
+  const [activeFit, setActiveFit] = useState("Todas");
   // Destacados: lo mismo que se ve en el inicio (tendencia, ofertas, más vendidos).
   const [activeCollection, setActiveCollection] = useState(initialCollection || "Todas");
   const [query, setQuery] = useState(initialQuery || "");
@@ -5842,7 +5832,10 @@ function Catalog({ settings, initialCollection, products, categories, groups, on
   // (ver "También listar en otras categorías" en el admin) — p.category es
   // la principal, p.extraCategories las que se suman solo para mostrarlo acá.
   const catsInGroup = [...new Set(filtered.flatMap((p) => [p.category, ...(p.extraCategories || [])]))].filter(Boolean);
-  filtered = activeCat === "Todas" ? filtered : filtered.filter((p) => p.category === activeCat || (p.extraCategories || []).includes(activeCat));
+  const activeFamily = activeCat.startsWith("__family_") ? activeCat.slice("__family_".length) : "";
+  filtered = !activeFamily ? (activeCat === "Todas" ? filtered : filtered.filter((p) => p.category === activeCat || (p.extraCategories || []).includes(activeCat))) : filtered.filter(p => garmentFamilyOf(p) === activeFamily);
+  const fitChoices = GARMENT_FAMILIES.find(f=>f.id===activeFamily)?.fits || [];
+  if (activeFamily && activeFit !== "Todas") filtered = filtered.filter(p=>garmentFitOf(p)===activeFit);
   // Subcategoría (ej: dentro de "Sudaderas" separar "Con capucha" de "Sin
   // capucha") — llega sobre todo desde el submenú del header, ver AdminProductForm.
   // Carpetas de diseños (ej: dentro de "anime": Naruto, Dragon Ball) — se
@@ -6060,6 +6053,13 @@ function Catalog({ settings, initialCollection, products, categories, groups, on
             </button>
             <span className="hidden lg:block text-xs shrink-0" style={{ color: "var(--slate)" }}>{filtered.length} producto{filtered.length === 1 ? "" : "s"}</span>
           </div>
+          {fitChoices.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-5" aria-label="Tipo de prenda">
+              {["Todas",...fitChoices].map(f => <button key={f} type="button" onClick={() => { setActiveFit(f); setPage(1); }}
+                 className="kulto-btn px-4 py-2 rounded-full text-sm font-semibold" aria-pressed={activeFit===f}
+                 style={{background:activeFit===f?"var(--signal)":"var(--ink-2)",color:"var(--bone)",border:"1px solid var(--line)"}}>{f==="Todas"?"Todos los modelos":f}</button>)}
+            </div>
+          )}
           <div ref={gridTopRef} style={{ scrollMarginTop: 96 }} />
           {compareMode && (
             <p className="text-xs mb-3" style={{ color: "var(--slate)" }}>
