@@ -1,3 +1,4 @@
+import { seasonalPricing, isOversizeGarment } from "./promotion-pricing.js";
 import "./editorial.css";
 import { escapeEmailHtml, secureSixDigitCode } from "./email-safety.js";
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
@@ -7606,8 +7607,9 @@ function isValidEmail(v) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
 }
 
-function CartDrawer({ cart, onClose, onUpdateQty, onRemove, onCheckout, customerName, setCustomerName, customerPhone, setCustomerPhone, customerEmail, setCustomerEmail, comment, setComment, deliveryMethod, setDeliveryMethod, address, setAddress, settings, sending, customer }) {
+function CartDrawer({ cart, products, onClose, onUpdateQty, onRemove, onCheckout, customerName, setCustomerName, customerPhone, setCustomerPhone, customerEmail, setCustomerEmail, comment, setComment, deliveryMethod, setDeliveryMethod, address, setAddress, settings, sending, customer }) {
   const subtotal = cart.reduce((s, it) => s + it.qty * it.unitPrice, 0);
+  const seasonal = seasonalPricing(cart, settings, products || []);
   const itemCount = cart.reduce((s, it) => s + it.qty, 0);
   // Suma el puntaje propio de cada prenda (si el admin le puso uno) y si no
   // usa el general de Ajustes → Fidelización, en vez de una cifra pareja por
@@ -7674,8 +7676,12 @@ function CartDrawer({ cart, onClose, onUpdateQty, onRemove, onCheckout, customer
   const eligibleForSignupDiscount = !!customer && !!settings?.signupDiscountEnabled && !customer.firstDiscountUsed;
   // El código de descuento reemplaza al de bienvenida (no se suman): así el
   // descuento de bienvenida no se "gasta" si el cliente usa un código mejor.
-  const discountAmount = eligibleForSignupDiscount && !(promoActive && promoDiscount > 0) ? subtotal * (welcomePercent / 100) : 0;
-  const total = Math.max(0, subtotal - discountAmount - promoDiscount) + shippingCost;
+  // Do not stack seasonal bundles with promo codes or welcome discounts.
+  // When no code is used, grant the better of the welcome discount and the seasonal deal.
+  const welcomeDiscount = eligibleForSignupDiscount && !promoActive ? subtotal * (welcomePercent / 100) : 0;
+  const seasonalDiscount = promoActive || welcomeDiscount > seasonal.discount ? 0 : seasonal.discount;
+  const discountAmount = seasonalDiscount > 0 ? 0 : welcomeDiscount;
+  const total = Math.round((Math.max(0, subtotal - discountAmount - promoDiscount - seasonalDiscount) + shippingCost) * 100) / 100;
   const addressOk = deliveryMethod !== "envio" || (address.street.trim() && address.city.trim() && address.state.trim() && address.postalCode.trim());
   const canCheckout = emailOk && addressOk;
 
@@ -7920,6 +7926,12 @@ function CartDrawer({ cart, onClose, onUpdateQty, onRemove, onCheckout, customer
                     <span>-{formatPrice(discountAmount)}</span>
                   </div>
                 )}
+                {seasonal.active && (
+                  <div className="flex items-center justify-between gap-2" style={{color:"var(--bone)"}}>
+                    <span>{seasonal.label} · {seasonal.eligibleQuantity}/{seasonal.minimumQuantity} prendas válidas</span>
+                    <span>{seasonalDiscount > 0 ? "-" + formatPrice(seasonalDiscount) : "—"}</span>
+                  </div>
+                )}
                 {promoActive && promoDiscount > 0 && (
                   <div className="flex items-center justify-between" style={{ color: appliedPromo.color || "var(--sun)" }}>
                     <span>Código {appliedPromo.code}</span>
@@ -8003,6 +8015,7 @@ function CartDrawer({ cart, onClose, onUpdateQty, onRemove, onCheckout, customer
                   if (!canCheckout) return;
                   const args = {
                     subtotal, shippingCost, total, discountAmount, itemCount,
+                    seasonalPromotion: seasonalDiscount > 0 ? { title: seasonal.label, discount: seasonalDiscount, productIds: seasonal.includedIds, eligibleQuantity: seasonal.eligibleQuantity } : null,
                     promo: promoActive ? { code: appliedPromo.code, label: appliedPromo.label || "", type: appliedPromo.type, personal: !!appliedPromo.personal, perCustomerOnce: !!appliedPromo.perCustomerOnce, discount: promoDiscount, freeShipping: promoEval.freeShipping, gift: promoEval.gift } : null,
                   };
                   if (isCheckoutEmailVerified(customerEmail, customer)) onCheckout(args);
@@ -19842,7 +19855,7 @@ export default function App() {
   const handleUpdateQty = (cartId, qty) => setCart((prev) => prev.map((it) => (it.cartId === cartId ? { ...it, qty } : it)));
   const handleRemove = (cartId) => setCart((prev) => prev.filter((it) => it.cartId !== cartId));
 
-  const handleCheckout = async ({ subtotal, shippingCost, total, discountAmount = 0, itemCount = 0, promo = null }) => {
+  const handleCheckout = async ({ subtotal, shippingCost, total, discountAmount = 0, itemCount = 0, promo = null, seasonalPromotion = null }) => {
     if (cart.length === 0) return;
     // Nunca se registra un pedido con un mail sin confirmar (ver CartDrawer).
     if (!isCheckoutEmailVerified(customerEmail, customer)) return;
@@ -19854,6 +19867,9 @@ export default function App() {
       customerName, customerPhone, customerEmail, comment,
       deliveryMethod, address: deliveryMethod === "envio" ? address : null,
       subtotal, shippingCost, total, discountAmount,
+      seasonalPromotion: seasonalPromotion?.title || "",
+      seasonalDiscount: seasonalPromotion?.discount || 0,
+      seasonalIncludedIds: seasonalPromotion?.productIds || [],
       promoCode: promo?.code || null,
       promoLabel: promo?.label || "",
       promoDiscount: promo?.discount || 0,
@@ -21073,6 +21089,7 @@ export default function App() {
           deliveryMethod={deliveryMethod} setDeliveryMethod={setDeliveryMethod}
           address={address} setAddress={setAddress}
           settings={settings}
+          products={products}
           sending={sending}
           customer={customer}
         />
