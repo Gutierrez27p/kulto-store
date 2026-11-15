@@ -1,6 +1,8 @@
 import { GARMENT_FAMILIES, GARMENT_MODEL_TYPES, garmentFamilyOf, garmentFitOf, modelMatchesProduct } from "./garment-families.js";
 import { seasonalPricing, isOversizeGarment } from "./promotion-pricing.js";
 import { backgroundSilhouette } from "./garment-mask.js";
+import { safeRecolorPixel, growSilhouette } from "./garment-color.js";
+import { selectGarmentArt } from "./garment-art.js";
 import { coverForHomeCategory } from "./home-category-covers.js";
 import "./editorial.css";
 import { escapeEmailHtml, secureSixDigitCode } from "./email-safety.js";
@@ -1072,7 +1074,7 @@ function resolveProductMockup(product) {
   if (!model?.base || model.enabled === false) return original;
   const design = original?.design || (product?.designs?.length === 1 ? product.designs[0]?.image : null);
   if (!design) return original; // Never hide an existing product photo if its art cannot be recovered.
-  return { ...model, ...original, base: model.base, backBase: model.backBase || null, mask: model.mask || null, backMask: model.backMask || null, ar: model.ar || original?.ar, backAr: model.backAr || original?.backAr, design, enabled: true };
+  return { ...model, ...original, base: model.base, backBase: model.backBase || null, mask: model.mask || null, backMask: model.backMask || null, ar: model.ar || original?.ar, backAr: model.backAr || original?.backAr, design, backDesign: original?.backDesign || model.backDesign || null, enabled: true };
 }
 const mockupPrepCache = new Map(); // src -> Promise<prep>
 const mockupTintedCache = new Map(); // `${src}|${hex}` -> canvas
@@ -1203,8 +1205,10 @@ function prepareMockupBase(src, explicitMask = null) {
       // Sin recorte ni máscara: no recolorear el fondo entero a ciegas.
       throw new Error("No se pudo detectar la silueta: añadí una máscara PNG transparente en la Biblioteca de prendas.");
     }
-    // borde suave (desenfoque simple de 3x3, dos veces)
-    let soft = maskAlpha ? maskAlpha : (isCutout ? Float32Array.from({ length: n }, (_, i) => d[i * 4 + 3] / 255) : Float32Array.from(mask));
+    // Extend the actual silhouette one pixel to remove pale cutout halos.
+    // Transparent alpha never changes: no paint can escape the garment.
+    const expandedMask = !maskAlpha && !isCutout ? growSilhouette(mask, w, h, 1) : mask;
+    let soft = maskAlpha ? maskAlpha : (isCutout ? Float32Array.from({ length: n }, (_, i) => d[i * 4 + 3] / 255) : Float32Array.from(expandedMask));
     for (let pass = 0; pass < (maskAlpha || isCutout ? 0 : 2); pass++) {
       const next = new Float32Array(n);
       for (let y = 0; y < h; y++) {
@@ -1238,7 +1242,8 @@ function prepareMockupBase(src, explicitMask = null) {
     const mimg = mctx.createImageData(w, h);
     for (let i = 0; i < n; i++) { mimg.data[i * 4 + 3] = Math.round(soft[i] * 255); }
     mctx.putImageData(mimg, 0, 0);
-    return { w, h, orig, soft, shade, maskCv, maskKey: explicitMask };
+    const background = [0, 1, 2].map(ch => corners.reduce((sum, idx) => sum + d[idx * 4 + ch], 0) / corners.length);
+    return { w, h, orig, soft, shade, maskCv, maskKey: explicitMask, background, cutout: isCutout || !!maskAlpha };
   })();
   mockupPrepCache.set(cacheKey, p);
   p.catch(() => mockupPrepCache.delete(cacheKey));
@@ -1248,7 +1253,7 @@ function prepareMockupBase(src, explicitMask = null) {
 function tintedMockupCanvas(src, prep, hex) {
   const key = `${src}|${prep.maskKey || ""}|${hex}`;
   if (mockupTintedCache.has(key)) return mockupTintedCache.get(key);
-  const { w, h, orig, soft, shade } = prep;
+  const { w, h, orig, soft, shade, background, cutout } = prep;
   const { r: tr, g: tg, b: tb } = hexToRgb(hex);
   const cv = document.createElement("canvas");
   cv.width = w; cv.height = h;
@@ -1256,11 +1261,12 @@ function tintedMockupCanvas(src, prep, hex) {
   const out = ctx.createImageData(w, h);
   const d = orig.data, o = out.data;
   for (let i = 0; i < w * h; i++) {
-    const a = soft[i], s = shade[i];
-    o[i * 4] = d[i * 4] * (1 - a) + tr * s * a;
-    o[i * 4 + 1] = d[i * 4 + 1] * (1 - a) + tg * s * a;
-    o[i * 4 + 2] = d[i * 4 + 2] * (1 - a) + tb * s * a;
-    o[i * 4 + 3] = d[i * 4 + 3];
+    const p = i * 4;
+    const rgb = safeRecolorPixel(
+      [d[p], d[p + 1], d[p + 2]], [tr, tg, tb],
+      soft[i], shade[i], background, cutout
+    );
+    o[p] = rgb[0]; o[p + 1] = rgb[1]; o[p + 2] = rgb[2]; o[p + 3] = d[p + 3];
   }
   ctx.putImageData(out, 0, 0);
   mockupTintedCache.set(key, cv);
@@ -1480,6 +1486,7 @@ function AdminMockupEditor({ draft, setDraft, inputStyle }) {
       const ar = await new Promise((resolve) => { const i = new Image(); i.onload = () => resolve(i.naturalWidth / i.naturalHeight); i.onerror = () => resolve(0.8); i.src = b64; });
       set(kind === "base" ? { base: url, ar } : { backBase: url, backAr: ar });
     } else if (kind === "design") set({ design: url });
+    else if (kind === "backDesign") set({ backDesign: url });
     else if (kind === "logoLight") set({ logoLight: url });
     else if (kind === "logoDark") set({ logoDark: url });
     else set({ cover: url });
@@ -1537,10 +1544,11 @@ function AdminMockupEditor({ draft, setDraft, inputStyle }) {
       </label>
       {slot("1. Mockup delantero vacío", "Prenda sin estampado, vista frontal.", "base", m.base)}
       {slot("2. Mockup trasero vacío", "La misma prenda sin estampado, vista trasera.", "backBase", m.backBase)}
-      {slot("3. Diseño (PNG)", "Se utiliza el mismo diseño delante y detrás.", "design", m.design)}
-      {slot("4. Ejemplo / portada", "Foto de cómo debe quedar: el mismo mockup con el diseño ya puesto en su lugar. Se ve en las tarjetas y sirve para acomodar el diseño solo.", "cover", m.cover)}
-      {slot("5. Texto para prendas claras (negro)", "Opcional: el texto o logo en negro, PNG sin fondo (ej. Kulto en el frente).", "logoLight", m.logoLight)}
-      {slot("6. Texto para prendas oscuras (blanco)", "Opcional: el mismo texto en blanco. Se usa solo en las prendas oscuras.", "logoDark", m.logoDark)}
+      {slot("3. Estampado delantero (PNG)", "Diseño del frente, transparente y sin fondo.", "design", m.design)}
+       {slot("4. Estampado trasero (PNG)", "Opcional: diseño exclusivo de la espalda; si no subís uno, esa cara será lisa.", "backDesign", m.backDesign)}
+      {slot("5. Ejemplo / portada", "Foto de cómo debe quedar: el mismo mockup con el diseño ya puesto en su lugar. Se ve en las tarjetas y sirve para acomodar el diseño solo.", "cover", m.cover)}
+      {slot("6. Texto para prendas claras (negro)", "Opcional: el texto o logo en negro, PNG sin fondo (ej. Kulto en el frente).", "logoLight", m.logoLight)}
+      {slot("7. Texto para prendas oscuras (blanco)", "Opcional: el mismo texto en blanco. Se usa solo en las prendas oscuras.", "logoDark", m.logoDark)}
       {m.base && m.design && m.cover && (
         <div className="flex flex-col gap-1.5">
           <button type="button" onClick={autoPlace} disabled={detecting} className="kulto-btn text-xs font-semibold px-4 py-2.5 rounded-full self-start" style={{ background: "var(--sun)", color: "var(--ink)", opacity: detecting ? 0.6 : 1 }}>
@@ -1550,7 +1558,7 @@ function AdminMockupEditor({ draft, setDraft, inputStyle }) {
         </div>
       )}
       {busy && <p className="text-xs" style={{ color: "var(--sun)" }}>Subiendo…</p>}
-      {(canPreview || m.backBase) && m.design && (
+      {(canPreview || m.backBase) && (m.design || m.backDesign) && (
         <div className="grid sm:grid-cols-2 gap-4">
           <div className="sm:col-span-2 flex flex-wrap gap-2">
             {[["front", "Delante"], ["back", "Detrás"]].filter(([side]) => side === "front" ? !!m.base : !!m.backBase).map(([side, label]) => (
@@ -1567,7 +1575,7 @@ function AdminMockupEditor({ draft, setDraft, inputStyle }) {
             )}
             <p className="text-xs mb-1" style={{ color: "var(--slate)" }}>Tocá o arrastrá sobre la prenda para mover {target === "logo" ? "el texto" : "el diseño"}:</p>
             <div className="rounded-xl overflow-hidden mx-auto relative" style={{ aspectRatio: "4 / 5", maxWidth: 280, background: "var(--ink-2)", border: "1px solid var(--line)" }}>
-              <MockupComposite mockup={editorSide === "back" && m.backBase ? { ...m, base: m.backBase, mask: m.backMask, ar: m.backAr, x: m.backX ?? 50, y: m.backY ?? 38, w: m.backW ?? 40, rot: m.backRot ?? 0, logoLight: null, logoDark: null } : m} hex={previewHex} innerRef={innerRef} designProps={designProps} />
+              <MockupComposite mockup={editorSide === "back" && m.backBase ? { ...m, base: m.backBase, mask: m.backMask, ar: m.backAr, design: m.backDesign || null, x: m.backX ?? 50, y: m.backY ?? 38, w: m.backW ?? 40, rot: m.backRot ?? 0, logoLight: null, logoDark: null } : m} hex={previewHex} innerRef={innerRef} designProps={designProps} />
               {showExample && m.cover && <img src={m.cover} alt="" draggable={false} className="absolute inset-0 w-full h-full object-contain" style={{ opacity: 0.45, pointerEvents: "none" }} />}
             </div>
             {m.cover && (
@@ -4183,8 +4191,15 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
   const unitPrice = product.tags?.oferta && product.salePrice ? product.salePrice : product.price;
   const finalCustomImage = customImage ? (useProcessed && customImageProcessed ? customImageProcessed : customImage) : null;
   // Compositing inside each canvas prevents duplicate artwork floating over both garments.
-  const productMockPreview = mockActive ? { ...mock, design: designMode === "custom" ? finalCustomImage : designMode === "design" && design?.image ? design.image : mock.design } : null;
-  const backMock = productMockPreview?.backBase ? { ...productMockPreview, base: productMockPreview.backBase, mask: productMockPreview.backMask, ar: productMockPreview.backAr, x: productMockPreview.backX ?? 50, y: productMockPreview.backY ?? 38, w: productMockPreview.backW ?? 40, rot: productMockPreview.backRot ?? 0, logoLight: null, logoDark: null } : null;
+  const art = selectGarmentArt(mock, product, designMode === "custom" ? finalCustomImage : designMode === "design" && design?.image ? design.image : undefined);
+  const productMockPreview = mockActive ? { ...mock, design: art.front } : null;
+  const backMock = productMockPreview?.backBase ? {
+    ...productMockPreview, base: productMockPreview.backBase, mask: productMockPreview.backMask,
+    ar: productMockPreview.backAr, design: art.back,
+    x: productMockPreview.backX ?? 50, y: productMockPreview.backY ?? 38,
+    w: productMockPreview.backW ?? 40, rot: productMockPreview.backRot ?? 0,
+    logoLight: null, logoDark: null
+  } : null;
   // El stock es un número total del producto (no por talle/color todavía), así
   // que cuando llega a 0 bloqueamos la compra entera en vez de un talle puntual.
   const outOfStock = (product.stock ?? 0) <= 0;
