@@ -1,3 +1,4 @@
+import "./editorial.css";
 import { escapeEmailHtml, secureSixDigitCode } from "./email-safety.js";
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import {
@@ -5229,6 +5230,61 @@ function CustomWorkCarousel({ items = [], speed = 0.5 }) {
   );
 }
 
+
+/* Editorial home: only catalogue data is used; no products, names or prices
+   are replaced. The existing product editor and cart continue to own state. */
+function EditorialHomeIntro({ products, settings, onGoCatalog, onGoWizard }) {
+  const uniqueCategories = [...new Set((products || []).flatMap(p => [p.category, ...(p.extraCategories || [])]).filter(Boolean))];
+  const preferred = ["Camisetas", "Oversize", "Sudaderas", "Tops", "Ofertas", "Personaliza"];
+  const categories = preferred.map(label => {
+    const name = uniqueCategories.find(c => c.toLowerCase() === label.toLowerCase() || c.toLowerCase().includes(label.toLowerCase()));
+    const item = name && products.find(p => p.category === name || (p.extraCategories || []).includes(name));
+    const image = item?.photoPool?.[0] || getColorImages(item?.colors?.[0])[0] || null;
+    return { label, name, image };
+  });
+  const fallbackHero = "https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=1800&q=85";
+  const hero = settings?.heroImage || settings?.heroImages?.[0] || fallbackHero;
+  const benefits = [
+    [Package, "Envío en España", "Consulta condiciones"],
+    [RotateCcw, "Devoluciones fáciles", "Atención personalizada"],
+    [Lock, "Pago seguro", "Compra con confianza"],
+    [Shirt, "Diseños originales", "Hecho para tu estilo"],
+  ];
+  return (
+    <>
+      <section className="kulto-editorial-hero" aria-label="Colección KULTO">
+        <img className="kulto-editorial-hero-photo" src={hero} alt="Moda urbana KULTO" />
+        <div className="kulto-editorial-hero-inner">
+          <h1>STREETWEAR<br />SIN LÍMITES</h1>
+          <p>Camisetas, oversize y sudaderas con diseños únicos. Moda urbana creada en España.</p>
+          <button type="button" className="kulto-editorial-action" onClick={() => onGoCatalog({})}>Descubrir colección <ArrowRight size={16} /></button>
+        </div>
+      </section>
+      <div className="kulto-editorial-perks">
+        {benefits.map(([Icon, title, sub]) => <div className="kulto-editorial-perk" key={title}>
+          <Icon size={25} strokeWidth={1.5}/><div>{title}<small>{sub}</small></div>
+        </div>)}
+      </div>
+      <section className="kulto-editorial-section" aria-label="Explora nuestras categorías">
+        <div className="kulto-editorial-section-head">
+          <h2>Explora <em>KULTO</em></h2>
+          <button type="button" className="kulto-editorial-textlink" onClick={() => onGoCatalog({})}>Ver todas las categorías →</button>
+        </div>
+        <div className="kulto-editorial-cats">
+          {categories.map(({ label, name, image }) => (
+            <button type="button" key={label} className="kulto-editorial-cat"
+              onClick={() => label === "Personaliza" ? onGoWizard() : label === "Ofertas" ? onGoCatalog({ collection:"ofertas" }) : onGoCatalog(name ? { category:name } : {})}
+              aria-label={`Explorar ${label}`}>
+              {image ? <img src={image} alt="" loading="lazy"/> : <span aria-hidden="true" style={{fontSize:34,position:"absolute",inset:0,display:"grid",placeItems:"center",opacity:.22}}>K.</span>}
+              <span>{label} <ArrowRight size={13} style={{display:"inline"}}/></span>
+            </button>
+          ))}
+        </div>
+      </section>
+    </>
+  );
+}
+
 function Home({ products, settings, reviews, customWorkGallery, onOpen, onGoCatalog, onGoWizard, onSearch, favorites, onToggleFavorite, onAddToCart }) {
   // Un mismo diseño puede repetirse en varias prendas (mismo designGroup) —
   // si por error quedaron varias copias con la misma etiqueta ("más
@@ -5428,10 +5484,16 @@ function Home({ products, settings, reviews, customWorkGallery, onOpen, onGoCata
   }
 
   return (
-    <div>
-      <Hero onGoCatalog={onGoCatalog} onGoWizard={onGoWizard} onSearch={onSearch} heroTitle={settings.heroTitle} heroSubtitle={settings.heroSubtitle} heroImage={settings.heroImage} heroImages={settings.heroImages} banners={settings.banners} />
-
-      <div className="flex flex-col gap-14 py-12">
+    <div className="kulto-editorial-home">
+      <EditorialHomeIntro products={products} settings={settings} onGoCatalog={onGoCatalog} onGoWizard={onGoWizard} />
+      <section className="kulto-editorial-section kulto-editorial-new" aria-label="Novedades">
+        <div className="kulto-editorial-section-head">
+          <h2>Novedades</h2>
+          <button type="button" className="kulto-editorial-textlink" onClick={() => onGoCatalog({})}>Ver novedades →</button>
+        </div>
+        <FeaturedGrid list={dedupeByDesign([...products].reverse()).slice(0, 4)} collection="novedades" />
+      </section>
+      <div className="kulto-editorial-extra flex flex-col gap-14 py-12">
         {renderGroups.map((g) => {
           if (g.type === "tiles") {
             const contents = g.keys.map((key) => renderSection(key)).filter(Boolean);
