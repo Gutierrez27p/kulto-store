@@ -3,6 +3,7 @@ import { seasonalPricing, isOversizeGarment } from "./promotion-pricing.js";
 import { backgroundSilhouette } from "./garment-mask.js";
 import { safeRecolorPixel, growSilhouette } from "./garment-color.js";
 import { selectGarmentArt } from "./garment-art.js";
+const Garment3DViewer = React.lazy(() => import("./Garment3DViewer.jsx"));
 import { coverForHomeCategory } from "./home-category-covers.js";
 import "./editorial.css";
 import { escapeEmailHtml, secureSixDigitCode } from "./email-safety.js";
@@ -1073,7 +1074,8 @@ function resolveProductMockup(product) {
   const model = explicitlyAssigned || (automaticCandidates.length === 1 ? automaticCandidates[0] : null);
   if (!model?.base || model.enabled === false) return original;
   const design = original?.design || (product?.designs?.length === 1 ? product.designs[0]?.image : null);
-  if (!design) return original; // Never hide an existing product photo if its art cannot be recovered.
+  const backDesign = original?.backDesign || model?.backDesign || null;
+  if (!design && !backDesign) return original; // Do not replace a photographed product with a blank garment.
   return { ...model, ...original, base: model.base, backBase: model.backBase || null, mask: model.mask || null, backMask: model.backMask || null, ar: model.ar || original?.ar, backAr: model.backAr || original?.backAr, design, backDesign: original?.backDesign || model.backDesign || null, enabled: true };
 }
 const mockupPrepCache = new Map(); // src -> Promise<prep>
@@ -4124,6 +4126,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
   const [imgIdx, setImgIdx] = useState(0);
   const [showUploadedPhoto, setShowUploadedPhoto] = useState(!!firstPhoto);
   const [showEntryCover, setShowEntryCover] = useState(!!firstPhoto);
+  const [viewMode, setViewMode] = useState("photo");
   const [sizeIdx, setSizeIdx] = useState(0);
   const [aud, setAud] = useState(() => audsOf(product)[0] || "h");
   const [designMode, setDesignMode] = useState(product.designs && product.designs.length ? "design" : "custom");
@@ -4147,6 +4150,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
     setImgIdx(0);
     setShowUploadedPhoto(!!firstPhoto);
     setShowEntryCover(!!firstPhoto);
+    setViewMode("photo");
     setSizeIdx(0);
     setAud(audsOf(product)[0] || "h");
     setDesignMode(product.designs && product.designs.length ? "design" : "custom");
@@ -4174,6 +4178,10 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
   const mock = activeMockup(product);
   // Always honor the explicitly configured mockup; other uploaded photos remain in the gallery.
   const mockActive = !!mock;
+  const can3D = ["camisetas", "sudaderas", "tops", "tote"].includes(garmentFamilyOf(product));
+  const assignedModel3D = GARMENT_MOCKUP_LIBRARY.find(m=>m.id===product.garmentMockupId);
+  const eligibleModels3D = GARMENT_MOCKUP_LIBRARY.filter(m=>m.enabled !== false && m.garmentKind && modelMatchesProduct(m, product));
+  const model3D = assignedModel3D || (eligibleModels3D.length===1 ? eligibleModels3D[0] : null);
   const mockHex = color?.hex || "#ffffff";
   const autoImage = useAutoColorImage(product, color, !mockActive && colorImages.length === 0, imgIdx);
   const activeImage = (showEntryCover && firstPhoto) || (colorImages.length === 0 && autoImage) || images[imgIdx] || null;
@@ -4280,7 +4288,22 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
             setZoomOrigin({ x: ((e.clientX - rect.left) / rect.width) * 100, y: ((e.clientY - rect.top) / rect.height) * 100 });
           }}
         >
-          {mockActive && !showUploadedPhoto ? (
+          {viewMode === "3d" && can3D ? (
+            <React.Suspense fallback={<div role="status" className="p-6 text-sm text-center" style={{color:"var(--bone)"}}>Cargando prenda 3D…</div>}>
+              <Garment3DViewer
+                product={{...product,garment3DKind:model3D?.garmentKind || null}}
+                hex={mockHex}
+                frontArt={art.front}
+                backArt={art.back}
+                logoArt={(parseInt(mockHex.slice(1,3),16)*.299 + parseInt(mockHex.slice(3,5),16)*.587 + parseInt(mockHex.slice(5,7),16)*.114)>150
+                  ? (mock?.logoLight || mock?.logoDark || null)
+                  : (mock?.logoDark || mock?.logoLight || null)}
+                frontPlacement={{x:mock?.x,y:mock?.y,w:mock?.w,rot:mock?.rot}}
+                backPlacement={{x:mock?.backX,y:mock?.backY,w:mock?.backW,rot:mock?.backRot}}
+                modelUrl={model3D?.glbUrl || null}
+              />
+            </React.Suspense>
+          ) : viewMode === "mockup" && mockActive ? (
             <GarmentTurntable front={productMockPreview} back={backMock} hex={mockHex}/>
           ) : activeImage ? (
             <img
@@ -4297,7 +4320,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
           ) : (
             <Shirt size={64} style={{ color: "rgba(243,239,230,0.35)" }} />
           )}
-          {!showEntryCover && (!mockActive || showUploadedPhoto) && designMode === "design" && design && design.image && (
+          {viewMode === "photo" && !showEntryCover && (!mockActive || showUploadedPhoto) && designMode === "design" && design && design.image && (
             <img
               src={design.image}
               alt={design.name}
@@ -4305,7 +4328,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
               style={{ width: "48%", top: "26%", left: "26%", objectFit: "contain", filter: "drop-shadow(0 6px 14px rgba(0,0,0,0.35))" }}
             />
           )}
-          {!showEntryCover && (!mockActive || showUploadedPhoto) && designMode === "custom" && finalCustomImage && !removingBg && (
+          {viewMode === "photo" && !showEntryCover && (!mockActive || showUploadedPhoto) && designMode === "custom" && finalCustomImage && !removingBg && (
             <img
               src={finalCustomImage}
               alt="Tu diseño"
@@ -4313,7 +4336,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
               style={{ width: "48%", top: "26%", left: "26%", objectFit: "contain", filter: "drop-shadow(0 6px 14px rgba(0,0,0,0.35))" }}
             />
           )}
-          {!mockActive && images.length > 1 && (
+          {viewMode === "photo" && !mockActive && images.length > 1 && (
             <>
               <button
                 type="button"
@@ -4338,7 +4361,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
               </div>
             </>
           )}
-          {activeImage && (!mockActive || showUploadedPhoto) && (
+          {viewMode === "photo" && activeImage && (!mockActive || showUploadedPhoto) && (
             <button
               type="button"
               onClick={() => setZoomOpen(true)}
@@ -4350,16 +4373,17 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
             </button>
           )}
         </div>
-        {(mockActive || images.length > 1) && (
+        {(mockActive || can3D || images.length > 1) && (
           <div className="flex gap-2 mt-2 overflow-x-auto kulto-scrollbar pb-1">
-            {firstPhoto && <button type="button" onClick={() => { setShowUploadedPhoto(true); setShowEntryCover(true); setHoverZoom(false); }} className="kulto-btn shrink-0 rounded-lg px-3 text-xs font-bold" style={{ minWidth: 82, height: 44, border: showUploadedPhoto && showEntryCover ? "2px solid var(--sun)" : "1px solid var(--line)", background: "var(--ink-3)", color: "var(--bone)" }}>Portada</button>}
-            {mockActive && <button type="button" onClick={() => { setShowUploadedPhoto(false); setShowEntryCover(false); }} className="kulto-btn shrink-0 rounded-lg px-3 text-xs font-bold" style={{ minWidth: 104, height: 44, border: !showUploadedPhoto ? "2px solid var(--sun)" : "1px solid var(--line)", background: "var(--ink-3)", color: "var(--bone)" }}><RotateCw size={13} className="inline mr-1" /> Vista giratoria</button>}
+            {firstPhoto && <button type="button" onClick={() => { setShowUploadedPhoto(true); setShowEntryCover(true); setHoverZoom(false); setViewMode("photo"); }} className="kulto-btn shrink-0 rounded-lg px-3 text-xs font-bold" style={{ minWidth: 82, height: 44, border: viewMode==="photo" && showUploadedPhoto && showEntryCover ? "2px solid var(--sun)" : "1px solid var(--line)", background: "var(--ink-3)", color: "var(--bone)" }}>Portada</button>}
+            {can3D && <button type="button" onClick={() => {setViewMode("3d");setShowUploadedPhoto(false);setShowEntryCover(false);}} className="kulto-btn shrink-0 rounded-lg px-3 text-xs font-bold" style={{minWidth:80,height:44,border:viewMode==="3d"?"2px solid var(--sun)":"1px solid var(--line)",background:"var(--ink-3)",color:"var(--bone)"}}>3D real</button>}
+            {mockActive && <button type="button" onClick={() => { setShowUploadedPhoto(false); setShowEntryCover(false); setViewMode("mockup"); }} className="kulto-btn shrink-0 rounded-lg px-3 text-xs font-bold" style={{ minWidth: 104, height: 44, border: viewMode==="mockup" ? "2px solid var(--sun)" : "1px solid var(--line)", background: "var(--ink-3)", color: "var(--bone)" }}><RotateCw size={13} className="inline mr-1" /> Mockup 360</button>}
             {images.map((img, i) => (
               <button
                 key={i}
-                onClick={() => { setImgIdx(i); setShowUploadedPhoto(true); setShowEntryCover(false); setHoverZoom(false); }}
+                onClick={() => { setImgIdx(i); setShowUploadedPhoto(true); setShowEntryCover(false); setHoverZoom(false); setViewMode("photo"); }}
                 className="kulto-btn shrink-0 rounded-lg overflow-hidden"
-                style={{ width: 44, height: 44, border: i === imgIdx && showUploadedPhoto && !showEntryCover ? "2px solid var(--sun)" : "1px solid var(--line)", background: "var(--ink-3)" }}
+                style={{ width: 44, height: 44, border: viewMode==="photo" && i === imgIdx && showUploadedPhoto && !showEntryCover ? "2px solid var(--sun)" : "1px solid var(--line)", background: "var(--ink-3)" }}
               >
                 <FastImg loading="lazy" src={img} className="w-full h-full object-contain" alt="" />
               </button>
@@ -4413,7 +4437,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
           {product.colors && product.colors.length > 0 ? (
             <div className="flex flex-wrap gap-2">
               {product.colors.map((c, i) => !colorOkForAud(product, c, aud) ? null : (
-                <ColorSwatch key={i} hex={c.hex} title={c.name} selected={i === colorIdx} onClick={() => { setColorIdx(i); setShowEntryCover(false); setShowUploadedPhoto(!mockActive); if (product.sizes && !sizeOkForColor(product, product.sizes[sizeIdx], product.colors[i])) setSizeIdx(firstOkSizeIdx(product, product.colors[i])); }} />
+                <ColorSwatch key={i} hex={c.hex} title={c.name} selected={i === colorIdx} onClick={() => { setColorIdx(i); setShowEntryCover(false); setShowUploadedPhoto(!mockActive); setViewMode(can3D?"3d":mockActive?"mockup":"photo"); if (product.sizes && !sizeOkForColor(product, product.sizes[sizeIdx], product.colors[i])) setSizeIdx(firstOkSizeIdx(product, product.colors[i])); }} />
               ))}
             </div>
           ) : (
