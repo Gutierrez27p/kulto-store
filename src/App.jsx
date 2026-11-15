@@ -4889,7 +4889,6 @@ function FocalCropImage({ src, box, focalX = 50, focalY = 50, zoom = 1, alt = ""
 const BANNER_FOCUS_POSITIONS = { center: "center center", top: "center top", bottom: "center bottom", left: "left center", right: "right center" };
 
 function PromoBanner({ banner, onGoCatalog, onGoWizard }) {
-  const [descriptionOpen, setDescriptionOpen] = useState(false);
   if (!banner || banner.active === false) return null;
 
   const clickable = banner.ctaAction && banner.ctaAction !== "none";
@@ -4917,7 +4916,7 @@ function PromoBanner({ banner, onGoCatalog, onGoWizard }) {
     return (
       <div
         {...interactiveProps}
-        className={`kulto-banner-tile kulto-editorial-banner ${descriptionOpen ? "kulto-desc-open" : ""} relative rounded-2xl overflow-hidden flex items-end ${clickable ? "cursor-pointer kulto-banner-clickable" : ""}`}
+        className={`kulto-banner-tile relative rounded-2xl overflow-hidden flex items-end ${clickable ? "cursor-pointer kulto-banner-clickable" : ""}`}
         style={{ minHeight, background: "var(--ink-3)", border: "1px solid var(--line)", "--banner-glow": banner.highlightColor || "transparent" }}
       >
         {banner.image && (
@@ -4934,14 +4933,8 @@ function PromoBanner({ banner, onGoCatalog, onGoWizard }) {
             pasar el mouse. En el celular, donde no hay mouse, queda a la vista
             en 3 líneas. */}
         <div className="absolute left-0 right-0 bottom-0 flex flex-col">
-          {banner.subtitle && (
-            <button type="button" className="kulto-banner-touch-reveal" aria-label={descriptionOpen ? "Ocultar descripción" : "Mostrar descripción"} aria-expanded={descriptionOpen}
-              onClick={(e) => { e.stopPropagation(); setDescriptionOpen(v => !v); }}>
-              {descriptionOpen ? <ChevronDown size={17} /> : <ChevronUp size={17} />}
-            </button>
-          )}
           {banner.title && (
-            <h3 className="kulto-display text-xl md:text-2xl leading-[0.95] whitespace-pre-line px-5 pt-5 pb-4" style={{ color: (Number(banner.textOutlineWidth) > 0 && !/^(#000000|#000|black)$/i.test(banner.textOutlineColor || "#000000")) ? "#171717" : "#ffffff", ...textOutlineStyle(banner.textOutlineWidth, banner.textOutlineColor) }}>
+            <h3 className="kulto-display text-xl md:text-2xl leading-[0.95] whitespace-pre-line px-5 pt-5 pb-4" style={{ color: "var(--bone)", ...textOutlineStyle(banner.textOutlineWidth, banner.textOutlineColor) }}>
               {banner.title}
             </h3>
           )}
@@ -4970,7 +4963,7 @@ function PromoBanner({ banner, onGoCatalog, onGoWizard }) {
   return (
     <section
       {...interactiveProps}
-      className={`kulto-banner-tile kulto-editorial-banner relative w-full overflow-hidden flex items-center ${rounded ? "rounded-2xl" : ""} ${clickable ? "cursor-pointer kulto-banner-clickable" : ""}`}
+      className={`kulto-banner-tile relative w-full overflow-hidden flex items-center ${rounded ? "rounded-2xl" : ""} ${clickable ? "cursor-pointer kulto-banner-clickable" : ""}`}
       style={{ minHeight, background: "var(--ink-2)", border: rounded ? "1px solid var(--line)" : "none", "--banner-glow": banner.highlightColor || "transparent" }}
     >
       {banner.image && (
@@ -4987,13 +4980,13 @@ function PromoBanner({ banner, onGoCatalog, onGoWizard }) {
       <div className="relative w-full max-w-6xl mx-auto px-4 md:px-6 py-10">
         <div className="flex flex-col gap-3 max-w-lg">
           {banner.title && (
-            <h3 className="kulto-display text-2xl md:text-4xl leading-[0.95] whitespace-pre-line" style={{ color: (Number(banner.textOutlineWidth) > 0 && !/^(#000000|#000|black)$/i.test(banner.textOutlineColor || "#000000")) ? "#171717" : "#ffffff", ...textOutlineStyle(banner.textOutlineWidth, banner.textOutlineColor) }}>
+            <h3 className="kulto-display text-2xl md:text-4xl leading-[0.95] whitespace-pre-line" style={{ color: "var(--bone)", ...textOutlineStyle(banner.textOutlineWidth, banner.textOutlineColor) }}>
               {banner.title}
             </h3>
           )}
-          {banner.subtitle && <ClampText text={banner.subtitle} lines={3} className="text-sm md:text-base" style={{ color: "#ffffff", ...subtitleOutline(banner) }} />}
+          {banner.subtitle && <ClampText text={banner.subtitle} lines={3} className="text-sm md:text-base" style={{ color: "var(--bone)", ...subtitleOutline(banner) }} />}
           {clickable && (
-            <span className="kulto-btn rounded-full px-6 py-3 font-semibold w-fit mt-1 inline-block" style={{ background: "#ffffff", color: "#181818" }}>
+            <span className="kulto-btn rounded-full px-6 py-3 font-semibold w-fit mt-1 inline-block" style={{ background: "var(--signal)", color: "var(--bone)" }}>
               {banner.ctaLabel || "Ver catálogo"}
             </span>
           )}
