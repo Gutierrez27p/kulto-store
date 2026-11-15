@@ -1,6 +1,7 @@
 import { GARMENT_FAMILIES, GARMENT_MODEL_TYPES, garmentFamilyOf, garmentFitOf, modelMatchesProduct } from "./garment-families.js";
 import { seasonalPricing, isOversizeGarment } from "./promotion-pricing.js";
 import { backgroundSilhouette } from "./garment-mask.js";
+import { coverForHomeCategory } from "./home-category-covers.js";
 import "./editorial.css";
 import { escapeEmailHtml, secureSixDigitCode } from "./email-safety.js";
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
@@ -78,6 +79,7 @@ const ADMIN_NOTIFICATION_EMAIL = "pablo.gutcha@gmail.com";
 // handleSetAdminPermissions. El dueño (ADMIN_EMAIL) siempre las tiene todas.
 const ADMIN_TABS = [
   ["productos", "Productos"],
+  ["inicio", "Diseño del Inicio"],
   ["mockups", "Biblioteca de prendas"],
   ["promociones", "Promociones"],
   ["personalizar", "Personalizar"],
@@ -95,6 +97,7 @@ const ADMIN_TABS = [
 const ADMIN_TAB_KEYS = ADMIN_TABS.map(([key]) => key);
 const ADMIN_TAB_META = {
   productos: { icon: Shirt, hint: "Fotos, precios y stock" },
+  inicio: { icon: LayoutGrid, hint: "Portadas, categorías y banners" },
   mockups: { icon: Boxes, hint: "Modelos y asignación masiva" },
   promociones: { icon: Gift, hint: "Campañas y productos incluidos" },
   personalizar: { icon: Sparkles, hint: "Banners, colores y textos" },
@@ -2742,6 +2745,9 @@ const DEFAULT_SETTINGS = {
   heroSubtitle: "Camisetas, sudaderas y accesorios sublimados a tu manera. Elige la prenda, el color y el diseño — nosotros lo estampamos.",
   heroImage: null,
   heroImages: [],
+  homeCategoryCovers: {},
+  editorialHeroTitle: "STREETWEAR\nSIN LÍMITES",
+  editorialHeroSubtitle: "Camisetas, oversize y sudaderas con diseños únicos. Moda urbana creada en España.",
   howItWorksSteps: [],
   howItWorksCardSize: "md",
   howItWorksImageShape: "auto",
@@ -5389,7 +5395,7 @@ function EditorialHomeIntro({ products, settings, onGoCatalog, onGoWizard }) {
   const uniqueCategories = [...new Set((products || []).flatMap(p => [p.category, ...(p.extraCategories || [])]).filter(Boolean))];
   const categories = [...GARMENT_FAMILIES, {id:"personalizar",title:"Personaliza",subtitle:"Crea tu propio diseño"}].map(({id,title,subtitle}) => {
     const item = products.find(p => garmentFamilyOf(p) === id && (p.photoPool?.[0] || getColorImages(p.colors?.[0])[0]));
-    return {id,label:title,hint:subtitle,image:item?.photoPool?.[0] || getColorImages(item?.colors?.[0])[0] || null};
+    return {id,label:title,hint:subtitle,image:coverForHomeCategory(settings?.homeCategoryCovers,id,item?.photoPool?.[0] || getColorImages(item?.colors?.[0])[0] || null)};
   });
   const fallbackHero = "https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=1800&q=85";
   const hero = settings?.heroImage || settings?.heroImages?.[0] || fallbackHero;
@@ -5404,8 +5410,8 @@ function EditorialHomeIntro({ products, settings, onGoCatalog, onGoWizard }) {
       <section className="kulto-editorial-hero" aria-label="Colección KULTO">
         <img className="kulto-editorial-hero-photo" src={hero} alt="Moda urbana KULTO" />
         <div className="kulto-editorial-hero-inner">
-          <h1>STREETWEAR<br />SIN LÍMITES</h1>
-          <p>Camisetas, oversize y sudaderas con diseños únicos. Moda urbana creada en España.</p>
+          <h1 style={{whiteSpace:"pre-line"}}>{settings?.editorialHeroTitle || "STREETWEAR\nSIN LÍMITES"}</h1>
+          <p>{settings?.editorialHeroSubtitle || "Camisetas, oversize y sudaderas con diseños únicos. Moda urbana creada en España."}</p>
           <button type="button" className="kulto-editorial-action" onClick={() => onGoCatalog({})}>Descubrir colección <ArrowRight size={16} /></button>
         </div>
       </section>
@@ -13763,6 +13769,97 @@ const BANNER_CROP_FRAME_H = 130;
 const BANNER_CROP_OUT_W = 1600;
 const BANNER_CROP_OUT_H = 650;
 
+
+/* Admin-owned covers for the six fixed "Explora KULTO" tiles. These images are
+   independent from the product catalogue and do not edit product photos. */
+function AdminHomeCategoryCovers({ settings, products, onSave }) {
+  const categories = [...GARMENT_FAMILIES, { id: "personalizar", title: "Personaliza", subtitle: "Crea tu propio diseño" }];
+  const [covers, setCovers] = useState(() => settings?.homeCategoryCovers || {});
+  const [title, setTitle] = useState(() => settings?.editorialHeroTitle || "STREETWEAR\nSIN LÍMITES");
+  const [subtitle, setSubtitle] = useState(() => settings?.editorialHeroSubtitle || "Camisetas, oversize y sudaderas con diseños únicos. Moda urbana creada en España.");
+  const [busy, setBusy] = useState("");
+  const [message, setMessage] = useState("");
+  useEffect(() => { setCovers(settings?.homeCategoryCovers || {}); }, [settings?.homeCategoryCovers]);
+  useEffect(() => { setTitle(settings?.editorialHeroTitle || "STREETWEAR\nSIN LÍMITES"); }, [settings?.editorialHeroTitle]);
+  useEffect(() => { setSubtitle(settings?.editorialHeroSubtitle || "Camisetas, oversize y sudaderas con diseños únicos. Moda urbana creada en España."); }, [settings?.editorialHeroSubtitle]);
+  const saveText = async () => {
+    setBusy("text"); setMessage("");
+    try {
+      await onSave({ editorialHeroTitle: title.trim() || "STREETWEAR\nSIN LÍMITES", editorialHeroSubtitle: subtitle.trim() });
+      setMessage("Texto de la portada guardado.");
+    } catch (err) { setMessage("No se pudo guardar el texto: " + (err?.message || "error")); }
+    finally { setBusy(""); }
+  };
+  const saveCover = async (id, url) => {
+    const next = { ...covers };
+    if (url) next[id] = url; else delete next[id];
+    await onSave({ homeCategoryCovers: next });
+    setCovers(next);
+  };
+  const upload = async (id, file) => {
+    if (!file) return;
+    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) { setMessage("Subí una imagen JPG, PNG o WebP."); return; }
+    setBusy(id); setMessage("");
+    try {
+      const b64 = await new Promise(resolve => fileToBase64(file, resolve, 1400, 0.86, "image/jpeg"));
+      if (!b64) throw new Error("No se pudo procesar la imagen.");
+      const url = await uploadDataUrlToStorage(b64);
+      if (!url) throw new Error("No se pudo subir a Storage. No se modificó la portada.");
+      await saveCover(id, url);
+      setMessage("Portada guardada. La imagen ya se usa en Inicio.");
+    } catch (err) { setMessage("No se pudo guardar la portada: " + (err?.message || "error")); }
+    finally { setBusy(""); }
+  };
+  const remove = async (id) => {
+    setBusy(id); setMessage("");
+    try { await saveCover(id, null); setMessage("Imagen quitada. Se vuelve a usar la foto automática, si existe."); }
+    catch (err) { setMessage("No se pudo quitar la imagen: " + (err?.message || "error")); }
+    finally { setBusy(""); }
+  };
+  const fields = { background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" };
+  return (
+    <section className="space-y-5">
+      <div>
+        <h2 className="kulto-display text-2xl" style={{color:"var(--bone)"}}>Diseño del Inicio</h2>
+        <p className="text-sm mt-2" style={{color:"var(--slate)"}}>Elegí una imagen independiente para cada recuadro de «Explora KULTO». No hace falta cambiar las fotos de tus productos y las categorías originales se conservan.</p>
+      </div>
+      <div className="rounded-2xl p-5 space-y-3" style={{background:"var(--ink-2)",border:"1px solid var(--line)"}}>
+        <h3 className="font-semibold">Texto principal de la portada</h3>
+        <label className="block text-xs">Título<textarea rows={2} className="block w-full p-3 rounded-xl mt-1" style={fields} value={title} onChange={e=>setTitle(e.target.value)}/></label>
+        <label className="block text-xs">Descripción<textarea rows={3} className="block w-full p-3 rounded-xl mt-1" style={fields} value={subtitle} onChange={e=>setSubtitle(e.target.value)}/></label>
+        <button type="button" disabled={!!busy} onClick={saveText} className="kulto-btn rounded-full font-semibold px-4 py-2.5 text-sm" style={{background:"var(--sun)",color:"var(--ink)"}}>{busy==="text"?"Guardando…":"Guardar título y descripción"}</button>
+      </div>
+      <div className="rounded-2xl p-5 space-y-4" style={{background:"var(--ink-2)",border:"1px solid var(--line)"}}>
+        <h3 className="font-semibold">Portadas de categorías</h3>
+        <p className="text-xs" style={{color:"var(--slate)"}}>Las imágenes se guardan en Storage y se reutilizan para todos los visitantes. Si quitás una, se recuperará la primera foto disponible de un producto de esa familia. Para «Personaliza», aparecerá la K. si no hay foto manual.</p>
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {categories.map(cat=>{
+            const fallback = products.find(p=>garmentFamilyOf(p)===cat.id && (p.photoPool?.[0] || getColorImages(p.colors?.[0])[0]));
+            const image = coverForHomeCategory(covers, cat.id, fallback?.photoPool?.[0] || getColorImages(fallback?.colors?.[0])[0] || null);
+            return <div key={cat.id} className="rounded-xl overflow-hidden" style={{background:"var(--ink-3)",border:"1px solid var(--line)"}}>
+              <div className="relative h-44" style={{background:"var(--ink)"}}>
+                {image ? <img src={image} loading="lazy" alt={"Vista previa de "+cat.title} className="w-full h-full object-cover"/> : <div className="h-full flex items-center justify-center text-4xl font-bold" style={{color:"var(--slate)"}}>K.</div>}
+                <div className="absolute bottom-0 left-0 right-0 p-3" style={{background:"linear-gradient(transparent,rgba(0,0,0,.9))",color:"#fff"}}>
+                  <strong className="text-sm block">{cat.title}</strong><small>{cat.subtitle}</small>
+                </div>
+              </div>
+              <div className="p-3 flex flex-wrap items-center gap-2">
+                <label className="kulto-btn cursor-pointer rounded-full px-3 py-2 text-xs font-semibold" style={{background:"var(--signal)",color:"var(--bone)"}}>
+                  <Upload size={12} className="inline mr-1"/>{busy===cat.id ? "Subiendo…" : covers[cat.id] ? "Cambiar foto" : "Subir foto"}
+                  <input type="file" className="sr-only" accept="image/jpeg,image/png,image/webp" disabled={!!busy} onChange={e=>{upload(cat.id,e.target.files?.[0]);e.target.value="";}}/>
+                </label>
+                {covers[cat.id] && <button type="button" className="kulto-btn rounded-full px-3 py-2 text-xs" style={{border:"1px solid var(--line)",color:"var(--bone)"}} disabled={!!busy} onClick={()=>remove(cat.id)}>Usar automática</button>}
+              </div>
+              <p className="text-[11px] px-3 pb-3" style={{color:"var(--slate)"}}>{covers[cat.id] ? "Imagen personalizada" : "Imagen automática"}</p>
+            </div>;
+          })}
+        </div>
+      </div>
+      {message && <p role="status" className="text-sm rounded-xl p-3" style={{background:"var(--ink-2)",border:"1px solid var(--line)",color:"var(--bone)"}}>{message}</p>}
+    </section>
+  );
+}
+
 function AdminBannerSettings({ settings, groups = [], onSave }) {
   const [heroTitle, setHeroTitle] = useState(settings.heroTitle);
   const [heroSubtitle, setHeroSubtitle] = useState(settings.heroSubtitle);
@@ -17885,6 +17982,14 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
 
       {tab === "promociones" && <AdminPromotionsPanel products={sellableProducts} settings={settings} onSaveSettings={onSaveSettings} />}
 
+      {tab === "inicio" && (
+        <div className="space-y-8">
+          <AdminHomeCategoryCovers settings={settings} products={sellableProducts} onSave={onSaveSettings}/>
+          <AdminBannerSettings settings={settings} groups={groups} onSave={onSaveSettings}/>
+          <AdminSectionSettings settings={settings} onSave={onSaveSettings}/>
+        </div>
+      )}
+
       {tab === "mockups" && (
         <AdminGarmentMockupLibrary products={sellableProducts} categories={categories} groups={groups} designLibrary={designLibrary} models={settings?.garmentMockupLibrary || []} onSaveModels={onSaveGarmentModels} onSaveProductsBulk={onSaveProductsBulk} />
       )}
@@ -21131,7 +21236,10 @@ export default function App() {
   };
 
   const handleSaveSettings = async (partial) => {
-    if (Object.prototype.hasOwnProperty.call(partial, "storefrontPromotion")) {
+    if (Object.prototype.hasOwnProperty.call(partial, "storefrontPromotion")
+      || Object.prototype.hasOwnProperty.call(partial, "homeCategoryCovers")
+      || Object.prototype.hasOwnProperty.call(partial, "editorialHeroTitle")
+      || Object.prototype.hasOwnProperty.call(partial, "editorialHeroSubtitle")) {
       // A campaign is not announced as saved until persistent storage confirms it.
       const next = {...settings, ...partial};
       const saved = await storageSetVerbose("kulto:settings", JSON.stringify(next), true);
