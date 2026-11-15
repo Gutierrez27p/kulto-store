@@ -17015,7 +17015,7 @@ function AdminCustomWorkGallery({ items, onAdd, onRemove, speed = 0.5, onSpeedCh
 
 
 // Central model library; contains no individual design artworks or duplicated garments.
-function AdminGarmentMockupLibrary({ products, categories, groups, models, onSaveModels, onSaveProductsBulk }) {
+function AdminGarmentMockupLibrary({ products, categories, groups, models, designLibrary = [], onSaveModels, onSaveProductsBulk }) {
   const [name, setName] = useState("");
   const [garmentKind, setGarmentKind] = useState("camiseta-clasica");
   const [artProductId, setArtProductId] = useState("");
@@ -17085,30 +17085,36 @@ function AdminGarmentMockupLibrary({ products, categories, groups, models, onSav
   const matching = products.filter((p) => (!category || p.category === category) && (!group || p.group === group) && (!onlyUnassigned || !p.garmentMockupId) && (!chosenModel || modelMatchesProduct(chosenModel,p)));
   const compatible = matching.filter((p) => p.mockup?.design || (p.designs?.length === 1 && p.designs[0]?.image));
   const artProduct = products.find(p=>p.id===artProductId);
-  const uploadArtForDesign = async (file) => {
-    if (!file || !artProduct) return;
+  const linkTransparentDesign = async url => {
+    if (!artProduct || !url) {setStatus("Elegí el producto y el arte.");return;}
     setSaving(true);setStatus("");
     try {
-      if (!["image/png","image/webp"].includes(file.type)) throw Error("El diseño tiene que ser PNG o WebP transparente.");
-      const b64 = await new Promise(resolve=>fileToBase64(file,resolve,1400,1,"image/png"));
-      const url = await uploadDataUrlToStorage(b64);
-      if (!url) throw Error("No se pudo guardar el archivo en Storage.");
       const im = await loadMockupImg(url);
       const cv = document.createElement("canvas");cv.width=24;cv.height=24;
       const cx=cv.getContext("2d",{willReadFrequently:true});cx.drawImage(im,0,0,24,24);
       const rgba=cx.getImageData(0,0,24,24).data;
       const corners=[0,23,23*24,24*24-1];
-      if (corners.every(i=>rgba[i*4+3]>245)) throw Error("El PNG parece tener fondo opaco. Necesitamos únicamente el estampado con fondo transparente.");
+      if (corners.every(i=>rgba[i*4+3]>245)) throw Error("El arte parece tener fondo opaco. Elegí un PNG transparente.");
       const group = applyToGroup && artProduct.designGroup
         ? products.filter(p=>p.designGroup===artProduct.designGroup) : [artProduct];
-      const patched=group.map(p=>({
-        ...p,mockup:{...(p.mockup || {}),design:url,enabled:!!(p.mockup?.base || p.garmentMockupId)}
-      }));
+      const patched=group.map(p=>({...p,mockup:{...(p.mockup || {}),design:url,enabled:!!(p.mockup?.base || p.garmentMockupId)}}));
       const outcome=await onSaveProductsBulk(patched);
       if(outcome.failed) throw Error("Guardados "+outcome.ok+"; fallidos "+outcome.failed+".");
-      setStatus("PNG vinculado a "+outcome.ok+" producto(s). Los productos sin modelo siguen mostrando su fotografía hasta asignarles uno; después publicá los cambios.");
-    } catch(e){setStatus("No se pudo vincular el diseño: "+(e?.message || "Error"))}
+      setStatus("Estampado vinculado a "+outcome.ok+" prenda(s). Los modelos compatibles se aplicarán automáticamente cuando haya uno por tipo. Publicá los cambios en Productos.");
+    } catch(e){setStatus("No se pudo vincular: "+(e?.message || "Error"))}
     finally{setSaving(false)}
+  };
+  const uploadArtForDesign = async file => {
+    if(!file || !artProduct) return;
+    if(!["image/png","image/webp"].includes(file.type)){setStatus("Elegí un PNG/WebP transparente.");return;}
+    setSaving(true);setStatus("");
+    try {
+      const b64=await new Promise(resolve=>fileToBase64(file,resolve,1400,1,"image/png"));
+      const url=await uploadDataUrlToStorage(b64);
+      if(!url) throw Error("No se pudo subir a Storage");
+      await linkTransparentDesign(url);
+    } catch(e){setStatus("No se pudo subir: "+(e?.message || "Error"))}
+    finally {setSaving(false)}
   };
   const assign = async () => {
     if (!modelId) { setStatus("Seleccioná un modelo."); return; }
@@ -17170,6 +17176,16 @@ function AdminGarmentMockupLibrary({ products, categories, groups, models, onSav
           {products.filter(p=>[p.name,p.sku,p.category].join(" ").toLowerCase().includes(artSearch.toLowerCase())).map(p=><option key={p.id} value={p.id}>{p.name} · {p.category}{p.designGroup?" · grupo vinculado":""}</option>)}
         </select>
         <label className="flex gap-2 text-sm items-center"><input type="checkbox" checked={applyToGroup} onChange={e=>setApplyToGroup(e.target.checked)}/> Reutilizar el mismo estampado en las prendas que comparten este diseño</label>
+        {designLibrary.length > 0 && (
+          <div className="space-y-1">
+            <p className="text-xs" style={{color:"var(--slate)"}}>O elegí el estampado que ya está subido en tu Biblioteca de diseños:</p>
+            <select disabled={!artProductId || saving} aria-label="Vincular estampado existente" defaultValue="" onChange={e=> { const art=designLibrary.find(d=>String(d.id)===e.target.value); if(art?.image) linkTransparentDesign(art.image); e.target.value=""; }}
+              className="block w-full p-3 rounded-lg text-sm" style={{background:"var(--ink-3)",color:"var(--bone)"}}>
+              <option value="">Seleccionar de Biblioteca de diseños</option>
+              {designLibrary.filter(d=>d.image).map(d=><option key={d.id} value={d.id}>{d.name}</option>)}
+            </select>
+          </div>
+        )}
         <label className="block cursor-pointer rounded-xl px-4 py-3 text-center font-semibold text-sm" style={{border:"1px dashed var(--line)"}}>
           {saving?"Guardando PNG…":"Subir estampado PNG transparente"}
           <input disabled={!artProductId || saving} type="file" accept="image/png,image/webp" className="sr-only" onChange={e=>{uploadArtForDesign(e.target.files?.[0]);e.target.value="";}}/>
@@ -17698,7 +17714,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
       {tab === "promociones" && <AdminPromotionsPanel products={sellableProducts} settings={settings} onSaveSettings={onSaveSettings} />}
 
       {tab === "mockups" && (
-        <AdminGarmentMockupLibrary products={sellableProducts} categories={categories} groups={groups} models={settings?.garmentMockupLibrary || []} onSaveModels={onSaveGarmentModels} onSaveProductsBulk={onSaveProductsBulk} />
+        <AdminGarmentMockupLibrary products={sellableProducts} categories={categories} groups={groups} designLibrary={designLibrary} models={settings?.garmentMockupLibrary || []} onSaveModels={onSaveGarmentModels} onSaveProductsBulk={onSaveProductsBulk} />
       )}
 
       {tab === "productos" && (
