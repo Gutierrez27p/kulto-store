@@ -649,6 +649,9 @@ function buildOrderMessage(order, settings) {
   if (order.discountAmount > 0) {
     lines.push(`Descuento de bienvenida: -${formatPrice(order.discountAmount)}`);
   }
+  if (order.seasonalDiscount > 0) {
+    lines.push(seasonalOrderSummary(order));
+  }
   if (order.promoCode) {
     lines.push(promoOrderSummary(order));
   }
@@ -825,6 +828,7 @@ function buildOrderEmailHtml(order, settings) {
     <table style="width:100%;border-collapse:collapse;margin-bottom:16px;">${itemsHtml}</table>
     ${deliveryHtml}
     ${order.discountAmount > 0 ? `<p style="margin:0 0 4px;">Descuento: -${formatPrice(order.discountAmount)}</p>` : ""}
+    ${order.seasonalDiscount > 0 ? `<p style="margin:0 0 4px;">${escapeEmailHtml(seasonalOrderSummary(order))}</p>` : ""}
     ${order.promoCode ? `<p style="margin:0 0 4px;">${escapeEmailHtml(promoOrderSummary(order))}</p>` : ""}
     <p style="margin:0 0 4px;font-size:18px;font-weight:bold;">Total: ${formatPrice(order.total)}</p>
     ${paymentEmailHtml(order)}
@@ -881,6 +885,7 @@ function buildAdminOrderEmailHtml(order, settings) {
     <table style="width:100%;border-collapse:collapse;margin-bottom:16px;">${itemsHtml}</table>
     ${deliveryHtml}
     ${order.discountAmount > 0 ? `<p style="margin:0 0 4px;">Descuento: -${formatPrice(order.discountAmount)}</p>` : ""}
+    ${order.seasonalDiscount > 0 ? `<p style="margin:0 0 4px;">${escapeEmailHtml(seasonalOrderSummary(order))}</p>` : ""}
     ${order.promoCode ? `<p style="margin:0 0 4px;">${escapeEmailHtml(promoOrderSummary(order))}</p>` : ""}
     <p style="margin:0 0 4px;font-size:18px;font-weight:bold;">Total: ${formatPrice(order.total)}</p>
     ${order.comment ? `<p style="margin:16px 0 4px;"><strong>Comentario del cliente:</strong></p><p style="margin:0 0 12px;white-space:pre-line;background:#15131a;border-radius:12px;padding:12px;">${escapeEmailHtml(order.comment)}</p>` : ""}
@@ -3189,6 +3194,9 @@ function evalPromo(promo, subtotal, customer) {
   return { ok: true, discount, freeShipping, gift };
 }
 // Texto corto con el beneficio que usó un pedido (mensaje y mails).
+function seasonalOrderSummary(order) {
+  return order?.seasonalDiscount > 0 ? `${order.seasonalPromotion || "Promoción por prendas"}: -${formatPrice(order.seasonalDiscount)}` : "";
+}
 function promoOrderSummary(order) {
   if (!order || !order.promoCode) return "";
   const parts = [];
