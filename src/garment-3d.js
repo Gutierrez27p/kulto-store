@@ -6,7 +6,7 @@ export function infer3DKind(product={},model={}){
   if(model?.garmentKind && THREE_GARMENT_KINDS.includes(model.garmentKind))return model.garmentKind;
   const t=[product.name,product.category,product.subcategory,product.garmentType,product.fit].filter(Boolean).join(" ").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
   if(/tote|bolsa/.test(t))return"tote-bag";
-  if(/top deportivo|sport bra|crop top/.test(t))return"top";
+  if(/tops? deportivos?|sport bra|crop top/.test(t))return"top";
   if(/sudadera|hoodie|sweatshirt/.test(t))return /sin capucha|crew.?neck/.test(t)?"sudadera-sin-capucha":"sudadera-capucha";
   if(/oversize|oversized/.test(t))return"camiseta-oversize";
   if(/camiseta|remera|shirt/.test(t))return"camiseta-clasica";

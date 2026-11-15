@@ -101,7 +101,9 @@ function makeKind(kind,hex){
  return group;
 }
 function curvedPrint(texture,width,height,back,m,place={}){
- const w=width,h=height;
+ const requestedWidth=Number(place.w);
+ const w=Number.isFinite(requestedWidth) && requestedWidth>0 ? LIMIT(width*(requestedWidth/40),.18,1.3) : width;
+ const h=height*(w/width);
  const geo=new THREE.PlaneGeometry(w,h,24,20);
  const p=geo.attributes.position;
  for(let i=0;i<p.count;i++){
@@ -133,12 +135,12 @@ function normalizedGlbScene(gltf,hex){
    if(!child.isMesh)return;
    child.castShadow=true;child.receiveShadow=true;
    const materials=Array.isArray(child.material)?child.material:[child.material];
-   child.material=materials.map(mat=>{
+   const recolored=materials.map(mat=>{
      const cp=mat.clone();
      if(cp.color)cp.color.set(COLOR(hex));
      cp.roughness=.88;cp.metalness=0;return cp;
    });
-   if(!Array.isArray(child.material))child.material=child.material[0];
+   child.material=Array.isArray(child.material)?recolored:recolored[0];
  });
  return obj;
 }

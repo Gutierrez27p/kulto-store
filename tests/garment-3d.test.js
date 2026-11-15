@@ -7,6 +7,7 @@ test("3D kinds support cut-specific garment shapes",()=>{
  assert.equal(infer3DKind({name:"Sudadera sin capucha"}),"sudadera-sin-capucha");
  assert.equal(infer3DKind({name:"Bolsa tote"}),"tote-bag");
  assert.equal(infer3DKind({name:"Top deportivo"}),"top");
+ assert.equal(infer3DKind({name:"Mujer fitness",category:"Tops deportivos"}),"top");
  assert.equal(infer3DKind({name:"Accesorio llavero"}),null);
 });
 test("models override normalized names and have independent geometry",()=>{
