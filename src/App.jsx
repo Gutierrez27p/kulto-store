@@ -5804,11 +5804,11 @@ function CompareModal({ products, onClose, onRemove, onOpen }) {
   );
 }
 
-function Catalog({ settings, initialCollection, products, categories, groups, onOpen, initialQuery, initialGroup, initialCategory, initialSubcategory, favorites, onToggleFavorite, onlyFavorites = false, onGoHome, onAddToCart }) {
+function Catalog({ settings, initialCollection, products, categories, groups, onOpen, initialQuery, initialGroup, initialCategory, initialSubcategory, initialFit, favorites, onToggleFavorite, onlyFavorites = false, onGoHome, onAddToCart }) {
   const [activeGroup, setActiveGroup] = useState(initialGroup || "Todas");
   const [activeCat, setActiveCat] = useState(initialCategory || "Todas");
   const [activeSubcat, setActiveSubcat] = useState(initialSubcategory || "Todas");
-  const [activeFit, setActiveFit] = useState("Todas");
+  const [activeFit, setActiveFit] = useState(initialFit || "Todas");
   // Destacados: lo mismo que se ve en el inicio (tendencia, ofertas, más vendidos).
   const [activeCollection, setActiveCollection] = useState(initialCollection || "Todas");
   const [query, setQuery] = useState(initialQuery || "");
@@ -18631,19 +18631,26 @@ function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, cus
   const [catalogMenuOpen, setCatalogMenuOpen] = useState(false);
   const [catalogMenuOpenMobile, setCatalogMenuOpenMobile] = useState(false);
   const catalogMenuRef = useRef(null);
+  // Show garment families as top-level navigation; preserve custom design
+  // categories/groups without duplicating shirt cuts as separate families.
+  const displayMenuItems = [
+    ...GARMENT_FAMILIES.filter(f=>products.some(p=>garmentFamilyOf(p)===f.id))
+      .map(f=>({id:"family:"+f.id,type:"family",value:f.id,label:f.title})),
+    ...productsMenuItems.filter(it=>it.type!=="category" || !garmentFamilyOf({category:it.value}))
+  ];
   // Qué acceso directo (de categoría) tiene desplegado su lista de
   // subcategorías ahora mismo — uno a la vez, y por separado en desktop y
   // celular porque son dos desplegables independientes.
   const [expandedMenuItemId, setExpandedMenuItemId] = useState(null);
   const [expandedMenuItemIdMobile, setExpandedMenuItemIdMobile] = useState(null);
   const goCatalog = (item) => {
-    onGoCatalog?.(item ? { group: item.type === "group" ? item.value : "", category: item.type === "category" ? item.value : "" } : {});
+    onGoCatalog?.(item ? { group: item.type === "group" ? item.value : "", category: item.type === "family" ? "__family_"+item.value : item.type === "category" ? item.value : "" } : {});
     setOpen(false);
     setCatalogMenuOpen(false);
     setCatalogMenuOpenMobile(false);
   };
   const goCatalogSubcategory = (categoryValue, subcat) => {
-    onGoCatalog?.({ category: categoryValue, subcategory: subcat });
+    onGoCatalog?.(categoryValue.startsWith("__family_") ? {category:categoryValue,fit:subcat} : {category:categoryValue,subcategory:subcat});
     setOpen(false);
     setCatalogMenuOpen(false);
     setCatalogMenuOpenMobile(false);
@@ -18652,6 +18659,7 @@ function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, cus
   // ver "Subcategoría" en el formulario de producto) — si no hay ninguna,
   // el acceso directo se comporta como antes, sin flecha para desplegar.
   const subcatsForItem = (it) => {
+    if (it.type === "family") return (GARMENT_FAMILIES.find(f=>f.id===it.value)?.fits || []).filter(f=>products.some(p=>garmentFamilyOf(p)===it.value && garmentFitOf(p)===f));
     if (it.type !== "category") return [];
     return Array.from(
       new Set(
@@ -18668,12 +18676,20 @@ function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, cus
   const [megaItemId, setMegaItemId] = useState(null);
   const closeMenus = () => { setOpen(false); setCatalogMenuOpen(false); setCatalogMenuOpenMobile(false); };
   const tileImage = (p) => (p ? (p.photoPool?.[0] || getColorImages(p.colors?.[0])[0] || null) : null);
-  const productsForItem = (it) => products.filter((p) => (it.type === "group" ? (p.group || "") === it.value : (p.category === it.value || (p.extraCategories || []).includes(it.value))));
+  const productsForItem = (it) => products.filter((p) => it.type === "family" ? garmentFamilyOf(p) === it.value : it.type === "group" ? (p.group || "") === it.value : (p.category === it.value || (p.extraCategories || []).includes(it.value)));
   const megaTiles = (it) => {
     const ps = productsForItem(it);
     const withImg = (list) => list.find((p) => tileImage(p)) || list[0];
+    if (it.type === "family") {
+      const fits = (GARMENT_FAMILIES.find(f=>f.id===it.value)?.fits || []).filter(f=>ps.some(p=>garmentFitOf(p)===f));
+      if (fits.length) return fits.map(f => ({
+        key:"fit:"+f, label:f,
+        img:tileImage(withImg(ps.filter(p=>garmentFitOf(p)===f))),
+        onClick:()=>{onGoCatalog?.({category:"__family_"+it.value,fit:f});closeMenus();}
+      }));
+    }
     const subs = [...new Set(ps.map((p) => p.subcategory).filter(Boolean))].sort((x, y) => x.localeCompare(y, "es"));
-    const base = { group: it.type === "group" ? it.value : "", category: it.type === "category" ? it.value : "" };
+    const base = { group: it.type === "group" ? it.value : "", category: it.type === "family" ? "__family_"+it.value : it.type === "category" ? it.value : "" };
     if (subs.length) {
       return subs.slice(0, 8).map((sc) => ({ key: `s:${sc}`, label: sc, img: tileImage(withImg(ps.filter((p) => p.subcategory === sc))), onClick: () => { onGoCatalog?.({ ...base, subcategory: sc }); closeMenus(); } }));
     }
@@ -18748,13 +18764,13 @@ function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, cus
               Productos <ChevronDown size={14} />
             </button>
             {catalogMenuOpen && (() => {
-              const activeItem = productsMenuItems.find((x) => x.id === megaItemId) || productsMenuItems[0] || null;
+              const activeItem = displayMenuItems.find((x) => x.id === megaItemId) || displayMenuItems[0] || null;
               const tiles = activeItem ? [...(activeItem.image ? [{ key: "custom-img", label: activeItem.label || activeItem.value, img: activeItem.image, onClick: () => goCatalog(activeItem) }] : []), ...megaTiles(activeItem)] : [];
               return (
                 <div className="absolute left-0 right-0 top-full z-50" style={{ background: "var(--ink)", borderBottom: "1px solid var(--line)", boxShadow: "0 24px 40px rgba(0,0,0,0.25)" }}>
                   <div className="max-w-6xl mx-auto px-4 md:px-6 py-6 grid gap-8" style={{ gridTemplateColumns: "260px minmax(0, 1fr)" }}>
                     <div className="flex flex-col gap-1">
-                      {productsMenuItems.map((it) => {
+                      {displayMenuItems.map((it) => {
                         const on = activeItem && activeItem.id === it.id;
                         return (
                           <button
@@ -18770,7 +18786,7 @@ function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, cus
                           </button>
                         );
                       })}
-                      <button onClick={() => goCatalog(null)} className="kulto-btn flex items-center justify-between text-left text-sm rounded-xl px-4 py-2.5 mt-1" style={{ color: "var(--bone)", borderTop: productsMenuItems.length ? "1px solid var(--line)" : "none" }}>
+                      <button onClick={() => goCatalog(null)} className="kulto-btn flex items-center justify-between text-left text-sm rounded-xl px-4 py-2.5 mt-1" style={{ color: "var(--bone)", borderTop: displayMenuItems.length ? "1px solid var(--line)" : "none" }}>
                         <span>Ver todo el catálogo</span>
                         <ChevronRight size={14} style={{ color: "var(--slate)" }} />
                       </button>
@@ -18947,7 +18963,7 @@ function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, cus
                 <button onClick={() => goCatalog(null)} className="kulto-btn text-left py-2 text-sm" style={{ color: "var(--slate)" }}>
                   Catálogo
                 </button>
-                {productsMenuItems.map((it) => {
+                {displayMenuItems.map((it) => {
                   const subcats = subcatsForItem(it);
                   const expanded = expandedMenuItemIdMobile === it.id;
                   return (
@@ -18973,7 +18989,7 @@ function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, cus
                           {subcats.map((sc) => (
                             <button
                               key={sc}
-                              onClick={() => goCatalogSubcategory(it.value, sc)}
+                              onClick={() => goCatalogSubcategory(it.type === "family" ? "__family_"+it.value : it.value, sc)}
                               className="kulto-btn text-left py-1.5 text-sm"
                               style={{ color: "var(--slate)" }}
                             >
@@ -19693,6 +19709,7 @@ export default function App() {
   const [catalogInitialGroup, setCatalogInitialGroup] = useState("");
   const [catalogInitialCategory, setCatalogInitialCategory] = useState("");
   const [catalogInitialSubcategory, setCatalogInitialSubcategory] = useState("");
+  const [catalogInitialFit, setCatalogInitialFit] = useState("");
   const [catalogInitialCollection, setCatalogInitialCollection] = useState("");
   // Compartida entre el header (menú "Productos", ahora puede filtrar por
   // categoría/subcategoría además de por grupo), el inicio y los banners —
@@ -19705,6 +19722,7 @@ export default function App() {
     setCatalogInitialGroup(f.group || "");
     setCatalogInitialCategory(f.category || "");
     setCatalogInitialSubcategory(f.subcategory || "");
+    setCatalogInitialFit(f.fit || "");
     setCatalogInitialCollection(f.collection || "");
     setCatalogSearchQuery("");
     setPage("catalog");
@@ -21104,7 +21122,7 @@ export default function App() {
             onAddToCart={handleAddToCart}
           />
         )}
-        {page === "catalog" && <Catalog key={`${catalogInitialGroup}|${catalogInitialCategory}|${catalogInitialSubcategory}|${catalogInitialCollection}|${catalogSearchQuery}`} settings={settings} initialCollection={catalogInitialCollection} products={sellableProducts} categories={categories} groups={groups} onOpen={setSelectedProduct} initialQuery={catalogSearchQuery} initialGroup={catalogInitialGroup} initialCategory={catalogInitialCategory} initialSubcategory={catalogInitialSubcategory} favorites={customer?.favorites} onToggleFavorite={handleToggleFavorite} onGoHome={() => setPage("home")} onAddToCart={handleAddToCart} />}
+        {page === "catalog" && <Catalog key={`${catalogInitialGroup}|${catalogInitialCategory}|${catalogInitialSubcategory}|${catalogInitialFit}|${catalogInitialCollection}|${catalogSearchQuery}`} settings={settings} initialCollection={catalogInitialCollection} products={sellableProducts} categories={categories} groups={groups} onOpen={setSelectedProduct} initialQuery={catalogSearchQuery} initialGroup={catalogInitialGroup} initialCategory={catalogInitialCategory} initialSubcategory={catalogInitialSubcategory} initialFit={catalogInitialFit} favorites={customer?.favorites} onToggleFavorite={handleToggleFavorite} onGoHome={() => setPage("home")} onAddToCart={handleAddToCart} />}
         {page === "favoritos" && <Catalog products={sellableProducts} categories={categories} groups={groups} onOpen={setSelectedProduct} favorites={customer?.favorites} onToggleFavorite={handleToggleFavorite} onlyFavorites onGoHome={() => setPage("home")} onAddToCart={handleAddToCart} />}
         {page === "wizard" && (
           <Wizard
