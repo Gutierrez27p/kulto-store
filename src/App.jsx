@@ -1,5 +1,6 @@
 import { GARMENT_FAMILIES, GARMENT_MODEL_TYPES, garmentFamilyOf, garmentFitOf, modelMatchesProduct } from "./garment-families.js";
 import { seasonalPricing, isOversizeGarment } from "./promotion-pricing.js";
+import { backgroundSilhouette } from "./garment-mask.js";
 import "./editorial.css";
 import { escapeEmailHtml, secureSixDigitCode } from "./email-safety.js";
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
@@ -1158,10 +1159,14 @@ function prepareMockupBase(src, explicitMask = null) {
       }
     }
     const mask = new Uint8Array(n);
+    // Flat backgrounds can be separated from the entire garment outline.
+    const bgSilhouette = !maskAlpha && !isCutout ? backgroundSilhouette(d, w, h) : null;
     if (maskAlpha) {
       for (let i = 0; i < n; i++) mask[i] = maskAlpha[i] >= 0.1 ? 1 : 0;
     } else if (isCutout) {
       for (let i = 0; i < n; i++) mask[i] = d[i * 4 + 3] >= 10 ? 1 : 0;
+    } else if (bgSilhouette) {
+      mask.set(bgSilhouette);
     } else if (seed >= 0) {
       const stack = [seed];
       mask[seed] = 1;
@@ -1256,6 +1261,7 @@ function tintedMockupCanvas(src, prep, hex) {
   }
   ctx.putImageData(out, 0, 0);
   mockupTintedCache.set(key, cv);
+  if (mockupTintedCache.size > 36) mockupTintedCache.delete(mockupTintedCache.keys().next().value);
   return cv;
 }
 
@@ -1313,6 +1319,7 @@ function MockupComposite({ mockup, hex, innerRef, designProps }) {
             <img src={mockup.base} alt="" draggable={false} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "fill", pointerEvents: "none" }} />
             {mockup.design && <img src={mockup.design} alt="" draggable={false} style={{ position: "absolute", left: `${mockup.x ?? 50}%`, top: `${mockup.y ?? 38}%`, width: `${mockup.w ?? 40}%`, transform: `translate(-50%, -50%) rotate(${mockup.rot || 0}deg)`, objectFit: "contain", pointerEvents: "none" }} />}
             {logoSrc && <img src={logoSrc} alt="" draggable={false} style={{ position: "absolute", left: `${mockup.lx ?? 30}%`, top: `${mockup.ly ?? 20}%`, width: `${mockup.lw ?? 15}%`, transform: `translate(-50%, -50%) rotate(${mockup.lrot || 0}deg)`, objectFit: "contain", pointerEvents: "none" }} />}
+            <span role="status" className="absolute bottom-1 left-1 right-1 text-center text-[10px] rounded p-1" style={{ background: "rgba(25,19,26,.85)", color: "#fff" }}>No se pudo aplicar este color. Revisá la máscara de la prenda.</span>
           </>
         ) : (
           <canvas ref={canvasRef} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }} />
@@ -1582,7 +1589,7 @@ function AdminMockupEditor({ draft, setDraft, inputStyle }) {
               <p className="text-xs mb-1" style={{ color: "var(--slate)" }}>Probar en otro color:</p>
               <div className="flex flex-wrap items-center gap-1.5">
                 {(draft.colors || []).slice(0, 14).map((c, i) => (
-                  <button key={i} type="button" onClick={() => setPreviewHex(c.hex)} className="kulto-btn kulto-tip kulto-tip-l rounded-full" data-tip={c.name} aria-label={c.name} style={{ width: 22, height: 22, background: c.hex, border: previewHex === c.hex ? "2px solid var(--sun)" : "1px solid var(--line)" }} />
+                  <button key={i} type="button" onClick={() => setPreviewHex(c.hex)} className="kulto-btn kulto-tip kulto-tip-l rounded-full" data-tip={c.name} aria-label={c.name} style={{ width: 22, height: 22, background: c.hex, border: previewHex === c.hex ? "2px solid var(--sun)" : "2px solid #737373" }} />
                 ))}
                 <input type="color" value={previewHex} onChange={(e) => setPreviewHex(e.target.value)} className="w-8 h-7 rounded" style={{ background: "transparent" }} aria-label="Otro color" />
               </div>
@@ -3799,7 +3806,7 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
                       type="button"
                       onClick={() => { setQuickColorIdx(i); if (quickSizeIdx !== null && !sizeOkForColor(product, product.sizes[quickSizeIdx], colors[i])) setQuickSizeIdx(null); }}
                       className="kulto-btn kulto-tip kulto-tip-l rounded-full shrink-0"
-                      style={{ width: 26, height: 26, background: c.hex, border: i === quickColorIdx ? "2px solid var(--sun)" : "1px solid var(--line)" }}
+                      style={{ width: 26, height: 26, background: c.hex, border: i === quickColorIdx ? "2px solid var(--sun)" : "2px solid #737373" }}
                       data-tip={c.name}
                       aria-label={`Color ${c.name}`}
                     />
@@ -4035,7 +4042,6 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
   const mock = activeMockup(product);
   // Always honor the explicitly configured mockup; other uploaded photos remain in the gallery.
   const mockActive = !!mock;
-  const backMock = mockActive && mock.backBase ? { ...mock, base: mock.backBase, mask: mock.backMask, ar: mock.backAr, x: mock.backX ?? 50, y: mock.backY ?? 38, w: mock.backW ?? 40, rot: mock.backRot ?? 0, logoLight: null, logoDark: null } : null;
   const mockHex = color?.hex || "#ffffff";
   const autoImage = useAutoColorImage(product, color, !mockActive && colorImages.length === 0, imgIdx);
   const activeImage = (colorImages.length === 0 && autoImage) || images[imgIdx] || null;
@@ -4052,6 +4058,9 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
   const showDesignStep = hasPresetDesigns || allowCustomDesign;
   const unitPrice = product.tags?.oferta && product.salePrice ? product.salePrice : product.price;
   const finalCustomImage = customImage ? (useProcessed && customImageProcessed ? customImageProcessed : customImage) : null;
+  // Compositing inside each canvas prevents duplicate artwork floating over both garments.
+  const productMockPreview = mockActive ? { ...mock, design: designMode === "custom" ? finalCustomImage : designMode === "design" && design?.image ? design.image : mock.design } : null;
+  const backMock = productMockPreview?.backBase ? { ...productMockPreview, base: productMockPreview.backBase, mask: productMockPreview.backMask, ar: productMockPreview.backAr, x: productMockPreview.backX ?? 50, y: productMockPreview.backY ?? 38, w: productMockPreview.backW ?? 40, rot: productMockPreview.backRot ?? 0, logoLight: null, logoDark: null } : null;
   // El stock es un número total del producto (no por talle/color todavía), así
   // que cuando llega a 0 bloqueamos la compra entera en vez de un talle puntual.
   const outOfStock = (product.stock ?? 0) <= 0;
@@ -4135,10 +4144,10 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
           {mockActive && !showUploadedPhoto ? (
             backMock ? (
               <div className="grid grid-cols-2 gap-2 w-full h-full p-2 sm:p-3">
-                <div className="relative min-w-0 rounded-xl overflow-hidden" style={{ background: "var(--ink-2)" }}><MockupComposite mockup={mock} hex={mockHex} /><span className="absolute bottom-2 left-2 text-[10px] font-bold px-2 py-1 rounded-full" style={{ background: "var(--ink)", color: "var(--bone)" }}>DELANTE</span></div>
+                <div className="relative min-w-0 rounded-xl overflow-hidden" style={{ background: "var(--ink-2)" }}><MockupComposite mockup={productMockPreview} hex={mockHex} /><span className="absolute bottom-2 left-2 text-[10px] font-bold px-2 py-1 rounded-full" style={{ background: "var(--ink)", color: "var(--bone)" }}>DELANTE</span></div>
                 <div className="relative min-w-0 rounded-xl overflow-hidden" style={{ background: "var(--ink-2)" }}><MockupComposite mockup={backMock} hex={mockHex} /><span className="absolute bottom-2 left-2 text-[10px] font-bold px-2 py-1 rounded-full" style={{ background: "var(--ink)", color: "var(--bone)" }}>DETRÁS</span></div>
               </div>
-            ) : <MockupComposite mockup={mock} hex={mockHex} />
+            ) : <MockupComposite mockup={productMockPreview} hex={mockHex} />
           ) : activeImage ? (
             <img
               src={activeImage}
@@ -4154,7 +4163,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
           ) : (
             <Shirt size={64} style={{ color: "rgba(243,239,230,0.35)" }} />
           )}
-          {designMode === "design" && design && design.image && (
+          {(!mockActive || showUploadedPhoto) && designMode === "design" && design && design.image && (
             <img
               src={design.image}
               alt={design.name}
@@ -4162,7 +4171,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
               style={{ width: "48%", top: "26%", left: "26%", objectFit: "contain", filter: "drop-shadow(0 6px 14px rgba(0,0,0,0.35))" }}
             />
           )}
-          {designMode === "custom" && finalCustomImage && !removingBg && (
+          {(!mockActive || showUploadedPhoto) && designMode === "custom" && finalCustomImage && !removingBg && (
             <img
               src={finalCustomImage}
               alt="Tu diseño"
@@ -5654,7 +5663,7 @@ function Paginator({ page, total, onChange }) {
   );
 }
 
-const productThumbSrc = (p) => (activeMockup(p) && p.mockup.cover) || p?.photoPool?.[0] || getColorImages(p?.colors?.[0])[0] || null;
+const productThumbSrc = (p) => (activeMockup(p) && p.mockup?.cover) || p?.photoPool?.[0] || getColorImages(p?.colors?.[0])[0] || null;
 const effectivePrice = (p) => (p.tags?.oferta && p.salePrice ? p.salePrice : p.price);
 // Telas por tipo de prenda (se cargan en Admin → Productos → "Telas por tipo de
 // prenda"). Un producto usa su tela propia si la tiene; si no, la de su tipo
@@ -5936,7 +5945,7 @@ function Catalog({ settings, initialCollection, products, categories, groups, on
           { label: onlyFavorites ? "Favoritos" : "Catálogo" },
           ...(activeCollection !== "Todas" ? [{ label: COLLECTION_LABELS[activeCollection] }] : []),
           ...(activeGroup !== "Todas" ? [{ label: activeGroup }] : []),
-          ...(activeCat !== "Todas" ? [{ label: activeCat }] : []),
+          ...(activeCat !== "Todas" ? [{ label: activeFamily ? (GARMENT_FAMILIES.find(f=>f.id===activeFamily)?.title || activeCat) : activeCat }] : []),
           ...(activeSubcat !== "Todas" ? [{ label: activeSubcat }] : []),
         ]}
       />
@@ -5962,9 +5971,13 @@ function Catalog({ settings, initialCollection, products, categories, groups, on
               </FilterAccordion>
             )}
             <FilterAccordion title="Categoría" defaultOpen badge={activeCat !== "Todas" ? "1" : null}>
-              {["Todas", ...catsInGroup].map((c) => (
-                <FilterOption key={c} label={c} active={activeCat === c} onClick={() => { setActiveCat(c); setActiveSubcat("Todas"); }} />
-              ))}
+              <FilterOption label="Todas las prendas" active={activeCat === "Todas"} onClick={() => { setActiveCat("Todas"); setActiveFit("Todas"); setActiveSubcat("Todas"); }} />
+               {GARMENT_FAMILIES.filter(f=>products.some(p=>garmentFamilyOf(p)===f.id)).map(f=>(
+                 <FilterOption key={f.id} label={f.title} active={activeCat === "__family_"+f.id} onClick={() => { setActiveCat("__family_"+f.id); setActiveFit("Todas"); setActiveSubcat("Todas"); }} />
+               ))}
+               {catsInGroup.filter(c=>!garmentFamilyOf({category:c})).map(c=>(
+                 <FilterOption key={c} label={c} active={activeCat === c} onClick={() => { setActiveCat(c); setActiveFit("Todas"); setActiveSubcat("Todas"); }} />
+               ))}
             </FilterAccordion>
             {(subcatsInView.length > 0 || activeSubcat !== "Todas") && (
               <FilterAccordion title="Carpeta / diseños" defaultOpen badge={activeSubcat !== "Todas" ? "1" : null}>
@@ -5986,7 +5999,7 @@ function Catalog({ settings, initialCollection, products, categories, groups, on
                         data-tip={c.name}
                         aria-label={c.name}
                         className="kulto-btn kulto-tip kulto-tip-l w-8 h-8 rounded-full flex items-center justify-center"
-                        style={{ background: c.hex, border: active ? "2px solid var(--sun)" : "1px solid var(--line)" }}
+                        style={{ background: c.hex, border: active ? "2px solid var(--sun)" : "2px solid #737373" }}
                       >
                         {active && <Check size={14} color="#fff" style={{ filter: "drop-shadow(0 0 2px rgba(0,0,0,0.8))" }} />}
                       </button>
@@ -6662,7 +6675,7 @@ function TemplateProductCard({ product, onSelect, bg }) {
             {colors.length > 0 && (
               <div className="flex flex-wrap items-center gap-1.5">
                 {shownColors.map((c, i) => (
-                  <span key={i} className="w-4 h-4 rounded-full shrink-0" style={{ background: c.hex, border: "1px solid rgba(255,255,255,0.4)" }} title={c.name} />
+                  <span key={i} className="w-4 h-4 rounded-full shrink-0" style={{ background: c.hex, border: "1.5px solid #737373", boxShadow: "0 0 0 1px rgba(255,255,255,.6)" }} title={c.name} />
                 ))}
                 {extraColors > 0 && <span className="text-[11px] font-semibold" style={{ color: "var(--sun)" }}>+{extraColors}</span>}
               </div>
@@ -6757,7 +6770,7 @@ function PickFlipCard({ title, hideName = false, thumb, thumbFill = false, bg, d
           {shown.length > 0 && (
             <div className="flex flex-wrap items-center gap-1.5">
               {shown.map((c, i) => (
-                <span key={i} className="w-4 h-4 rounded-full shrink-0" style={{ background: c.hex, border: "1px solid rgba(255,255,255,0.4)" }} title={c.name} />
+                <span key={i} className="w-4 h-4 rounded-full shrink-0" style={{ background: c.hex, border: "1.5px solid #737373", boxShadow: "0 0 0 1px rgba(255,255,255,.6)" }} title={c.name} />
               ))}
               {extra > 0 && <span className="text-[11px] font-semibold" style={{ color: "var(--sun)" }}>+{extra}</span>}
             </div>
@@ -7215,7 +7228,7 @@ function Wizard({ products, categories, settings, designLibrary, designFolders, 
               >
                 <span
                   className="w-14 h-14 rounded-full flex items-center justify-center"
-                  style={{ background: c.hex, border: colorIdx === i ? "3px solid var(--sun)" : "1px solid var(--line)" }}
+                  style={{ background: c.hex, border: colorIdx === i ? "3px solid var(--sun)" : "2px solid #737373" }}
                 >
                   {(c.frontImage || c.images?.[0]) && <FastImg loading="lazy" src={c.frontImage || c.images[0]} className="w-10 h-10 object-contain rounded-full" alt="" />}
                 </span>
@@ -10304,7 +10317,7 @@ function AdminProductForm({ categories, groups, onAddCategory, onAddGroup, saved
                   className="kulto-btn flex items-center gap-1 rounded-full pl-1 pr-2 py-1"
                   style={{ background: editingColorIdx === i ? "var(--signal)" : "var(--ink-3)" }}
                 >
-                  <span className="w-5 h-5 rounded-full overflow-hidden" style={{ background: c.hex }}>{c.images && c.images[0] && <img loading="lazy" src={c.images[0]} className="w-full h-full object-cover" alt={c.name || "Color"} />}</span>
+                  <span className="w-5 h-5 rounded-full overflow-hidden" style={{ background: c.hex, border: "1.5px solid #737373", boxShadow: "0 0 0 1px rgba(255,255,255,.6)" }}>{c.images && c.images[0] && <img loading="lazy" src={c.images[0]} className="w-full h-full object-cover" alt={c.name || "Color"} />}</span>
                   <span className="text-xs" style={{ color: "var(--bone)" }}>{c.name}</span>
                   {c.images && c.images.length > 1 && <span className="text-[10px]" style={{ color: "var(--bone)", opacity: 0.7 }}>+{c.images.length - 1}</span>}
                   {!colorHasAnyZoneImage(c) && (
@@ -10327,7 +10340,7 @@ function AdminProductForm({ categories, groups, onAddCategory, onAddGroup, saved
                       className="kulto-btn flex items-center gap-1.5 rounded-full pl-1 pr-2 py-1"
                       style={{ background: "var(--ink-3)", border: colorDraft.name === c.name && colorDraft.hex === c.hex ? "1px solid var(--sun)" : "1px solid var(--line)" }}
                     >
-                      <span className="w-4 h-4 rounded-full" style={{ background: c.hex }} />
+                      <span className="w-4 h-4 rounded-full" style={{ background: c.hex, border: "1.5px solid #737373", boxShadow: "0 0 0 1px rgba(255,255,255,.6)" }} />
                       <span className="text-xs" style={{ color: "var(--bone)" }}>{c.name}</span>
                       <button onClick={(e) => { e.stopPropagation(); onRemoveColorFromLibrary?.(c); }} style={{ color: "var(--slate)" }} title="Quitar de la librería">
                         <X size={11} />
@@ -10371,7 +10384,7 @@ function AdminProductForm({ categories, groups, onAddCategory, onAddGroup, saved
                       style={{ background: "var(--ink)", border: "1px solid var(--line)" }}
                       title="Usar este color ahora"
                     >
-                      <span className="w-4 h-4 rounded-full" style={{ background: c.hex }} />
+                      <span className="w-4 h-4 rounded-full" style={{ background: c.hex, border: "1.5px solid #737373", boxShadow: "0 0 0 1px rgba(255,255,255,.6)" }} />
                       <span className="text-xs" style={{ color: "var(--bone)" }}>{c.name}</span>
                     </button>
                   ))}
@@ -11105,7 +11118,7 @@ function AdminTemplateForm({ categories, templateProducts = [], onAddCategory, o
                 className="kulto-btn flex items-center gap-1.5 rounded-full pl-1 pr-2 py-1"
                 style={{ background: editingColorIdx === i ? "var(--signal)" : "var(--ink-3)", border: i === 0 ? "1px solid var(--sun)" : "1px solid var(--line)" }}
               >
-                <span className="w-6 h-6 rounded-full overflow-hidden flex items-center justify-center shrink-0" style={{ background: c.hex }}>
+                <span className="w-6 h-6 rounded-full overflow-hidden flex items-center justify-center shrink-0" style={{ background: c.hex, border: "1.5px solid #737373", boxShadow: "0 0 0 1px rgba(255,255,255,.6)" }}>
                   {c.frontImage && <FastImg loading="lazy" src={c.frontImage} className="w-full h-full object-contain" alt={c.name || "Color"} />}
                 </span>
                 <span className="text-xs" style={{ color: "var(--bone)" }}>{c.name || "(sin nombre)"}</span>
@@ -11217,7 +11230,7 @@ function AdminTemplateForm({ categories, templateProducts = [], onAddCategory, o
                   style={{ background: "var(--ink)", border: "1px solid var(--line)" }}
                   title="Usar este color ahora"
                 >
-                  <span className="w-4 h-4 rounded-full" style={{ background: c.hex }} />
+                  <span className="w-4 h-4 rounded-full" style={{ background: c.hex, border: "1.5px solid #737373", boxShadow: "0 0 0 1px rgba(255,255,255,.6)" }} />
                   <span className="text-xs" style={{ color: "var(--bone)" }}>{c.name}</span>
                 </button>
               ))}
@@ -16260,7 +16273,7 @@ function AdminBulkColorsBySubcategory({ templateProducts = [], onSaveVerbose }) 
         <div className="flex flex-wrap gap-2">
           {queue.map((c, i) => (
             <span key={c.name + i} className="text-xs px-2 py-1 rounded-full flex items-center gap-1" style={{ background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" }}>
-              <span className="w-3 h-3 rounded-full inline-block" style={{ background: c.hex, border: "1px solid var(--line)" }} />
+              <span className="w-3 h-3 rounded-full inline-block" style={{ background: c.hex, border: "1.5px solid #737373", boxShadow: "0 0 0 1px rgba(255,255,255,.6)" }} />
               {c.name}
               <button onClick={() => removeFromQueue(i)} aria-label="Quitar" style={{ color: "var(--slate)" }}><X size={12} /></button>
             </span>
@@ -17307,10 +17320,10 @@ function AdminPromotionsPanel({ products, settings, onSaveSettings }) {
       <label className="block text-sm">Texto de la campaña<textarea className="block w-full rounded-lg p-3 mt-1" rows={3} style={{background:"var(--ink-3)",color:"var(--bone)"}} value={draft.description} onChange={e=>setDraft({...draft,description:e.target.value})} placeholder="Llevando 2 camisetas clásicas, cada una queda a 10 €"/></label>
       <div className="grid grid-cols-2 gap-4">
         <label className="text-sm">Cantidad mínima<input type="number" min="1" max="20" className="block rounded-lg p-2 w-full mt-1" value={draft.quantity} onChange={e=>setDraft({...draft,quantity:Math.max(1,Number(e.target.value)||1)})} style={{background:"var(--ink-3)",color:"var(--bone)"}}/></label>
-        <label className="text-sm">Precio orientativo por unidad (€)<input type="number" min="0" step=".01" className="block rounded-lg p-2 w-full mt-1" value={draft.unitPrice} onChange={e=>setDraft({...draft,unitPrice:Math.max(0,Number(e.target.value)||0)})} style={{background:"var(--ink-3)",color:"var(--bone)"}}/></label>
+        <label className="text-sm">Precio final por unidad (€)<input type="number" min="0" step=".01" className="block rounded-lg p-2 w-full mt-1" value={draft.unitPrice} onChange={e=>setDraft({...draft,unitPrice:Math.max(0,Number(e.target.value)||0)})} style={{background:"var(--ink-3)",color:"var(--bone)"}}/></label>
       </div>
       <label className="flex gap-3 items-center text-sm"><input type="checkbox" checked={!!draft.excludeOversize} onChange={e=>setDraft({...draft,excludeOversize:e.target.checked})}/> Excluir camisetas oversize aunque compartan diseño</label>
-      <p className="text-xs" style={{color:"var(--slate)"}}>La selección se hace por prenda/producto, no por ilustración. Una camiseta clásica puede participar aunque exista el mismo diseño en una oversize. Esta versión publica la campaña y su selección; no modifica automáticamente el precio del carrito hasta validar las reglas de descuento.</p>
+      <p className="text-xs" style={{color:"var(--slate)"}}>La selección se hace por prenda/producto, no por ilustración. Una camiseta clásica puede participar aunque exista el mismo diseño en una oversize. El descuento se calcula automáticamente en el carrito al alcanzar la cantidad mínima seleccionada, sin cambiar los precios originales.</p>
       <input aria-label="Buscar productos para promoción" placeholder="Buscar por nombre, SKU o categoría…" className="w-full p-3 rounded-lg" style={{background:"var(--ink-3)",color:"var(--bone)"}} value={term} onChange={e=>setTerm(e.target.value)} />
       <div className="max-h-80 overflow-y-auto grid sm:grid-cols-2 gap-2">
         {visible.map(p=><label key={p.id} className="flex gap-3 items-center p-2 rounded-xl text-sm" style={{border:"1px solid var(--line)"}}>
@@ -18107,7 +18120,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                               className="kulto-btn flex items-center gap-1.5 rounded-full pl-1 pr-2 py-1 text-[11px]"
                               style={{ background: "var(--ink-3)", color: "var(--bone)", border: on ? "2px solid var(--sun)" : "1px solid var(--line)" }}
                             >
-                              <span className="w-4 h-4 rounded-full" style={{ background: c.hex, border: "1px solid var(--line)" }} />
+                              <span className="w-4 h-4 rounded-full" style={{ background: c.hex, border: "1.5px solid #737373", boxShadow: "0 0 0 1px rgba(255,255,255,.6)" }} />
                               {c.name}{on && <Check size={11} />}
                             </button>
                           );
@@ -18133,7 +18146,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
                         <span className="text-[11px]" style={{ color: "var(--slate)" }}>Elegidos:</span>
                         {bulkColors.map((c, i) => (
                           <span key={i} className="flex items-center gap-1 text-[11px] rounded-full pl-1 pr-2 py-0.5" style={{ background: "var(--ink-3)", color: "var(--bone)" }}>
-                            <span className="w-3.5 h-3.5 rounded-full" style={{ background: c.hex }} /> {c.name}
+                            <span className="w-3.5 h-3.5 rounded-full" style={{ background: c.hex, border: "1.5px solid #737373", boxShadow: "0 0 0 1px rgba(255,255,255,.6)" }} /> {c.name}
                             <button type="button" onClick={() => setBulkColors((prev) => prev.filter((_, idx) => idx !== i))} aria-label="Quitar"><X size={10} /></button>
                           </span>
                         ))}
