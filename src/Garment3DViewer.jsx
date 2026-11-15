@@ -279,7 +279,7 @@ export default function Garment3DViewer({ product, hex, frontArt, backArt, logoA
    <div className="absolute right-3 top-3 flex items-center gap-2">
      <label className="text-[10px] rounded-full py-1 px-2" style={{background:"rgba(15,15,19,.88)",color:"#fff"}}>
        <input type="checkbox" checked={showPrint} onChange={e=>setShowPrint(e.target.checked)} className="mr-1" />
-       Mostrar estampado
+       Mostrar estampado (solo vista)
      </label>
    </div>
    <div className="absolute bottom-3 left-2 right-2 flex justify-between gap-1" style={{pointerEvents:"none"}}>

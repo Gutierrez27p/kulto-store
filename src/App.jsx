@@ -4199,7 +4199,11 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
   const unitPrice = product.tags?.oferta && product.salePrice ? product.salePrice : product.price;
   const finalCustomImage = customImage ? (useProcessed && customImageProcessed ? customImageProcessed : customImage) : null;
   // Compositing inside each canvas prevents duplicate artwork floating over both garments.
-  const art = selectGarmentArt(mock, product, designMode === "custom" ? finalCustomImage : designMode === "design" && design?.image ? design.image : undefined);
+  // Keep the product's original transparent art when no new custom PNG was selected.
+  // Many existing products do not use the optional "choose a design" step.
+  const selectedArtOverride = designMode === "custom" && finalCustomImage ? finalCustomImage
+    : designMode === "design" && design?.image ? design.image : undefined;
+  const art = selectGarmentArt(mock, product, selectedArtOverride);
   const productMockPreview = mockActive ? { ...mock, design: art.front } : null;
   const backMock = productMockPreview?.backBase ? {
     ...productMockPreview, base: productMockPreview.backBase, mask: productMockPreview.backMask,
