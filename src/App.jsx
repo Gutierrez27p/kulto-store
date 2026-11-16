@@ -17228,7 +17228,9 @@ function AdminGarmentMockupLibrary({ products, models, designLibrary = [], onSav
   const [progress,setProgress] = useState("");
   const selectedScope = scopeOptions.find(x=>x.id===scope) || scopeOptions[0];
   const impact = countMockupImpact(products,scope);
-  const existing = resolveLibraryMockup(models,{category:"Camisetas"});
+  const previousMockups = [...new Map(products.filter(p=>p.mockup?.base)
+    .map(p=>[p.mockup.base,{product:p,mockup:p.mockup,scope:mockupScopeOfProduct(p)}])).values()]
+    .filter(item=>item.scope&&!models.some(model=>model.base===item.mockup.base));
   const planStats = batchPlan.reduce((acc,item)=>(acc[item.status]=(acc[item.status]||0)+1,acc),{});
   const readyBatch = batchPlan.filter(item=>item.status==="ready");
 
@@ -17279,6 +17281,33 @@ function AdminGarmentMockupLibrary({ products, models, designLibrary = [], onSav
       setName("");setFront(null);setBack(null);setFrontMask(null);setBackMask(null);
       setStatus("Mockup guardado y seleccionado para "+impact.total+" productos del tipo "+selectedScope.label+". Se conservan los diseños existentes.");
     }catch(e){setStatus("Error al guardar: "+(e?.message||"sin conexión"))}
+    finally{setSaving(false)}
+  };
+  const adoptExisting = async item => {
+    const target=item.scope;
+    const entry=scopeOptions.find(x=>x.id===target);
+    if(!entry)return;
+    if(!window.confirm("¿Reutilizar el mockup limpio de "+item.product.name+" para todos los productos de "+entry.label+"? Se conservarán los estampados individuales y las fotos originales."))return;
+    setSaving(true);setStatus("");
+    try {
+      const model=item.mockup;
+      const updated=models.map(m=>({
+        ...m,
+        isDefaultForScope:modelHasScope(m,target)?false:m.isDefaultForScope,
+        sharedForAllTshirts:target==="camisetas"&&modelHasScope(m,target)?false:m.sharedForAllTshirts
+      }));
+      updated.push({
+        id:genId("garment"),name:"Mockup recuperado · "+entry.label,
+        targetScope:target,garmentKind:entry.garmentKind||null,
+        isDefaultForScope:true,sharedForAllTshirts:target==="camisetas",
+        base:model.base,backBase:model.backBase||null,mask:model.mask||null,backMask:model.backMask||null,
+        ar:model.ar||null,backAr:model.backAr||null,enabled:true,
+        x:model.x??50,y:model.y??38,w:model.w??38,
+        backX:model.backX??50,backY:model.backY??38,backW:model.backW??40
+      });
+      await onSaveModels(updated);
+      setStatus("Mockup anterior recuperado y compartido por "+countMockupImpact(products,target).total+" productos.");
+    }catch(e){setStatus("No se pudo recuperar el mockup: "+(e?.message||"Error"))}
     finally{setSaving(false)}
   };
   const activate = async model => {
@@ -17419,6 +17448,17 @@ function AdminGarmentMockupLibrary({ products, models, designLibrary = [], onSav
       </div>
       <button type="button" disabled={saving||!front?.url} onClick={saveNew} className="kulto-btn rounded-full px-5 py-2.5 font-bold" style={{background:"var(--sun)",color:"var(--ink)",opacity:saving?0.5:1}}>{saving?"Guardando...":"Guardar y aplicar este mockup a "+impact.total+" productos"}</button>
     </div>
+    {previousMockups.length>0&&<div className="rounded-2xl p-5 space-y-3" style={{background:"var(--ink-2)",border:"1px solid var(--line)"}}>
+      <h3 className="font-bold">Recuperar mockups que ya habías subido</h3>
+      <p className="text-xs" style={{color:"var(--slate)"}}>Detecté fotos base guardadas dentro de productos. Puedes convertir una de esas imágenes en el mockup común sin volver a subirla. Solo hazlo si es una fotografía de prenda limpia.</p>
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        {previousMockups.map(item=><div key={item.mockup.base} className="rounded-xl p-3 space-y-2" style={{background:"var(--ink-3)"}}>
+          <img src={item.mockup.base} alt={"Mockup ya subido en "+item.product.name} className="w-full h-32 object-contain"/>
+          <p className="text-xs">{item.product.name} · {selection(item.scope)}</p>
+          <button type="button" disabled={saving} onClick={()=>adoptExisting(item)} className="kulto-btn rounded-lg px-3 py-2 text-xs font-bold" style={{background:"var(--sun)",color:"var(--ink)"}}>Reutilizar este mockup</button>
+        </div>)}
+      </div>
+    </div>}
     <div className="space-y-3">
       <h3 className="font-bold text-lg">2. Mockups ya subidos ({models.length})</h3>
       <p className="text-xs" style={{color:"var(--slate)"}}>Seleccioná qué modelo usa cada tipo. No tendrás que subir o asignar el mismo mockup por cada diseño.</p>
