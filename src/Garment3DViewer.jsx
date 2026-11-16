@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { infer3DKind } from "./garment-3d.js";
 import { createGarmentSurfacePrint } from "./garment-surface-print.js";
+import { recolorGarmentMaterial } from "./garment-glb-material.js";
 
 // The customer preview uses only uploaded and approved GLB clothing models.
 // Never resurrect the geometric sleeve/body placeholder.
@@ -19,11 +20,7 @@ function normalizedGlbScene(gltf,hex){
    if(!child.isMesh)return;
    child.castShadow=true;child.receiveShadow=true;
    const materials=Array.isArray(child.material)?child.material:[child.material];
-   const recolored=materials.map(mat=>{
-     const cp=mat.clone();
-     if(cp.color)cp.color.set(COLOR(hex));
-     cp.roughness=.88;cp.metalness=0;return cp;
-   });
+   const recolored=materials.map(mat=>recolorGarmentMaterial(mat,hex));
    child.material=Array.isArray(child.material)?recolored:recolored[0];
  });
  return obj;
