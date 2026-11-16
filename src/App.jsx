@@ -17279,7 +17279,7 @@ function AdminGarmentMockupLibrary({ products, models, designLibrary = [], onSav
       });
       await onSaveModels(next);
       setName("");setFront(null);setBack(null);setFrontMask(null);setBackMask(null);
-      setStatus("Mockup guardado y seleccionado para "+impact.total+" productos del tipo "+selectedScope.label+". Se conservan los diseños existentes.");
+      setStatus("Mockup guardado para "+impact.total+" productos del tipo "+selectedScope.label+". "+impact.withArt+" tienen estampado reutilizable; los demás conservan su foto hasta vincular el PNG.");
     }catch(e){setStatus("Error al guardar: "+(e?.message||"sin conexión"))}
     finally{setSaving(false)}
   };
@@ -17306,7 +17306,7 @@ function AdminGarmentMockupLibrary({ products, models, designLibrary = [], onSav
         backX:model.backX??50,backY:model.backY??38,backW:model.backW??40
       });
       await onSaveModels(updated);
-      setStatus("Mockup anterior recuperado y compartido por "+countMockupImpact(products,target).total+" productos.");
+      setStatus("Mockup anterior recuperado y seleccionado para la familia de "+countMockupImpact(products,target).total+" productos. Los que no tienen arte PNG mantienen su foto original.");
     }catch(e){setStatus("No se pudo recuperar el mockup: "+(e?.message||"Error"))}
     finally{setSaving(false)}
   };
@@ -17449,7 +17449,7 @@ function AdminGarmentMockupLibrary({ products, models, designLibrary = [], onSav
           <input type="file" accept="image/png,image/webp" disabled={saving} className="sr-only" onChange={e=>{pick(e.target.files?.[0],field);e.target.value=""}}/>
         </label>)}
       </div>
-      <button type="button" disabled={saving||!front?.url} onClick={saveNew} className="kulto-btn rounded-full px-5 py-2.5 font-bold" style={{background:"var(--sun)",color:"var(--ink)",opacity:saving?0.5:1}}>{saving?"Guardando...":"Guardar y aplicar este mockup a "+impact.total+" productos"}</button>
+      <button type="button" disabled={saving||!front?.url} onClick={saveNew} className="kulto-btn rounded-full px-5 py-2.5 font-bold" style={{background:"var(--sun)",color:"var(--ink)",opacity:saving?0.5:1}}>{saving?"Guardando...":"Guardar mockup común para "+impact.total+" productos"}</button>
     </div>
     {previousMockups.length>0&&<div className="rounded-2xl p-5 space-y-3" style={{background:"var(--ink-2)",border:"1px solid var(--line)"}}>
       <h3 className="font-bold">Recuperar mockups que ya habías subido</h3>
