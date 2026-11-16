@@ -3,10 +3,9 @@ import { seasonalPricing, isOversizeGarment } from "./promotion-pricing.js";
 import { backgroundSilhouette } from "./garment-mask.js";
 import { safeRecolorPixel, growSilhouette } from "./garment-color.js";
 import { selectGarmentArt } from "./garment-art.js";
-import { isApproved3DModel, preferredGarmentView } from "./garment-viewer-policy.js";
+import { isTshirtProduct, preferredPhotoOrMockup } from "./shared-tshirt-mockup.js";
 import { availableMockupScopes, mockupScopeOfProduct, modelHasScope, resolveLibraryMockup, countMockupImpact } from "./mockup-routing.js";
 import { makeArtworkBatchPlan, applyArtworkBatch } from "./mockup-artwork-batch.js";
-const Garment3DViewer = React.lazy(() => import("./Garment3DViewer.jsx"));
 import { coverForHomeCategory } from "./home-category-covers.js";
 import "./editorial.css";
 import { escapeEmailHtml, secureSixDigitCode } from "./email-safety.js";
@@ -1064,22 +1063,32 @@ function tintImageToColor(src, hex) {
 // caja donde se muestra), así se ve igual en la ficha, la tarjeta y el editor.
 // ---------------------------------------------------------------------------
 let GARMENT_MOCKUP_LIBRARY = [];
-// A library model shares the base garment across any number of products.
-// Individual design art and placement remain attached to the product.
+let LEGACY_SHARED_TSHIRT_MOCKUP = null;
+// Every category of shirts (classic and oversize included) uses the same
+// photographic base. The individual PNG artwork stays with each product.
 function resolveProductMockup(product) {
-  const original = product?.mockup;
-  const explicitlyAssigned = GARMENT_MOCKUP_LIBRARY.find(entry => entry.id === product?.garmentMockupId);
-  // One reusable base per garment cut can serve every design automatically.
-  // If several bases match, preserve explicit assignment instead of guessing.
-  const automaticCandidates = GARMENT_MOCKUP_LIBRARY.filter(entry =>
-    entry.enabled !== false && entry.base && entry.garmentKind && modelMatchesProduct(entry, product)
-  );
-  const model = explicitlyAssigned || (automaticCandidates.length === 1 ? automaticCandidates[0] : null);
-  if (!model?.base || model.enabled === false) return original;
-  const design = original?.design || (product?.designs?.length === 1 ? product.designs[0]?.image : null);
-  const backDesign = original?.backDesign || model?.backDesign || null;
-  if (!design && !backDesign) return original; // Do not replace a photographed product with a blank garment.
-  return { ...model, ...original, base: model.base, backBase: model.backBase || null, mask: model.mask || null, backMask: model.backMask || null, ar: model.ar || original?.ar, backAr: model.backAr || original?.backAr, design, backDesign: original?.backDesign || model.backDesign || null, enabled: true };
+  const original=product?.mockup;
+  const fromLibrary=resolveLibraryMockup(GARMENT_MOCKUP_LIBRARY,product);
+  const explicitlyAssigned=GARMENT_MOCKUP_LIBRARY.find(m=>m.id===product?.garmentMockupId);
+  const compatible=GARMENT_MOCKUP_LIBRARY.filter(m=>m.enabled!==false && m.base && modelMatchesProduct(m,product));
+  const fallback=compatible.length===1?compatible[0]:null;
+  const model=fromLibrary || (isTshirtProduct(product)?LEGACY_SHARED_TSHIRT_MOCKUP:null) || explicitlyAssigned || fallback;
+  if(!model?.base || model.enabled===false)return original;
+  const design=original?.design || (product?.designs?.length ? product.designs[0]?.image : null);
+  const backDesign=original?.backDesign || product?.backDesign || (!fromLibrary && !isTshirtProduct(product) ? model.backDesign : null) || null;
+  // Keep the original printed product photograph when the artwork is baked
+  // into the photo. A clean reusable mockup cannot recover that artwork.
+  if(!design && !backDesign && !product?.tags?.template)return original;
+  const placement=original?.base===model.base?{}:{
+    x:model.x??50,y:model.y??38,w:model.w??38,rot:model.rot??0,
+    backX:model.backX??50,backY:model.backY??38,backW:model.backW??40,backRot:model.backRot??0
+  };
+  return {
+    ...model,...original,...placement,base:model.base,backBase:model.backBase||null,
+    mask:model.mask||null,backMask:model.backMask||null,
+    ar:model.ar||original?.ar,backAr:model.backAr||original?.backAr,
+    design,backDesign,enabled:true
+  };
 }
 const mockupPrepCache = new Map(); // src -> Promise<prep>
 const mockupTintedCache = new Map(); // `${src}|${hex}` -> canvas
@@ -4015,110 +4024,30 @@ function ProductReviewsBlock({ product, reviews }) {
 }
 
 
-/* A single, accessible two-sided garment viewer. This is a photographic 3D
-   flip, not a polygon mesh: existing front/back art remains in sync. */
-function GarmentTurntable({ front, back, hex }) {
-  const [angle, setAngle] = useState(0);
-  const [zoom, setZoom] = useState(1);
-  const [dragging, setDragging] = useState(false);
-  const pointers = useRef(new Map());
-  const gesture = useRef(null);
-  const clampZoom = (z) => Math.max(1, Math.min(3, z));
-  const side = ((Math.round(angle / 180) % 2) + 2) % 2;
-  useEffect(() => { setAngle(0); setZoom(1); }, [front.base, back?.base]);
-  const rotate = (direction) => {
-    if (!back) return;
-    setAngle((a) => Math.round(a / 180) * 180 + 180 * direction);
-  };
-  const onDown = (e) => {
-    if (e.button !== 0 && e.pointerType === "mouse") return;
-    e.currentTarget.setPointerCapture(e.pointerId);
-    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    const points = [...pointers.current.values()];
-    if (points.length === 1) gesture.current = { mode: "rotate", x: e.clientX, startAngle: angle };
-    if (points.length === 2) {
-      gesture.current = {
-        mode: "pinch",
-        distance: Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y) || 1,
-        startZoom: zoom,
-      };
-    }
-    setDragging(true);
-  };
-  const onMove = (e) => {
-    if (!pointers.current.has(e.pointerId)) return;
-    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    const points = [...pointers.current.values()];
-    if (points.length === 2 && gesture.current?.mode === "pinch") {
-      const distance = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
-      setZoom(clampZoom(gesture.current.startZoom * distance / gesture.current.distance));
-    } else if (points.length === 1 && back && gesture.current?.mode === "rotate") {
-      setAngle(gesture.current.startAngle + (e.clientX - gesture.current.x) * 0.72);
-    }
-  };
-  const onEnd = (e) => {
-    pointers.current.delete(e.pointerId);
-    if (pointers.current.size === 0) {
-      if (back) setAngle((a) => Math.round(a / 180) * 180);
-      setDragging(false);
-      gesture.current = null;
-    } else if (pointers.current.size === 1) {
-      const point = [...pointers.current.values()][0];
-      gesture.current = { mode: "rotate", x: point.x, startAngle: angle };
-    }
-  };
-  const buttonStyle = { background: "rgba(21,19,26,.92)", color: "var(--bone)", border: "1px solid var(--line)" };
-  return (
-    <div className="kulto-garment-viewer w-full h-full relative" style={{ background: "var(--ink-3)" }}>
-      <div
-        role="group"
-        tabIndex={0}
-        aria-label={back ? "Visor de prenda giratorio. Arrastra para ver la otra cara. Usa las flechas o los botones de zoom." : "Vista ampliable de la prenda"}
-        onPointerDown={onDown}
-        onPointerMove={onMove}
-        onPointerUp={onEnd}
-        onPointerCancel={onEnd}
-        onKeyDown={(e) => {
-          if (e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); rotate(e.key === "ArrowRight" ? 1 : -1); }
-          if (e.key === "+" || e.key === "=") { e.preventDefault(); setZoom(z=>clampZoom(z+.25)); }
-          if (e.key === "-") { e.preventDefault(); setZoom(z=>clampZoom(z-.25)); }
-          if (e.key === "0") { e.preventDefault(); setZoom(1); setAngle(0); }
-        }}
-        className="absolute inset-0"
-        style={{ perspective: 1150, touchAction: "none", cursor: back ? (dragging ? "grabbing" : "grab") : "zoom-in", outlineOffset: -3 }}
-      >
-        <div className="absolute inset-0" style={{
-          transformStyle: "preserve-3d",
-          transform: `rotateY(${angle}deg) scale(${zoom})`,
-          transition: dragging ? "none" : "transform .42s cubic-bezier(.2,.75,.2,1)",
-        }}>
-          <div className="absolute inset-0" style={{ backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden" }}>
-            <MockupComposite mockup={front} hex={hex}/>
-          </div>
-          {back && (
-            <div className="absolute inset-0" style={{ transform: "rotateY(180deg)", backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden" }}>
-              <MockupComposite mockup={back} hex={hex}/>
-            </div>
-          )}
-        </div>
-      </div>
-      <span aria-live="polite" className="absolute top-3 left-3 text-xs rounded-full px-3 py-1 font-semibold" style={buttonStyle}>
-        {back && side ? "ESPALDA" : "DELANTE"} · {Math.round(zoom * 100)}%
-      </span>
-      <div className="absolute bottom-3 left-2 right-2 flex flex-wrap items-center justify-between gap-2" style={{ pointerEvents: "none" }}>
-        <div className="flex gap-1.5" style={{ pointerEvents: "auto" }}>
-          {back && <button type="button" className="kulto-btn rounded-full px-3 py-2 text-xs font-semibold" style={buttonStyle} onClick={()=>rotate(1)} aria-label="Girar camiseta para ver la otra cara"><RotateCw size={16} className="inline mr-1"/> Girar</button>}
-          {back && <button type="button" className="kulto-btn rounded-full px-3 py-2 text-xs" style={buttonStyle} onClick={()=>setAngle(a=>Math.round(a/360)*360)} aria-label="Ver delante">Frente</button>}
-        </div>
-        <div className="flex gap-1.5" style={{ pointerEvents: "auto" }}>
-          <button type="button" className="kulto-btn rounded-full p-2" style={buttonStyle} onClick={()=>setZoom(z=>clampZoom(z-.25))} aria-label="Alejar" disabled={zoom<=1}><ZoomOut size={17}/></button>
-          <button type="button" className="kulto-btn rounded-full p-2" style={buttonStyle} onClick={()=>setZoom(z=>clampZoom(z+.25))} aria-label="Acercar" disabled={zoom>=3}><ZoomIn size={17}/></button>
-          <button type="button" className="kulto-btn rounded-full p-2" style={buttonStyle} onClick={()=>{setZoom(1);setAngle(0);}} aria-label="Restablecer vista"><RotateCcw size={17}/></button>
-        </div>
-      </div>
-      {back && <p className="absolute top-3 right-3 text-[10px] hidden sm:block" style={{color:"var(--slate)"}}>Arrastra para girar · pellizca para ampliar</p>}
+/* Photographic front and back only: no 3D engine or simulated spinning. */
+function GarmentPhotoViewer({front,back,hex}) {
+  const [side,setSide]=useState("front");
+  const [zoom,setZoom]=useState(1);
+  useEffect(()=>{setSide("front");setZoom(1)},[front?.base,back?.base]);
+  const b={background:"rgba(21,19,26,.92)",color:"var(--bone)",border:"1px solid var(--line)"};
+  return <div className="w-full h-full relative overflow-hidden" style={{background:"var(--ink-3)"}}>
+    <div className="absolute inset-0" style={{transform:"scale("+zoom+")",transition:"transform .2s ease"}}>
+      <MockupComposite mockup={side==="back"&&back?back:front} hex={hex}/>
     </div>
-  );
+    <span aria-live="polite" className="absolute top-3 left-3 rounded-full px-3 py-1 text-xs font-semibold" style={b}>
+      {side==="back"&&back?"ESPALDA":"DELANTE"} · {Math.round(zoom*100)}%
+    </span>
+    <div className="absolute bottom-3 left-2 right-2 flex justify-between gap-1" style={{pointerEvents:"none"}}>
+      <div className="flex gap-1" style={{pointerEvents:"auto"}}>
+        {back&&["front","back"].map(value=><button type="button" key={value} onClick={()=>setSide(value)} aria-pressed={side===value} className="kulto-btn rounded-full px-3 py-2 text-xs font-semibold" style={{...b,border:side===value?"2px solid var(--sun)":"1px solid var(--line)"}}>{value==="front"?"Delante":"Espalda"}</button>)}
+      </div>
+      <div className="flex gap-1" style={{pointerEvents:"auto"}}>
+        <button type="button" className="kulto-btn rounded-full p-2" style={b} onClick={()=>setZoom(z=>Math.max(1,z-.25))} aria-label="Alejar" disabled={zoom<=1}><ZoomOut size={17}/></button>
+        <button type="button" className="kulto-btn rounded-full p-2" style={b} onClick={()=>setZoom(z=>Math.min(3,z+.25))} aria-label="Acercar" disabled={zoom>=3}><ZoomIn size={17}/></button>
+        <button type="button" className="kulto-btn rounded-full p-2" style={b} onClick={()=>{setZoom(1);setSide("front")}} aria-label="Restablecer vista"><RotateCcw size={17}/></button>
+      </div>
+    </div>
+  </div>;
 }
 
 function ProductConfigurator({ product, settings, onAddToCart, compact, reviews = [] }) {
@@ -4129,8 +4058,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
   const [imgIdx, setImgIdx] = useState(0);
   const [showUploadedPhoto, setShowUploadedPhoto] = useState(!!firstPhoto);
   const [showEntryCover, setShowEntryCover] = useState(!!firstPhoto);
-  const [viewMode, setViewMode] = useState("photo");
-  const [viewerWarning, setViewerWarning] = useState("");
+  const [viewMode, setViewMode] = useState(product.__entryFromCard && product.__entryColorIdx!=null && activeMockup(product) ? "mockup" : "photo");
   const [sizeIdx, setSizeIdx] = useState(0);
   const [aud, setAud] = useState(() => audsOf(product)[0] || "h");
   const [designMode, setDesignMode] = useState(product.designs && product.designs.length ? "design" : "custom");
@@ -4154,8 +4082,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
     setImgIdx(0);
     setShowUploadedPhoto(!!firstPhoto);
     setShowEntryCover(!!firstPhoto);
-    setViewMode("photo");
-    setViewerWarning("");
+    setViewMode(product.__entryFromCard && product.__entryColorIdx!=null && activeMockup(product) ? "mockup" : "photo");
     setSizeIdx(0);
     setAud(audsOf(product)[0] || "h");
     setDesignMode(product.designs && product.designs.length ? "design" : "custom");
@@ -4183,12 +4110,6 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
   const mock = activeMockup(product);
   // Always honor the explicitly configured mockup; other uploaded photos remain in the gallery.
   const mockActive = !!mock;
-  const is3DGarment = ["camisetas", "sudaderas", "tops", "tote"].includes(garmentFamilyOf(product));
-  const assignedModel3D = GARMENT_MOCKUP_LIBRARY.find(m=>m.id===product.garmentMockupId);
-  const eligibleModels3D = GARMENT_MOCKUP_LIBRARY.filter(m=>m.enabled !== false && m.garmentKind && modelMatchesProduct(m, product));
-  const model3D = assignedModel3D || (eligibleModels3D.length===1 ? eligibleModels3D[0] : null);
-  // Do not show temporary tube-shaped geometry to buyers. Only reviewed GLBs.
-  const can3D = is3DGarment && isApproved3DModel(model3D);
   const mockHex = color?.hex || "#ffffff";
   const autoImage = useAutoColorImage(product, color, !mockActive && colorImages.length === 0, imgIdx);
   const activeImage = (showEntryCover && firstPhoto) || (colorImages.length === 0 && autoImage) || images[imgIdx] || null;
@@ -4299,29 +4220,9 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
             setZoomOrigin({ x: ((e.clientX - rect.left) / rect.width) * 100, y: ((e.clientY - rect.top) / rect.height) * 100 });
           }}
         >
-          {viewMode === "3d" && can3D ? (
-            <React.Suspense fallback={<div role="status" className="p-6 text-sm text-center" style={{color:"var(--bone)"}}>Cargando prenda 3D…</div>}>
-              <Garment3DViewer
-                product={{...product,garment3DKind:model3D?.garmentKind || null}}
-                hex={mockHex}
-                frontArt={art.front}
-                backArt={art.back}
-                logoArt={(parseInt(mockHex.slice(1,3),16)*.299 + parseInt(mockHex.slice(3,5),16)*.587 + parseInt(mockHex.slice(5,7),16)*.114)>150
-                  ? (mock?.logoLight || mock?.logoDark || null)
-                  : (mock?.logoDark || mock?.logoLight || null)}
-                frontPlacement={{x:mock?.x,y:mock?.y,w:mock?.w,rot:mock?.rot}}
-                backPlacement={{x:mock?.backX,y:mock?.backY,w:mock?.backW,rot:mock?.backRot}}
-                modelUrl={model3D?.glbUrl || null}
-                onUnavailable={() => {
-                  const fallback = preferredGarmentView({hasColorPhotos:colorImages.length>0,hasMockup:mockActive});
-                  setViewMode(fallback);
-                  setShowUploadedPhoto(fallback==="photo");
-                  setViewerWarning("El modelo 3D no pudo cargarse. Se muestra la imagen de la prenda.");
-                }}
-              />
-            </React.Suspense>
-          ) : viewMode === "mockup" && mockActive ? (
-            <GarmentTurntable front={productMockPreview} back={backMock} hex={mockHex}/>
+          {viewMode === "mockup" && mockActive ? (
+            <GarmentPhotoViewer front={productMockPreview} back={backMock} hex={mockHex}/>
+
           ) : activeImage ? (
             <img
               src={activeImage}
@@ -4390,11 +4291,10 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
             </button>
           )}
         </div>
-        {(mockActive || can3D || images.length > 1) && (
+        {(mockActive || images.length > 1) && (
           <div className="flex gap-2 mt-2 overflow-x-auto kulto-scrollbar pb-1">
             {firstPhoto && <button type="button" onClick={() => { setShowUploadedPhoto(true); setShowEntryCover(true); setHoverZoom(false); setViewMode("photo"); }} className="kulto-btn shrink-0 rounded-lg px-3 text-xs font-bold" style={{ minWidth: 82, height: 44, border: viewMode==="photo" && showUploadedPhoto && showEntryCover ? "2px solid var(--sun)" : "1px solid var(--line)", background: "var(--ink-3)", color: "var(--bone)" }}>Portada</button>}
-            {can3D && <button type="button" onClick={() => {setViewMode("3d");setShowUploadedPhoto(false);setShowEntryCover(false);}} className="kulto-btn shrink-0 rounded-lg px-3 text-xs font-bold" style={{minWidth:80,height:44,border:viewMode==="3d"?"2px solid var(--sun)":"1px solid var(--line)",background:"var(--ink-3)",color:"var(--bone)"}}>3D real</button>}
-            {mockActive && <button type="button" onClick={() => { setShowUploadedPhoto(false); setShowEntryCover(false); setViewMode("mockup"); }} className="kulto-btn shrink-0 rounded-lg px-3 text-xs font-bold" style={{ minWidth: 104, height: 44, border: viewMode==="mockup" ? "2px solid var(--sun)" : "1px solid var(--line)", background: "var(--ink-3)", color: "var(--bone)" }}><RotateCw size={13} className="inline mr-1" /> Mockup 360</button>}
+            {mockActive && <button type="button" onClick={() => { setShowUploadedPhoto(false); setShowEntryCover(false); setViewMode("mockup"); }} className="kulto-btn shrink-0 rounded-lg px-3 text-xs font-bold" style={{ minWidth: 104, height: 44, border: viewMode==="mockup" ? "2px solid var(--sun)" : "1px solid var(--line)", background: "var(--ink-3)", color: "var(--bone)" }}>Mockup fotográfico</button>}
             {images.map((img, i) => (
               <button
                 key={i}
@@ -4407,7 +4307,6 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
             ))}
           </div>
         )}
-        {viewerWarning && <p role="status" className="text-xs mt-2" style={{color:"var(--bone)"}}>{viewerWarning}</p>}
         <p className="text-xs mt-2" style={{ color: "var(--slate)" }}>
           Vista previa orientativa. Los colores y el estampado final pueden variar ligeramente.
         </p>
@@ -4456,9 +4355,9 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
             <div className="flex flex-wrap gap-2">
               {product.colors.map((c, i) => !colorOkForAud(product, c, aud) ? null : (
                 <ColorSwatch key={i} hex={c.hex} title={c.name} selected={i === colorIdx} onClick={() => {
-                    const nextView = preferredGarmentView({hasColorPhotos:getColorImages(c).length>0,hasMockup:mockActive});
+                    const nextView = preferredPhotoOrMockup({hasColorPhotos:getColorImages(c).length>0,hasMockup:mockActive,preferMockup:isTshirtProduct(product)});
                     setColorIdx(i);setShowEntryCover(false);setShowUploadedPhoto(nextView==="photo");
-                    setViewMode(nextView);setViewerWarning("");
+                    setViewMode(nextView);
                     if(product.sizes && !sizeOkForColor(product,product.sizes[sizeIdx],product.colors[i]))setSizeIdx(firstOkSizeIdx(product,product.colors[i]));
                   }} />
               ))}
@@ -19973,6 +19872,7 @@ export default function App() {
   const [reviews, setReviews] = useState([]);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   GARMENT_MOCKUP_LIBRARY = Array.isArray(settings?.garmentMockupLibrary) ? settings.garmentMockupLibrary : [];
+  LEGACY_SHARED_TSHIRT_MOCKUP = (products||[]).find(p=>isTshirtProduct(p)&&p.mockup?.base)?.mockup||null;
   FABRIC_MAP = settings?.fabricByType || {};
   {
     const gt = {};
