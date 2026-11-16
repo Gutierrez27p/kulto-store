@@ -4,6 +4,8 @@ import { backgroundSilhouette } from "./garment-mask.js";
 import { safeRecolorPixel, growSilhouette } from "./garment-color.js";
 import { selectGarmentArt } from "./garment-art.js";
 import { isApproved3DModel, preferredGarmentView } from "./garment-viewer-policy.js";
+import { availableMockupScopes, mockupScopeOfProduct, modelHasScope, resolveLibraryMockup, countMockupImpact } from "./mockup-routing.js";
+import { makeArtworkBatchPlan, applyArtworkBatch } from "./mockup-artwork-batch.js";
 const Garment3DViewer = React.lazy(() => import("./Garment3DViewer.jsx"));
 import { coverForHomeCategory } from "./home-category-covers.js";
 import "./editorial.css";
@@ -84,7 +86,7 @@ const ADMIN_NOTIFICATION_EMAIL = "pablo.gutcha@gmail.com";
 const ADMIN_TABS = [
   ["productos", "Productos"],
   ["inicio", "Diseño del Inicio"],
-  ["mockups", "Biblioteca de prendas"],
+  ["mockups", "Mockups"],
   ["promociones", "Promociones"],
   ["personalizar", "Personalizar"],
   ["pedidos", "Pedidos"],
@@ -17306,302 +17308,291 @@ function AdminCustomWorkGallery({ items, onAdd, onRemove, speed = 0.5, onSpeedCh
 }
 
 
-// Central model library; contains no individual design artworks or duplicated garments.
-function AdminGarmentMockupLibrary({ products, categories, groups, models, designLibrary = [], onSaveModels, onSaveProductsBulk }) {
-  const [name, setName] = useState("");
-  const [garmentKind, setGarmentKind] = useState("camiseta-clasica");
-  const [artProductId, setArtProductId] = useState("");
-  const [artSide, setArtSide] = useState("front");
-  const [applyToGroup, setApplyToGroup] = useState(true);
-  const [artSearch, setArtSearch] = useState("");
-  const [front, setFront] = useState(null);
-  const [back, setBack] = useState(null);
-  const [frontMask, setFrontMask] = useState(null);
-  const [glbDraft, setGlbDraft] = useState("");
-  const [backMask, setBackMask] = useState(null);
-  const [saving, setSaving] = useState(false);
-  const [cleanGarmentBackground, setCleanGarmentBackground] = useState(false);
-  const [status, setStatus] = useState("");
-  const [modelId, setModelId] = useState("");
-  const [category, setCategory] = useState("");
-  const [group, setGroup] = useState("");
-  const [onlyUnassigned, setOnlyUnassigned] = useState(true);
-  const [progress, setProgress] = useState("");
-  const [previewColor, setPreviewColor] = useState("#1761A0");
-  const [testModel, setTestModel] = useState(null);
-  const [updatingModel, setUpdatingModel] = useState(null);
-  const pick = async (file, side) => {
-    if (!file) return;
-    if (!["image/png", "image/webp"].includes(file.type)) { setStatus("Subí un PNG o WebP sin fondo."); return; }
-    setSaving(true);
-    setStatus("");
-    try {
-      let b64 = await new Promise((resolve) => fileToBase64(file, resolve, 1400, 1, "image/png"));
-      if (cleanGarmentBackground && (side === "front" || side === "back")) {
-        const cleaned = await removeImageBackground(b64);
-        if (!cleaned) throw Error("No se pudo quitar el fondo automáticamente. Subí un PNG transparente o una máscara.");
-        b64 = cleaned;
-      }
-      const url = b64?.startsWith("https://") ? b64 : await uploadDataUrlToStorage(b64);
-      if (!url) throw new Error("No se pudo subir a Storage; no se guarda el modelo para evitar fotos que desaparezcan.");
-      const image = await loadMockupImg(url);
-      const info = { url, ar: image.naturalWidth / image.naturalHeight };
-      if (side === "front") setFront(info);
-      else if (side === "back") setBack(info);
-      else if (side === "frontMask") setFrontMask(info);
-      else setBackMask(info);
-    } catch (e) { setStatus("No se pudo leer la imagen: " + (e?.message || "error")); }
-    finally { setSaving(false); }
-  };
-  const add = async () => {
-    if (!name.trim() || !front?.url) { setStatus("Indicá el nombre y subí al menos el frente."); return; }
-    setSaving(true);
-    try {
-      const next = [...models, { id: genId("garment"), name: name.trim(), garmentKind, base: front.url, ar: front.ar, backBase: back?.url || null, backAr: back?.ar || null, mask: frontMask?.url || null, backMask: backMask?.url || null, glbUrl: glbDraft.trim() || null, glbApproved:false, enabled: true, x: 50, y: 38, w: 38, backX: 50, backY: 38, backW: 40 }];
-      await onSaveModels(next);
-      setName(""); setGlbDraft(""); setFront(null); setBack(null); setFrontMask(null); setBackMask(null); setStatus("Modelo guardado. Ya podés asignarlo a productos.");
-    } catch (e) { setStatus("Error al guardar: " + (e?.message || "sin conexión")); }
-    finally { setSaving(false); }
-  };
-  const upload3DForModel = async (model, file) => {
-    if (!file) return;
-    if (!/\.glb$/i.test(file.name) || file.size > 25 * 1024 * 1024) {
-      setStatus("Seleccioná un .glb válido de hasta 25 MB."); return;
+// Shared photographic mockup manager. No 3D models or individual artwork duplication.
+function AdminGarmentMockupLibrary({ products, models, designLibrary = [], onSaveModels, onSaveProductsBulk }) {
+  const scopeOptions = availableMockupScopes(products);
+  const [scope,setScope] = useState("camisetas");
+  const [name,setName] = useState("");
+  const [front,setFront] = useState(null);
+  const [back,setBack] = useState(null);
+  const [frontMask,setFrontMask] = useState(null);
+  const [backMask,setBackMask] = useState(null);
+  const [removeBackground,setRemoveBackground] = useState(false);
+  const [previewColor,setPreviewColor] = useState("#ffffff");
+  const [previewId,setPreviewId] = useState(null);
+  const [editId,setEditId] = useState(null);
+  const [selectedProductId,setSelectedProductId] = useState("");
+  const [selectedSide,setSelectedSide] = useState("front");
+  const [batchPlan,setBatchPlan] = useState([]);
+  const [saving,setSaving] = useState(false);
+  const [status,setStatus] = useState("");
+  const [progress,setProgress] = useState("");
+  const selectedScope = scopeOptions.find(x=>x.id===scope) || scopeOptions[0];
+  const impact = countMockupImpact(products,scope);
+  const existing = resolveLibraryMockup(models,{category:"Camisetas"});
+  const planStats = batchPlan.reduce((acc,item)=>(acc[item.status]=(acc[item.status]||0)+1,acc),{});
+  const readyBatch = batchPlan.filter(item=>item.status==="ready");
+
+  const uploadImage = async (file,removeBg=false) => {
+    if (!file || !["image/png","image/webp"].includes(file.type)) throw Error("Solo se admite PNG o WebP.");
+    let b64=await new Promise(resolve=>fileToBase64(file,resolve,1400,1,"image/png"));
+    if(removeBg){
+      const cleaned=await removeImageBackground(b64);
+      if(!cleaned)throw Error("No se pudo quitar el fondo; subí un PNG transparente o una máscara.");
+      b64=cleaned;
     }
-    setSaving(true); setStatus("");
-    try {
-      const path = "models/" + genId("model3d") + ".glb";
-      const result = await supabase.storage.from(STORAGE_BUCKET).upload(path,file,{contentType:"model/gltf-binary",upsert:false});
-      if(result.error)throw new Error(result.error.message || "El bucket no acepta modelos .glb");
-      const data = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path).data;
-      if(!data?.publicUrl)throw new Error("No se pudo obtener el enlace público");
-      await onSaveModels(models.map(m=>m.id===model.id?{...m,glbUrl:data.publicUrl,glbApproved:false}:m));
-      setStatus("Modelo 3D vinculado a "+model.name+". Probaló en la vista previa.");
-    }catch(err){setStatus("No se pudo subir GLB: "+(err?.message||"Error")+". Podés usar una URL HTTPS accesible.")}
-    finally {setSaving(false);}
+    const url=b64?.startsWith("https://")?b64:await uploadDataUrlToStorage(b64);
+    if(!url)throw Error("No se pudo subir a Storage; no se modificó ningún producto.");
+    const img=await loadMockupImg(url);
+    return {url,ar:img.naturalWidth/img.naturalHeight};
   };
-  const update3DUrl = async (model,raw) => {
-    const url=String(raw||"").trim();
-    if(url && !/^https:\/\//i.test(url)){setStatus("La URL del modelo debe comenzar por https://");return;}
+  const pick = async (file,field) => {
+    if(!file)return;
     setSaving(true);setStatus("");
-    try{await onSaveModels(models.map(m=>m.id===model.id?{...m,glbUrl:url||null,glbApproved:false}:m));setStatus("Referencia 3D actualizada.");}
-    catch(e){setStatus(e?.message||"No se pudo guardar el modelo 3D");}
-    finally{setSaving(false);}
-  };
-  const updateExistingModel = async (model, file, field) => {
-    if (!file) return;
-    setSaving(true); setStatus("");
-    try {
-      if (!["image/png", "image/webp"].includes(file.type)) throw new Error("Solo PNG o WebP, con fondo transparente.");
-      const b64 = await new Promise((resolve) => fileToBase64(file, resolve, 1400, 1, "image/png"));
-      const url = b64?.startsWith("https://") ? b64 : await uploadDataUrlToStorage(b64);
-      if (!url) throw new Error("No se pudo subir a Storage.");
-      const img = await loadMockupImg(url);
-      const patch = { [field]: url };
-      if (field === "base") patch.ar = img.naturalWidth / img.naturalHeight;
-      if (field === "backBase") patch.backAr = img.naturalWidth / img.naturalHeight;
-      const next = models.map((m) => m.id === model.id ? { ...m, ...patch } : m);
-      await onSaveModels(next);
-      setStatus("Modelo actualizado: " + model.name);
-    } catch (e) { setStatus("No se pudo actualizar: " + (e?.message || "Error")); }
-    finally { setSaving(false); }
-  };
-  const chosenModel = models.find(m=>m.id===modelId);
-  const matching = products.filter((p) => (!category || p.category === category) && (!group || p.group === group) && (!onlyUnassigned || !p.garmentMockupId) && (!chosenModel || modelMatchesProduct(chosenModel,p)));
-  const compatible = matching.filter((p) => p.mockup?.design || (p.designs?.length === 1 && p.designs[0]?.image));
-  const normArtName = value => String(value || "").normalize("NFD").replace(/[^\p{L}\p{N}]/gu,"").toLowerCase().replace(/(png|webp|jpg|jpeg)$/i,"");
-  const artByName = new Map();
-  designLibrary.filter(d=>d.image).forEach(d=>{
-    const key=normArtName(d.name);
-    const current=artByName.get(key)||[];
-    artByName.set(key,[...current,d]);
-  });
-  const exactArtMatches = products.filter(p=>!p.mockup?.design && !(p.designs?.length===1 && p.designs[0]?.image)).map(p=>{
-    const byName=artByName.get(normArtName(p.name))||[];
-    const bySku=artByName.get(normArtName(p.sku))||[];
-    const candidates=[...new Map([...byName,...bySku].map(d=>[d.id,d])).values()];
-    return {product:p,art:candidates.length===1?candidates[0]:null};
-  }).filter(entry=>entry.art);
-  const applyExactMatches = async () => {
-    if(!exactArtMatches.length)return;
-    if(!window.confirm(`¿Vincular ${exactArtMatches.length} productos a PNG de tu biblioteca con nombre/SKU exactamente coincidente? No se borrará ninguna fotografía; tendrás que publicar los cambios desde Productos.`))return;
-    setSaving(true);setStatus("");setProgress(`0 / ${exactArtMatches.length}`);
-    try {
-      const updates=exactArtMatches.map(({product:p,art})=>({
-        ...p,mockup:{...(p.mockup || {}),design:art.image,enabled:!!(p.mockup?.base || p.garmentMockupId)}
-      }));
-      const result=await onSaveProductsBulk(updates,(done,total)=>setProgress(`${done} / ${total}`));
-      setStatus(`Coincidencias guardadas: ${result.ok}. Fallidas: ${result.failed}. Revisá los modelos antes de publicar. Los nombres ambiguos no se han modificado.`);
-    }catch(e){setStatus(e?.message || "Error al asociar PNG")}
-    finally{setSaving(false);setProgress("")}
-  };
-  const artProduct = products.find(p=>p.id===artProductId);
-  const linkTransparentDesign = async url => {
-    if (!artProduct || !url) {setStatus("Elegí el producto y el arte.");return;}
-    setSaving(true);setStatus("");
-    try {
-      const im = await loadMockupImg(url);
-      const cv = document.createElement("canvas");cv.width=24;cv.height=24;
-      const cx=cv.getContext("2d",{willReadFrequently:true});cx.drawImage(im,0,0,24,24);
-      const rgba=cx.getImageData(0,0,24,24).data;
-      const corners=[0,23,23*24,24*24-1];
-      if (corners.every(i=>rgba[i*4+3]>245)) throw Error("El arte parece tener fondo opaco. Elegí un PNG transparente.");
-      const group = applyToGroup && artProduct.designGroup
-        ? products.filter(p=>p.designGroup===artProduct.designGroup) : [artProduct];
-      const patched=group.map(p=>({...p,mockup:{...(p.mockup || {}),[artSide==="back"?"backDesign":"design"]:url,enabled:!!(p.mockup?.base || p.garmentMockupId)}}));
-      const outcome=await onSaveProductsBulk(patched);
-      if(outcome.failed) throw Error("Guardados "+outcome.ok+"; fallidos "+outcome.failed+".");
-      setStatus("Estampado "+(artSide==="back"?"trasero":"delantero")+" vinculado a "+outcome.ok+" prenda(s). Los modelos compatibles se aplicarán automáticamente cuando haya uno por tipo. Publicá los cambios en Productos.");
-    } catch(e){setStatus("No se pudo vincular: "+(e?.message || "Error"))}
+    try{
+      const data=await uploadImage(file,removeBackground&&(field==="front"||field==="back"));
+      if(field==="front")setFront(data);
+      else if(field==="back")setBack(data);
+      else if(field==="frontMask")setFrontMask(data);
+      else setBackMask(data);
+    }catch(e){setStatus(e?.message||"Error al subir el mockup");}
     finally{setSaving(false)}
   };
-  const uploadArtForDesign = async file => {
-    if(!file || !artProduct) return;
-    if(!["image/png","image/webp"].includes(file.type)){setStatus("Elegí un PNG/WebP transparente.");return;}
+  const saveNew = async () => {
+    if(!front?.url){setStatus("Primero subí el frente limpio de la prenda.");return;}
+    const modelName=name.trim() || selectedScope.label;
+    setSaving(true);setStatus("");
+    try{
+      const next=models.map(m=>({
+        ...m,
+        isDefaultForScope:modelHasScope(m,scope)?false:m.isDefaultForScope,
+        sharedForAllTshirts:scope==="camisetas"&&modelHasScope(m,scope)?false:m.sharedForAllTshirts
+      }));
+      next.push({
+        id:genId("garment"),name:modelName,targetScope:scope,
+        garmentKind:selectedScope.garmentKind||null,
+        isDefaultForScope:true,sharedForAllTshirts:scope==="camisetas",
+        base:front.url,ar:front.ar,backBase:back?.url||null,backAr:back?.ar||null,
+        mask:frontMask?.url||null,backMask:backMask?.url||null,
+        x:50,y:38,w:38,backX:50,backY:38,backW:40,enabled:true
+      });
+      await onSaveModels(next);
+      setName("");setFront(null);setBack(null);setFrontMask(null);setBackMask(null);
+      setStatus("Mockup guardado y seleccionado para "+impact.total+" productos del tipo "+selectedScope.label+". Se conservan los diseños existentes.");
+    }catch(e){setStatus("Error al guardar: "+(e?.message||"sin conexión"))}
+    finally{setSaving(false)}
+  };
+  const activate = async model => {
     setSaving(true);setStatus("");
     try {
-      const b64=await new Promise(resolve=>fileToBase64(file,resolve,1400,1,"image/png"));
-      const url=b64?.startsWith("https://")?b64:await uploadDataUrlToStorage(b64);
-      if(!url) throw Error("No se pudo subir a Storage");
-      await linkTransparentDesign(url);
-    } catch(e){setStatus("No se pudo subir: "+(e?.message || "Error"))}
-    finally {setSaving(false)}
+      const target=model.targetScope || (["camiseta-clasica","camiseta-oversize"].includes(model.garmentKind)?"camisetas":model.garmentKind);
+      if(!target)throw Error("Asigná primero un tipo de prenda.");
+      await onSaveModels(models.map(m=>({
+        ...m,
+        isDefaultForScope:m.id===model.id?true:modelHasScope(m,target)?false:m.isDefaultForScope,
+        sharedForAllTshirts:target==="camisetas"?m.id===model.id:m.sharedForAllTshirts
+      })));
+      setStatus("Mockup seleccionado para "+countMockupImpact(products,target).total+" productos de "+target+".");
+    }catch(e){setStatus(e?.message||"No se pudo seleccionar el mockup");}
+    finally{setSaving(false)}
   };
-  const assign = async () => {
-    if (!modelId) { setStatus("Seleccioná un modelo."); return; }
-    if (!compatible.length) { setStatus("No hay productos compatibles con PNG de diseño para asignar."); return; }
-    if (!window.confirm(`Asignar el modelo a ${compatible.length} productos? Los demás conservarán sus imágenes originales.`)) return;
-    setSaving(true); setStatus(""); setProgress(`0 / ${compatible.length}`);
+  const changeScope = async (model,newScope) => {
+    setSaving(true);setStatus("");
     try {
-      const updates = compatible.map((p) => ({ ...p, garmentMockupId: modelId }));
-      const outcome = await onSaveProductsBulk(updates, (done, total) => setProgress(`${done} / ${total}`));
-      setStatus(`Asignados: ${outcome.ok}. Fallidos: ${outcome.failed}. Sin PNG individual: ${matching.length - compatible.length}. Publicá los cambios desde Productos cuando hayas revisado los resultados.`);
-    } catch (e) { setStatus("Error al asignar: " + (e?.message || "desconocido")); }
-    finally { setSaving(false); setProgress(""); }
+      const target=scopeOptions.find(x=>x.id===newScope);
+      if(!target)throw Error("Tipo de prenda desconocido.");
+      await onSaveModels(models.map(m=>m.id===model.id?{
+        ...m,targetScope:newScope,garmentKind:target.garmentKind,
+        isDefaultForScope:false,sharedForAllTshirts:false
+      }:m));
+      setStatus("Relación actualizada. Elegí «Usar en estos productos» para activar la nueva categoría.");
+    }catch(e){setStatus(e?.message||"No se pudo cambiar el tipo");}
+    finally{setSaving(false)}
   };
-  return (
-    <section className="space-y-5">
-      <div><h2 className="kulto-display text-2xl" style={{ color: "var(--bone)" }}>Biblioteca de prendas</h2><p className="text-sm mt-2" style={{ color: "var(--slate)" }}>Subí una sola imagen limpia del frente por modelo de prenda (camiseta clásica, oversize, sudadera con/sin capucha, tote bag...). La imagen trasera es opcional. Los diseños y categorías existentes no se borran.</p></div>
-      <div className="rounded-2xl p-5 space-y-3" style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}>
-        <p className="font-semibold">Nuevo modelo reutilizable</p>
-        <label className="block text-sm">Tipo de prenda
-          <select aria-label="Tipo de prenda" value={garmentKind} onChange={e=>setGarmentKind(e.target.value)} className="w-full p-3 rounded-lg mt-1" style={{background:"var(--ink-3)",color:"var(--bone)"}}>
-            {GARMENT_MODEL_TYPES.map(k=><option key={k.id} value={k.id}>{k.label}</option>)}
-          </select>
-        </label>
-        <input aria-label="Nombre del modelo" placeholder="Ej. Camiseta Premium Oversize" value={name} onChange={(e) => setName(e.target.value)} className="w-full rounded-lg p-3" style={{ background: "var(--ink-3)", color: "var(--bone)" }}/>
-        <label className="block text-xs">URL del modelo 3D real .glb (opcional)
-          <input value={glbDraft} onChange={e=>setGlbDraft(e.target.value)} placeholder="https://.../camiseta.glb" className="block w-full rounded-lg p-3 mt-1" style={{background:"var(--ink-3)",color:"var(--bone)"}}/>
-        </label>
-        <p className="text-xs" style={{color:"var(--slate)"}}>Sin GLB se utiliza la prenda 3D integrada. Un archivo GLB permite sustituirla por el modelo de tu proveedor.</p>
-        <div className="grid grid-cols-2 gap-3">
-          {[[front, "Delante (obligatorio)", "front"], [back, "Detrás (opcional)", "back"]].map(([img, label, side]) => <label key={side} className="rounded-xl p-3 text-sm cursor-pointer text-center" style={{ border: "1px dashed var(--line)" }}>
-            <p className="mb-2 font-semibold">{label}</p>
-            {img ? <img src={img.url} alt={label} className="mx-auto h-36 object-contain" /> : <div className="h-36 flex items-center justify-center" style={{ color: "var(--slate)" }}>Subir mockup limpio</div>}
-            <input type="file" accept="image/png,image/webp" onChange={(e) => { pick(e.target.files?.[0], side); e.target.value = ""; }} className="sr-only" />
-          </label>)}
-        </div>
-        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={cleanGarmentBackground} onChange={e=>setCleanGarmentBackground(e.target.checked)}/> Quitar fondo automáticamente al subir el mockup frontal/trasero</label>
-        <p className="text-xs" style={{color:"var(--slate)"}}>Revisá el resultado con «Probar colores» antes de asignarlo. La eliminación automática puede recortar partes finas de la tela; si sucede, utilizá una máscara PNG de la silueta.</p>
-        <p className="text-xs" style={{ color: "var(--slate)" }}>Si tu camiseta tiene fondo o deja partes sin colorear, subí también una máscara PNG: prenda sólida y opaca, fondo totalmente transparente, misma silueta en la misma posición. Es opcional para mockups ya recortados.</p>
-        <div className="grid grid-cols-2 gap-3">
-          {[[frontMask, "Máscara delantera", "frontMask"], [backMask, "Máscara trasera", "backMask"]].map(([img, label, side]) => <label key={side} className="rounded-xl p-3 text-xs cursor-pointer text-center" style={{ border: "1px dashed var(--line)" }}>
-            <p className="mb-2 font-semibold">{label} (opcional)</p>
-            {img ? <img src={img.url} alt={label} className="mx-auto h-24 object-contain" /> : <div className="h-24 flex items-center justify-center" style={{ color: "var(--slate)" }}>Añadir silueta PNG</div>}
-            <input type="file" accept="image/png,image/webp" onChange={(e) => { pick(e.target.files?.[0], side); e.target.value = ""; }} className="sr-only" />
-          </label>)}
-        </div>
-        <button type="button" onClick={add} disabled={saving} className="kulto-btn rounded-full px-5 py-2.5 font-semibold" style={{ background: "var(--sun)", color: "var(--ink)" }}>{saving ? "Guardando…" : "Guardar modelo"}</button>
-      </div>
-      {models.length > 0 && <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        {models.map((m) => <div key={m.id} className="rounded-xl p-3" style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}>
-          <p className="font-semibold text-sm mb-2">{m.name}</p>
-          <label className="block text-xs mb-2">Tipo de prenda<select value={m.garmentKind || ""} onChange={async e=> { setSaving(true); try { await onSaveModels(models.map(old=>old.id===m.id?{...old,garmentKind:e.target.value || null}:old)); } catch(err) {setStatus(err?.message || "Error");} finally {setSaving(false);} }} className="block w-full p-2 rounded-lg mt-1" style={{background:"var(--ink-3)",color:"var(--bone)"}}><option value="">Antiguo (sin clasificación)</option>{GARMENT_MODEL_TYPES.map(k=><option key={k.id} value={k.id}>{k.label}</option>)}</select></label>
-          <div className="grid grid-cols-2 gap-2"><img src={m.base} alt="Delante" className="h-32 w-full object-contain"/>{m.backBase ? <img src={m.backBase} alt="Detrás" className="h-32 w-full object-contain"/> : <div className="h-32 flex items-center justify-center text-xs" style={{color:"var(--slate)"}}>Sin vista trasera</div>}</div>
-          <p className="text-xs mt-2" style={{ color: "var(--slate)" }}>{products.filter((p) => p.garmentMockupId === m.id).length} productos asignados</p>
-          <div className="mt-3 space-y-2">
-            <p className="text-xs font-semibold">Modelo 3D de alta calidad (GLB)</p>
-            <p className="text-[11px]" style={{color:"var(--slate)"}}>{m.glbUrl?(m.glbApproved?"Modelo aprobado para compradores":"Archivo pendiente de revisión. Los clientes ven fotos/mockups."):"Sin archivo 3D. Los compradores ven fotos/mockups, no geometría provisional."}</p>
-            <label className="text-xs block cursor-pointer rounded-lg px-3 py-2" style={{border:"1px dashed var(--line)"}}>Subir .glb para este modelo
-              <input type="file" accept=".glb,model/gltf-binary" disabled={saving} className="block w-full text-[10px]" onChange={e=>{upload3DForModel(m,e.target.files?.[0]);e.target.value="";}}/>
-            </label>
-            <label className="text-xs block">O pegar URL GLB HTTPS
-              <input key={m.glbUrl||"empty"} defaultValue={m.glbUrl||""} placeholder="https://.../modelo.glb" onBlur={e=>{if(e.target.value.trim()!==(m.glbUrl||""))update3DUrl(m,e.target.value);}} className="block w-full rounded-lg mt-1 p-2 text-xs" style={{background:"var(--ink-3)",border:"1px solid var(--line)",color:"var(--bone)"}}/>
-            </label>
-            {m.glbUrl && <label className="flex gap-2 items-start text-xs">
-              <input type="checkbox" checked={m.glbApproved === true} disabled={saving} onChange={async e => {
-                setSaving(true);setStatus("");
-                try{await onSaveModels(models.map(x=>x.id===m.id?{...x,glbApproved:e.target.checked}:x));setStatus(e.target.checked?"Modelo habilitado. Verificá frente, espalda, estampados y colores en Preview.":"Visor 3D desactivado para clientes.");}
-                catch(err){setStatus("No se pudo actualizar: "+(err?.message||"error"));}
-                finally{setSaving(false);}
-              }}/>
-              <span><strong>Activar visor 3D para compradores</strong> — marcá esto solo después de revisar el GLB con el color oscuro, frente y espalda, y comprobar que los estampados encajan en la geometría.</span>
-            </label>}
-            {m.glbUrl && <div className="rounded-xl overflow-hidden" style={{height:270,background:"var(--ink-3)"}}>
-              <React.Suspense fallback={<p className="text-xs p-4">Cargando vista de revisión...</p>}>
-                <Garment3DViewer product={{garment3DKind:m.garmentKind,name:m.name}} hex={previewColor} frontArt={null} backArt={null} logoArt={null} modelUrl={m.glbUrl}/>
-              </React.Suspense>
-            </div>}
-          </div>
-          <div className="flex flex-wrap gap-3 mt-2"><button type="button" onClick={() => setTestModel(testModel === m.id ? null : m.id)} className="text-xs underline">Probar colores</button><button type="button" onClick={() => setUpdatingModel(updatingModel === m.id ? null : m.id)} className="text-xs underline">Editar fotos y máscaras</button></div>
-          {updatingModel === m.id && <div className="grid grid-cols-2 gap-2 mt-3">{[["base", "Frente"], ["backBase", "Espalda"], ["mask", "Máscara frente"], ["backMask", "Máscara espalda"]].map(([field, label]) => <label key={field} className="cursor-pointer rounded-lg p-2 text-xs text-center" style={{ border: "1px dashed var(--line)" }}><span className="block mb-1">{label}</span><input aria-label={label} type="file" accept="image/png,image/webp" disabled={saving} onChange={(e) => { updateExistingModel(m, e.target.files?.[0], field); e.target.value = ""; }} className="w-full text-[10px]" /></label>)}</div>}
-          {testModel === m.id && <div className="mt-2 space-y-2"><input type="color" value={previewColor} onChange={(e) => setPreviewColor(e.target.value)} aria-label="Color de prueba"/><div className="grid grid-cols-2 h-44 gap-2"><MockupComposite mockup={{ ...m, design: null }} hex={previewColor}/>{m.backBase ? <MockupComposite mockup={{ ...m, base: m.backBase, mask: m.backMask, design: null }} hex={previewColor}/> : <div className="flex items-center justify-center text-xs">Sin reverso</div>}</div></div>}
-        </div>)}
-      </div>}
-      <div className="rounded-2xl p-5 space-y-3" style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}>
-        <h3 className="font-semibold">Recuperar un diseño para todos sus modelos</h3>
-        {exactArtMatches.length > 0 && <div className="rounded-xl p-3 space-y-2" style={{background:"var(--ink-3)",border:"1px solid var(--line)"}}>
-          <p className="font-semibold text-sm">{exactArtMatches.length} coincidencias exactas en tu Biblioteca de diseños</p>
-          <p className="text-xs" style={{color:"var(--slate)"}}>Se vinculará el PNG únicamente cuando el nombre del diseño o SKU coincida sin ambigüedad. Los diseños que ya tienen PNG no se sobrescriben.</p>
-          <button type="button" disabled={saving} onClick={applyExactMatches} className="kulto-btn rounded-lg px-4 py-2 text-sm font-semibold" style={{background:"var(--sun)",color:"var(--ink)"}}>Vincular coincidencias exactas</button>
-        </div>}
-        <p className="text-xs" style={{color:"var(--slate)"}}>Si el diseño solo existe dentro de una foto de camiseta, necesitás su estampado PNG transparente para poder recolorear la prenda sin cambiar el estampado. Subilo una vez por diseño y lo compartimos con sus prendas vinculadas.</p>
-        <input className="w-full p-3 rounded-lg text-sm" value={artSearch} onChange={e=>setArtSearch(e.target.value)} placeholder="Buscar diseño por nombre o SKU..." style={{background:"var(--ink-3)",color:"var(--bone)"}}/>
-        <select className="w-full p-3 rounded-lg" aria-label="Diseño a vincular" value={artProductId} onChange={e=>setArtProductId(e.target.value)} style={{background:"var(--ink-3)",color:"var(--bone)"}}>
-          <option value="">Seleccioná un producto</option>
-          {products.filter(p=>[p.name,p.sku,p.category].join(" ").toLowerCase().includes(artSearch.toLowerCase())).map(p=><option key={p.id} value={p.id}>{p.name} · {p.category}{p.designGroup?" · grupo vinculado":""}</option>)}
-        </select>
-        <div className="flex flex-wrap gap-3 items-center">
-          <label className="text-xs font-semibold">¿En qué cara se imprime?
-            <select aria-label="Cara para el estampado" value={artSide} onChange={e=>setArtSide(e.target.value)} className="block mt-1 rounded-lg p-2 text-xs" style={{background:"var(--ink-3)",color:"var(--bone)",border:"1px solid var(--line)"}}>
-              <option value="front">Delante</option>
-              <option value="back">Detrás</option>
-            </select>
-          </label>
-        </div>
-        <label className="flex gap-2 text-sm items-center"><input type="checkbox" checked={applyToGroup} onChange={e=>setApplyToGroup(e.target.checked)}/> Reutilizar el mismo estampado en las prendas que comparten este diseño</label>
-        <p className="text-xs" style={{color:"var(--slate)"}}>Para la espalda subí el PNG del estampado, no la fotografía de la camiseta ya estampada. El diseño frontal no se copiará automáticamente al reverso.</p>
-        {designLibrary.length > 0 && (
-          <div className="space-y-1">
-            <p className="text-xs" style={{color:"var(--slate)"}}>O elegí el estampado que ya está subido en tu Biblioteca de diseños:</p>
-            <select disabled={!artProductId || saving} aria-label="Vincular estampado existente" defaultValue="" onChange={e=> { const art=designLibrary.find(d=>String(d.id)===e.target.value); if(art?.image) linkTransparentDesign(art.image); e.target.value=""; }}
-              className="block w-full p-3 rounded-lg text-sm" style={{background:"var(--ink-3)",color:"var(--bone)"}}>
-              <option value="">Seleccionar de Biblioteca de diseños</option>
-              {designLibrary.filter(d=>d.image).map(d=><option key={d.id} value={d.id}>{d.name}</option>)}
-            </select>
-          </div>
-        )}
-        <label className="block cursor-pointer rounded-xl px-4 py-3 text-center font-semibold text-sm" style={{border:"1px dashed var(--line)"}}>
-          {saving?"Guardando PNG…":"Subir estampado PNG transparente"}
-          <input disabled={!artProductId || saving} type="file" accept="image/png,image/webp" className="sr-only" onChange={e=>{uploadArtForDesign(e.target.files?.[0]);e.target.value="";}}/>
-        </label>
-      </div>
-      <div className="rounded-2xl p-5 space-y-3" style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}>
-        <h3 className="font-semibold">Asignar modelos a muchos productos</h3>
-        <select aria-label="Modelo" value={modelId} onChange={(e) => setModelId(e.target.value)} className="w-full p-3 rounded-lg" style={{ background: "var(--ink-3)", color: "var(--bone)" }}><option value="">Elegí un modelo</option>{models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select>
-        <div className="grid sm:grid-cols-2 gap-3">
-          <select aria-label="Categoría" value={category} onChange={(e) => setCategory(e.target.value)} className="w-full p-3 rounded-lg" style={{ background: "var(--ink-3)", color: "var(--bone)" }}><option value="">Todas las categorías</option>{categories.map((c) => <option key={c} value={c}>{c}</option>)}</select>
-          <select aria-label="Grupo" value={group} onChange={(e) => setGroup(e.target.value)} className="w-full p-3 rounded-lg" style={{ background: "var(--ink-3)", color: "var(--bone)" }}><option value="">Todos los grupos</option>{groups.map((g) => <option key={g} value={g}>{g}</option>)}</select>
-        </div>
-        <label className="text-sm flex items-center gap-2"><input type="checkbox" checked={onlyUnassigned} onChange={(e) => setOnlyUnassigned(e.target.checked)}/> Solo sin modelo asignado</label>
-        <p className="text-sm" style={{ color: "var(--slate)" }}>{matching.length} productos encontrados · {compatible.length} con PNG reutilizable · {matching.length - compatible.length} requieren recuperar su diseño PNG. Ninguna foto original se borra.</p>
-        <button type="button" onClick={assign} disabled={saving || !modelId || !compatible.length} className="kulto-btn rounded-full px-5 py-2.5 font-semibold" style={{ background: "var(--sun)", color: "var(--ink)", opacity: saving ? 0.6 : 1 }}>{saving ? `Asignando ${progress}…` : `Asignar a ${compatible.length} productos`}</button>
-      </div>
-      {status && <p role="status" className="text-sm rounded-xl p-3" style={{ border: "1px solid var(--line)", color: "var(--bone)" }}>{status}</p>}
-    </section>
+  const updateExisting = async (model,file,field) => {
+    if(!file)return;
+    setSaving(true);setStatus("");
+    try {
+      const result=await uploadImage(file);
+      const patch={[field]:result.url};
+      if(field==="base")patch.ar=result.ar;
+      if(field==="backBase")patch.backAr=result.ar;
+      await onSaveModels(models.map(m=>m.id===model.id?{...m,...patch}:m));
+      setStatus("Mockup actualizado. Comprobá los colores antes de publicar.");
+    }catch(e){setStatus("Error al actualizar: "+(e?.message||"Error"))}
+    finally{setSaving(false)}
+  };
+  const presentUploads = files => {
+    const acceptable=Array.from(files||[]).filter(f=>["image/png","image/webp"].includes(f.type)).slice(0,120);
+    const plan=makeArtworkBatchPlan(acceptable,products);
+    setBatchPlan(plan);
+    setStatus(acceptable.length?"Comprobá las coincidencias antes de guardar. No se sustituirán diseños existentes.":"Seleccioná archivos PNG/WebP válidos.");
+  };
+  const checkTransparentArt = async dataUrl => {
+    const image=await loadMockupImg(dataUrl);
+    const cv=document.createElement("canvas");cv.width=24;cv.height=24;
+    const c=cv.getContext("2d",{willReadFrequently:true});c.drawImage(image,0,0,24,24);
+    const d=c.getImageData(0,0,24,24).data;
+    return [0,23,23*24,24*24-1].some(p=>d[p*4+3]<245);
+  };
+  const importBatch = async plan => {
+    if(!plan.length)return;
+    const totalProducts=new Set(plan.flatMap(p=>p.unassigned.map(product=>product.id))).size;
+    if(!window.confirm("¿Vincular "+plan.length+" archivos a "+totalProducts+" productos por coincidencia exacta? Se conservarán los diseños existentes y las fotografías originales."))return;
+    setSaving(true);setStatus("");setProgress("0 / "+plan.length);
+    try {
+      const uploaded=[];
+      for(const [index,item] of plan.entries()){
+        let url=item.file.image||null;
+        if(!url){
+          const base64=await new Promise(resolve=>fileToBase64(item.file,resolve,1400,1,"image/png"));
+          if(!await checkTransparentArt(base64))throw Error(item.file.name+" no tiene fondo transparente. Los demás productos permanecen sin modificar.");
+          url=await uploadDataUrlToStorage(base64);
+        }
+        if(!url)throw Error("No se pudo subir "+item.file.name+". Ningún producto se ha vinculado todavía.");
+        uploaded.push({...item,url});
+        setProgress((index+1)+" / "+plan.length);
+      }
+      const updates=applyArtworkBatch(products,uploaded);
+      const outcome=await onSaveProductsBulk(updates);
+      if(outcome.failed)throw Error("Guardados: "+outcome.ok+"; fallaron: "+outcome.failed+". Revisá los productos.");
+      setStatus("Vinculados "+outcome.ok+" productos. Los diseños ambiguos y existentes no se han tocado. Revisá los resultados antes de publicar.");
+      setBatchPlan([]);
+    }catch(e){setStatus("Importación: "+(e?.message||"Error"))}
+    finally{setSaving(false);setProgress("")}
+  };
+  const existingArtPlan=makeArtworkBatchPlan(
+    designLibrary.filter(d=>d.image).map(d=>({name:d.name+".png",image:d.image})),products
   );
+  const readyLibraryArt=existingArtPlan.filter(item=>item.status==="ready");
+  const uploadOneArt = async file => {
+    const product=products.find(p=>String(p.id)===selectedProductId);
+    if(!product||!file){setStatus("Elegí primero un producto y un archivo.");return;}
+    setSaving(true);setStatus("");
+    try {
+      const base64=await new Promise(resolve=>fileToBase64(file,resolve,1400,1,"image/png"));
+      if(!await checkTransparentArt(base64))throw Error("El diseño no tiene transparencia. Usá el estampado original, no la foto de la camiseta.");
+      const url=await uploadDataUrlToStorage(base64);
+      if(!url)throw Error("No se pudo subir el diseño.");
+      const field=selectedSide==="back"?"backDesign":"design";
+      const linked=product.designGroup?products.filter(p=>p.designGroup===product.designGroup):[product];
+      const updates=linked.filter(p=>!p.mockup?.[field]).map(p=>({...p,mockup:{...(p.mockup||{}),[field]:url,enabled:true}}));
+      if(!updates.length)throw Error("Ya existe un estampado en esa cara; no se sobrescribió.");
+      const outcome=await onSaveProductsBulk(updates);
+      setStatus("Asociados "+outcome.ok+" producto(s). Fallidos: "+outcome.failed+".");
+    }catch(e){setStatus(e?.message||"Error al vincular el estampado")}
+    finally{setSaving(false)}
+  };
+  const labelStyle={background:"var(--ink-3)",color:"var(--bone)",border:"1px solid var(--line)"};
+  const selection=(id)=>scopeOptions.find(x=>x.id===id)?.label||id;
+  return <section className="space-y-6">
+    <header>
+      <h2 className="kulto-display text-2xl" style={{color:"var(--bone)"}}>Mockups de prendas</h2>
+      <p className="text-sm mt-2" style={{color:"var(--slate)"}}>Una foto limpia compartida por tipo de prenda. Las camisetas clásicas y oversize usan el mismo mockup. Las sudaderas con/sin capucha, las tote bags y nuevas categorías tienen sus propias bases. No modifica fotografías originales ni diseños.</p>
+    </header>
+    <div className="rounded-2xl p-5 space-y-4" style={{background:"var(--ink-2)",border:"1px solid var(--line)"}}>
+      <h3 className="font-bold text-lg">1. Crear o seleccionar un mockup</h3>
+      <label className="block text-sm font-semibold">¿Dónde se utilizará?
+        <select aria-label="Tipo de prenda para el mockup" value={scope} onChange={e=>setScope(e.target.value)} className="block w-full p-3 rounded-lg mt-2" style={labelStyle}>
+          {scopeOptions.map(option=><option key={option.id} value={option.id}>{option.label}</option>)}
+        </select>
+      </label>
+      <div className="rounded-xl p-3 text-sm" style={{background:"var(--ink-3)",color:"var(--bone)"}}>
+        <strong>{impact.total} productos afectados</strong> · {impact.withArt} con PNG de diseño · {impact.missingArt} sin PNG identificado
+        {impact.examples.length>0&&<p className="text-xs mt-1" style={{color:"var(--slate)"}}>Ejemplos: {impact.examples.join(", ")}</p>}
+      </div>
+      <input value={name} onChange={e=>setName(e.target.value)} placeholder={"Nombre del mockup (opcional): "+selectedScope.label} aria-label="Nombre del mockup" className="w-full rounded-lg p-3" style={labelStyle}/>
+      <div className="grid grid-cols-2 gap-3">
+        {[[front,"Frente limpio · obligatorio","front"],[back,"Espalda limpia · opcional","back"]].map(([img,label,field])=><label key={field} className="cursor-pointer rounded-xl p-3 text-sm text-center" style={{border:"1px dashed var(--line)"}}>
+          <p className="font-semibold mb-2">{label}</p>
+          {img?<img src={img.url} alt={label} className="mx-auto h-36 object-contain"/>:<div className="h-36 flex items-center justify-center" style={{color:"var(--slate)"}}>Subir PNG o WebP</div>}
+          <input aria-label={label} type="file" accept="image/png,image/webp" disabled={saving} className="sr-only" onChange={e=>{pick(e.target.files?.[0],field);e.target.value=""}}/>
+        </label>)}
+      </div>
+      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={removeBackground} onChange={e=>setRemoveBackground(e.target.checked)}/> Intentar quitar automáticamente el fondo al subir</label>
+      <p className="text-xs" style={{color:"var(--slate)"}}>Si el recoloreado deja bordes blancos, utiliza una máscara de silueta PNG transparente. La máscara debe coincidir exactamente con la fotografía limpia.</p>
+      <div className="grid grid-cols-2 gap-3">
+        {[[frontMask,"Máscara delantera","frontMask"],[backMask,"Máscara trasera","backMask"]].map(([img,label,field])=><label key={field} className="cursor-pointer rounded-xl p-3 text-xs text-center" style={{border:"1px dashed var(--line)"}}>
+          <p className="font-semibold mb-2">{label}</p>
+          {img?<img src={img.url} alt={label} className="mx-auto h-24 object-contain"/>:<div className="h-24 flex items-center justify-center" style={{color:"var(--slate)"}}>Opcional</div>}
+          <input type="file" accept="image/png,image/webp" disabled={saving} className="sr-only" onChange={e=>{pick(e.target.files?.[0],field);e.target.value=""}}/>
+        </label>)}
+      </div>
+      <button type="button" disabled={saving||!front?.url} onClick={saveNew} className="kulto-btn rounded-full px-5 py-2.5 font-bold" style={{background:"var(--sun)",color:"var(--ink)",opacity:saving?0.5:1}}>{saving?"Guardando...":"Guardar y aplicar este mockup a "+impact.total+" productos"}</button>
+    </div>
+    <div className="space-y-3">
+      <h3 className="font-bold text-lg">2. Mockups ya subidos ({models.length})</h3>
+      <p className="text-xs" style={{color:"var(--slate)"}}>Seleccioná qué modelo usa cada tipo. No tendrás que subir o asignar el mismo mockup por cada diseño.</p>
+      {models.length===0&&<p className="text-sm" style={{color:"var(--slate)"}}>Todavía no hay mockups en la biblioteca. Podés crear el primero arriba.</p>}
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        {models.map(m=>{
+          const target=m.targetScope||(["camiseta-clasica","camiseta-oversize"].includes(m.garmentKind)?"camisetas":m.garmentKind);
+          const affected=countMockupImpact(products,target);
+          const selected=resolveLibraryMockup(models,{category:target==="camisetas"?"Camisetas":target==="sudadera-capucha"?"Sudadera con capucha":target==="sudadera-sin-capucha"?"Sudadera sin capucha":target==="tote-bag"?"Tote bags":target==="top"?"Tops deportivos":target?.startsWith("categoria:")?target.slice(10):"Accesorios"})?.id===m.id;
+          return <div key={m.id} className="rounded-xl p-4 space-y-3" style={{background:"var(--ink-2)",border:"1px solid var(--line)"}}>
+            <p className="font-bold text-sm">{m.name}</p>
+            <div className="grid grid-cols-2 gap-2">
+              <img src={m.base} alt={"Frente de "+m.name} className="h-32 w-full object-contain"/>
+              {m.backBase?<img src={m.backBase} alt={"Espalda de "+m.name} className="h-32 w-full object-contain"/>:<span className="h-32 flex items-center justify-center text-xs" style={{color:"var(--slate)"}}>Sin espalda</span>}
+            </div>
+            <label className="block text-xs">Aplicar a
+              <select value={target||""} disabled={saving} onChange={e=>changeScope(m,e.target.value)} className="block w-full mt-1 p-2 rounded-lg" style={labelStyle}>
+                {!scopeOptions.some(x=>x.id===target)&&<option value={target||""}>{target||"Sin clasificar"}</option>}
+                {scopeOptions.map(option=><option key={option.id} value={option.id}>{option.label}</option>)}
+              </select>
+            </label>
+            <p className="text-xs" style={{color:"var(--slate)"}}>{affected.total} productos de esta familia · {affected.withArt} con PNG</p>
+            <button type="button" disabled={saving||!m.base} onClick={()=>activate(m)} className="kulto-btn rounded-lg w-full p-2 text-sm font-semibold" style={{background:selected?"var(--sun)":"var(--ink-3)",color:selected?"var(--ink)":"var(--bone)",border:"1px solid var(--line)"}}>{selected?"✓ Mockup actualmente seleccionado":"Usar en estos productos"}</button>
+            <div className="flex gap-4 flex-wrap text-xs">
+              <button type="button" className="underline" onClick={()=>setPreviewId(previewId===m.id?null:m.id)}>Probar colores</button>
+              <button type="button" className="underline" onClick={()=>setEditId(editId===m.id?null:m.id)}>Cambiar fotos/máscaras</button>
+            </div>
+            {previewId===m.id&&<div className="space-y-2">
+              <label className="text-xs flex items-center gap-2">Color de prueba <input type="color" value={previewColor} onChange={e=>setPreviewColor(e.target.value)}/></label>
+              <div className="grid grid-cols-2 h-40 gap-1"><MockupComposite mockup={{...m,design:null}} hex={previewColor}/>{m.backBase?<MockupComposite mockup={{...m,base:m.backBase,mask:m.backMask,design:null}} hex={previewColor}/>:null}</div>
+            </div>}
+            {editId===m.id&&<div className="grid grid-cols-2 gap-2">
+              {[["base","Frente"],["backBase","Espalda"],["mask","Máscara delante"],["backMask","Máscara detrás"]].map(([field,label])=><label key={field} className="cursor-pointer text-xs rounded-lg p-2" style={{border:"1px dashed var(--line)"}}>{label}<input type="file" accept="image/png,image/webp" disabled={saving} className="block w-full text-[10px]" onChange={e=>{updateExisting(m,e.target.files?.[0],field);e.target.value=""}}/></label>)}
+            </div>}
+          </div>;
+        })}
+      </div>
+    </div>
+    <div className="rounded-2xl p-5 space-y-4" style={{background:"var(--ink-2)",border:"1px solid var(--line)"}}>
+      <h3 className="font-bold text-lg">3. Diseños: recuperarlos sin subir uno por uno</h3>
+      <p className="text-sm" style={{color:"var(--slate)"}}>Primero se aprovechan los PNG que ya existen en la Biblioteca de diseños. Se vinculan por nombre, SKU o grupo de diseño exacto, sin sustituir ninguna imagen o estampado existente.</p>
+      <p className="text-sm"><strong>{readyLibraryArt.length}</strong> diseños de biblioteca con coincidencia segura para vincular.</p>
+      <button type="button" disabled={saving||!readyLibraryArt.length} onClick={()=>importBatch(readyLibraryArt)} className="kulto-btn rounded-lg px-4 py-2 text-sm font-semibold" style={{background:"var(--sun)",color:"var(--ink)"}}>Vincular automáticamente los diseños ya cargados</button>
+      <div className="border-t pt-4 space-y-3" style={{borderColor:"var(--line)"}}>
+        <h4 className="font-semibold">O subir muchos PNG juntos</h4>
+        <p className="text-xs" style={{color:"var(--slate)"}}>Elegí varios PNG a la vez desde una carpeta; se buscará coincidencia exacta con nombre o SKU. Para una cara trasera, añade «-espalda» al nombre del archivo (ejemplo: JA-01-espalda.png). Los archivos no encontrados se muestran para revisión y NO se asignan.</p>
+        <input aria-label="Subir diseños PNG en lote" type="file" multiple accept="image/png,image/webp" disabled={saving} className="block w-full text-xs" onChange={e=>{presentUploads(e.target.files);e.target.value=""}}/>
+        {batchPlan.length>0&&<div className="space-y-2">
+          <p className="text-sm">{batchPlan.length} archivos · {readyBatch.length} coincidencias listas · {(planStats.ambiguous||0)+(planStats.collision||0)} ambiguos · {planStats.unmatched||0} sin coincidencia · {planStats.existing||0} ya vinculados</p>
+          <div className="max-h-44 overflow-y-auto space-y-1">
+            {batchPlan.map((item,i)=><div key={i} className="flex items-start justify-between gap-3 text-xs p-2 rounded" style={{background:"var(--ink-3)"}}>
+              <span className="truncate">{item.file.name} · {item.side==="back"?"espalda":"delante"}</span>
+              <span className="shrink-0">{item.status==="ready"?item.unassigned.length+" producto(s)":item.status==="existing"?"Ya existe":item.status==="unmatched"?"Sin coincidencia":item.status==="ambiguous"||item.status==="collision"?"Ambiguo":"No válido"}</span>
+            </div>)}
+          </div>
+          <button type="button" disabled={saving||!readyBatch.length} onClick={()=>importBatch(readyBatch)} className="kulto-btn rounded-lg px-4 py-2 font-semibold text-sm" style={{background:"var(--sun)",color:"var(--ink)"}}>Guardar {readyBatch.length} archivos con coincidencia segura</button>
+        </div>}
+      </div>
+      <div className="border-t pt-4 space-y-3" style={{borderColor:"var(--line)"}}>
+        <h4 className="font-semibold">Vincular manualmente un diseño que no coincide</h4>
+        <select aria-label="Producto para diseño manual" value={selectedProductId} onChange={e=>setSelectedProductId(e.target.value)} className="w-full rounded-lg p-2" style={labelStyle}>
+          <option value="">Elegí un producto</option>
+          {products.map(p=><option key={p.id} value={p.id}>{p.name} · {p.sku||p.category}</option>)}
+        </select>
+        <select value={selectedSide} onChange={e=>setSelectedSide(e.target.value)} className="w-full rounded-lg p-2" style={labelStyle} aria-label="Cara del diseño"><option value="front">Delante</option><option value="back">Espalda</option></select>
+        <input type="file" aria-label="Subir diseño manual" accept="image/png,image/webp" disabled={saving||!selectedProductId} className="text-xs block w-full" onChange={e=>{uploadOneArt(e.target.files?.[0]);e.target.value=""}}/>
+      </div>
+      <p className="text-xs" style={{color:"var(--slate)"}}>Importante: si el dibujo solo aparece dentro de una fotografía de una camiseta ya estampada, no existe un PNG transparente reutilizable. Para esos productos se conserva la fotografía original hasta obtener el archivo limpio; no se inventa ni recorta automáticamente el estampado.</p>
+    </div>
+    {saving&&progress&&<p role="status" className="text-xs">{progress}</p>}
+    {status&&<p role="status" className="rounded-xl p-3 text-sm" style={{border:"1px solid var(--line)",color:"var(--bone)"}}>{status}</p>}
+  </section>;
 }
-
 
 function AdminPromotionsPanel({ products, settings, onSaveSettings }) {
   const current = settings.storefrontPromotion || {};
