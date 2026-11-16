@@ -1,7 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App.jsx";
-import Garment3DDemo from "./Garment3DDemo.jsx";
 import "./index.css";
 
 // Protección contra traductores automáticos del navegador y extensiones que
@@ -22,6 +21,6 @@ if (typeof Node === "function" && Node.prototype) {
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
-    {new URLSearchParams(window.location.search).get("vista3d")==="demo" ? <Garment3DDemo/> : <App />}
+    <App />
   </React.StrictMode>
 );
