@@ -17317,6 +17317,7 @@ function AdminGarmentMockupLibrary({ products, models, designLibrary = [], onSav
       if(!target)throw Error("Asigná primero un tipo de prenda.");
       await onSaveModels(models.map(m=>({
         ...m,
+        enabled:m.id===model.id?true:m.enabled,
         isDefaultForScope:m.id===model.id?true:modelHasScope(m,target)?false:m.isDefaultForScope,
         sharedForAllTshirts:target==="camisetas"?m.id===model.id:m.sharedForAllTshirts
       })));
@@ -17376,6 +17377,8 @@ function AdminGarmentMockupLibrary({ products, models, designLibrary = [], onSav
           const base64=await new Promise(resolve=>fileToBase64(item.file,resolve,1400,1,"image/png"));
           if(!await checkTransparentArt(base64))throw Error(item.file.name+" no tiene fondo transparente. Los demás productos permanecen sin modificar.");
           url=await uploadDataUrlToStorage(base64);
+        } else if(!await checkTransparentArt(url)) {
+          throw Error(item.file.name+" no tiene un PNG transparente verificable y no se ha vinculado.");
         }
         if(!url)throw Error("No se pudo subir "+item.file.name+". Ningún producto se ha vinculado todavía.");
         uploaded.push({...item,url});
@@ -17390,7 +17393,7 @@ function AdminGarmentMockupLibrary({ products, models, designLibrary = [], onSav
     finally{setSaving(false);setProgress("")}
   };
   const existingArtPlan=makeArtworkBatchPlan(
-    designLibrary.filter(d=>d.image).map(d=>({name:d.name+".png",image:d.image})),products
+    designLibrary.filter(d=>d.image).map(d=>({name:String(d.name||"").replace(/\.(png|webp)$/i,"")+".png",image:d.image})),products
   );
   const readyLibraryArt=existingArtPlan.filter(item=>item.status==="ready");
   const uploadOneArt = async file => {
