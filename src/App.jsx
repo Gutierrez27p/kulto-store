@@ -3,6 +3,7 @@ import { seasonalPricing, isOversizeGarment } from "./promotion-pricing.js";
 import { backgroundSilhouette } from "./garment-mask.js";
 import { safeRecolorPixel, growSilhouette } from "./garment-color.js";
 import { selectGarmentArt } from "./garment-art.js";
+import { isApproved3DModel, preferredGarmentView } from "./garment-viewer-policy.js";
 const Garment3DViewer = React.lazy(() => import("./Garment3DViewer.jsx"));
 import { coverForHomeCategory } from "./home-category-covers.js";
 import "./editorial.css";
@@ -4127,6 +4128,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
   const [showUploadedPhoto, setShowUploadedPhoto] = useState(!!firstPhoto);
   const [showEntryCover, setShowEntryCover] = useState(!!firstPhoto);
   const [viewMode, setViewMode] = useState("photo");
+  const [viewerWarning, setViewerWarning] = useState("");
   const [sizeIdx, setSizeIdx] = useState(0);
   const [aud, setAud] = useState(() => audsOf(product)[0] || "h");
   const [designMode, setDesignMode] = useState(product.designs && product.designs.length ? "design" : "custom");
@@ -4151,6 +4153,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
     setShowUploadedPhoto(!!firstPhoto);
     setShowEntryCover(!!firstPhoto);
     setViewMode("photo");
+    setViewerWarning("");
     setSizeIdx(0);
     setAud(audsOf(product)[0] || "h");
     setDesignMode(product.designs && product.designs.length ? "design" : "custom");
@@ -4178,10 +4181,12 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
   const mock = activeMockup(product);
   // Always honor the explicitly configured mockup; other uploaded photos remain in the gallery.
   const mockActive = !!mock;
-  const can3D = ["camisetas", "sudaderas", "tops", "tote"].includes(garmentFamilyOf(product));
+  const is3DGarment = ["camisetas", "sudaderas", "tops", "tote"].includes(garmentFamilyOf(product));
   const assignedModel3D = GARMENT_MOCKUP_LIBRARY.find(m=>m.id===product.garmentMockupId);
   const eligibleModels3D = GARMENT_MOCKUP_LIBRARY.filter(m=>m.enabled !== false && m.garmentKind && modelMatchesProduct(m, product));
   const model3D = assignedModel3D || (eligibleModels3D.length===1 ? eligibleModels3D[0] : null);
+  // Do not show temporary tube-shaped geometry to buyers. Only reviewed GLBs.
+  const can3D = is3DGarment && isApproved3DModel(model3D);
   const mockHex = color?.hex || "#ffffff";
   const autoImage = useAutoColorImage(product, color, !mockActive && colorImages.length === 0, imgIdx);
   const activeImage = (showEntryCover && firstPhoto) || (colorImages.length === 0 && autoImage) || images[imgIdx] || null;
@@ -4305,6 +4310,12 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
                 frontPlacement={{x:mock?.x,y:mock?.y,w:mock?.w,rot:mock?.rot}}
                 backPlacement={{x:mock?.backX,y:mock?.backY,w:mock?.backW,rot:mock?.backRot}}
                 modelUrl={model3D?.glbUrl || null}
+                onUnavailable={() => {
+                  const fallback = preferredGarmentView({hasColorPhotos:colorImages.length>0,hasMockup:mockActive});
+                  setViewMode(fallback);
+                  setShowUploadedPhoto(fallback==="photo");
+                  setViewerWarning("El modelo 3D no pudo cargarse. Se muestra la imagen de la prenda.");
+                }}
               />
             </React.Suspense>
           ) : viewMode === "mockup" && mockActive ? (
@@ -4394,8 +4405,9 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
             ))}
           </div>
         )}
+        {viewerWarning && <p role="status" className="text-xs mt-2" style={{color:"var(--bone)"}}>{viewerWarning}</p>}
         <p className="text-xs mt-2" style={{ color: "var(--slate)" }}>
-          Vista previa orientativa. El sublimado final puede variar ligeramente.
+          Vista previa orientativa. Los colores y el estampado final pueden variar ligeramente.
         </p>
       </div>
 
@@ -4441,7 +4453,12 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
           {product.colors && product.colors.length > 0 ? (
             <div className="flex flex-wrap gap-2">
               {product.colors.map((c, i) => !colorOkForAud(product, c, aud) ? null : (
-                <ColorSwatch key={i} hex={c.hex} title={c.name} selected={i === colorIdx} onClick={() => { setColorIdx(i); setShowEntryCover(false); setShowUploadedPhoto(!mockActive); setViewMode(can3D?"3d":mockActive?"mockup":"photo"); if (product.sizes && !sizeOkForColor(product, product.sizes[sizeIdx], product.colors[i])) setSizeIdx(firstOkSizeIdx(product, product.colors[i])); }} />
+                <ColorSwatch key={i} hex={c.hex} title={c.name} selected={i === colorIdx} onClick={() => {
+                    const nextView = preferredGarmentView({hasColorPhotos:getColorImages(c).length>0,hasMockup:mockActive});
+                    setColorIdx(i);setShowEntryCover(false);setShowUploadedPhoto(nextView==="photo");
+                    setViewMode(nextView);setViewerWarning("");
+                    if(product.sizes && !sizeOkForColor(product,product.sizes[sizeIdx],product.colors[i]))setSizeIdx(firstOkSizeIdx(product,product.colors[i]));
+                  }} />
               ))}
             </div>
           ) : (
@@ -17340,7 +17357,7 @@ function AdminGarmentMockupLibrary({ products, categories, groups, models, desig
     if (!name.trim() || !front?.url) { setStatus("Indicá el nombre y subí al menos el frente."); return; }
     setSaving(true);
     try {
-      const next = [...models, { id: genId("garment"), name: name.trim(), garmentKind, base: front.url, ar: front.ar, backBase: back?.url || null, backAr: back?.ar || null, mask: frontMask?.url || null, backMask: backMask?.url || null, glbUrl: glbDraft.trim() || null, enabled: true, x: 50, y: 38, w: 38, backX: 50, backY: 38, backW: 40 }];
+      const next = [...models, { id: genId("garment"), name: name.trim(), garmentKind, base: front.url, ar: front.ar, backBase: back?.url || null, backAr: back?.ar || null, mask: frontMask?.url || null, backMask: backMask?.url || null, glbUrl: glbDraft.trim() || null, glbApproved:false, enabled: true, x: 50, y: 38, w: 38, backX: 50, backY: 38, backW: 40 }];
       await onSaveModels(next);
       setName(""); setGlbDraft(""); setFront(null); setBack(null); setFrontMask(null); setBackMask(null); setStatus("Modelo guardado. Ya podés asignarlo a productos.");
     } catch (e) { setStatus("Error al guardar: " + (e?.message || "sin conexión")); }
@@ -17358,7 +17375,7 @@ function AdminGarmentMockupLibrary({ products, categories, groups, models, desig
       if(result.error)throw new Error(result.error.message || "El bucket no acepta modelos .glb");
       const data = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path).data;
       if(!data?.publicUrl)throw new Error("No se pudo obtener el enlace público");
-      await onSaveModels(models.map(m=>m.id===model.id?{...m,glbUrl:data.publicUrl}:m));
+      await onSaveModels(models.map(m=>m.id===model.id?{...m,glbUrl:data.publicUrl,glbApproved:false}:m));
       setStatus("Modelo 3D vinculado a "+model.name+". Probaló en la vista previa.");
     }catch(err){setStatus("No se pudo subir GLB: "+(err?.message||"Error")+". Podés usar una URL HTTPS accesible.")}
     finally {setSaving(false);}
@@ -17367,7 +17384,7 @@ function AdminGarmentMockupLibrary({ products, categories, groups, models, desig
     const url=String(raw||"").trim();
     if(url && !/^https:\/\//i.test(url)){setStatus("La URL del modelo debe comenzar por https://");return;}
     setSaving(true);setStatus("");
-    try{await onSaveModels(models.map(m=>m.id===model.id?{...m,glbUrl:url||null}:m));setStatus("Referencia 3D actualizada.");}
+    try{await onSaveModels(models.map(m=>m.id===model.id?{...m,glbUrl:url||null,glbApproved:false}:m));setStatus("Referencia 3D actualizada.");}
     catch(e){setStatus(e?.message||"No se pudo guardar el modelo 3D");}
     finally{setSaving(false);}
   };
@@ -17503,14 +17520,28 @@ function AdminGarmentMockupLibrary({ products, categories, groups, models, desig
           <div className="grid grid-cols-2 gap-2"><img src={m.base} alt="Delante" className="h-32 w-full object-contain"/>{m.backBase ? <img src={m.backBase} alt="Detrás" className="h-32 w-full object-contain"/> : <div className="h-32 flex items-center justify-center text-xs" style={{color:"var(--slate)"}}>Sin vista trasera</div>}</div>
           <p className="text-xs mt-2" style={{ color: "var(--slate)" }}>{products.filter((p) => p.garmentMockupId === m.id).length} productos asignados</p>
           <div className="mt-3 space-y-2">
-            <p className="text-xs font-semibold">Modelo 3D (GLB opcional)</p>
-            <p className="text-[11px]" style={{color:"var(--slate)"}}>{m.glbUrl?"Usando archivo 3D personalizado":"Usando geometría 3D integrada por tipo de prenda"}</p>
+            <p className="text-xs font-semibold">Modelo 3D de alta calidad (GLB)</p>
+            <p className="text-[11px]" style={{color:"var(--slate)"}}>{m.glbUrl?(m.glbApproved?"Modelo aprobado para compradores":"Archivo pendiente de revisión. Los clientes ven fotos/mockups."):"Sin archivo 3D. Los compradores ven fotos/mockups, no geometría provisional."}</p>
             <label className="text-xs block cursor-pointer rounded-lg px-3 py-2" style={{border:"1px dashed var(--line)"}}>Subir .glb para este modelo
               <input type="file" accept=".glb,model/gltf-binary" disabled={saving} className="block w-full text-[10px]" onChange={e=>{upload3DForModel(m,e.target.files?.[0]);e.target.value="";}}/>
             </label>
             <label className="text-xs block">O pegar URL GLB HTTPS
               <input key={m.glbUrl||"empty"} defaultValue={m.glbUrl||""} placeholder="https://.../modelo.glb" onBlur={e=>{if(e.target.value.trim()!==(m.glbUrl||""))update3DUrl(m,e.target.value);}} className="block w-full rounded-lg mt-1 p-2 text-xs" style={{background:"var(--ink-3)",border:"1px solid var(--line)",color:"var(--bone)"}}/>
             </label>
+            {m.glbUrl && <label className="flex gap-2 items-start text-xs">
+              <input type="checkbox" checked={m.glbApproved === true} disabled={saving} onChange={async e => {
+                setSaving(true);setStatus("");
+                try{await onSaveModels(models.map(x=>x.id===m.id?{...x,glbApproved:e.target.checked}:x));setStatus(e.target.checked?"Modelo habilitado. Verificá frente, espalda, estampados y colores en Preview.":"Visor 3D desactivado para clientes.");}
+                catch(err){setStatus("No se pudo actualizar: "+(err?.message||"error"));}
+                finally{setSaving(false);}
+              }}/>
+              <span><strong>Activar visor 3D para compradores</strong> — marcá esto solo después de revisar el GLB con el color oscuro, frente y espalda, y comprobar que los estampados encajan en la geometría.</span>
+            </label>}
+            {m.glbUrl && <div className="rounded-xl overflow-hidden" style={{height:270,background:"var(--ink-3)"}}>
+              <React.Suspense fallback={<p className="text-xs p-4">Cargando vista de revisión...</p>}>
+                <Garment3DViewer product={{garment3DKind:m.garmentKind,name:m.name}} hex={previewColor} frontArt={null} backArt={null} logoArt={null} modelUrl={m.glbUrl}/>
+              </React.Suspense>
+            </div>}
           </div>
           <div className="flex flex-wrap gap-3 mt-2"><button type="button" onClick={() => setTestModel(testModel === m.id ? null : m.id)} className="text-xs underline">Probar colores</button><button type="button" onClick={() => setUpdatingModel(updatingModel === m.id ? null : m.id)} className="text-xs underline">Editar fotos y máscaras</button></div>
           {updatingModel === m.id && <div className="grid grid-cols-2 gap-2 mt-3">{[["base", "Frente"], ["backBase", "Espalda"], ["mask", "Máscara frente"], ["backMask", "Máscara espalda"]].map(([field, label]) => <label key={field} className="cursor-pointer rounded-lg p-2 text-xs text-center" style={{ border: "1px dashed var(--line)" }}><span className="block mb-1">{label}</span><input aria-label={label} type="file" accept="image/png,image/webp" disabled={saving} onChange={(e) => { updateExistingModel(m, e.target.files?.[0], field); e.target.value = ""; }} className="w-full text-[10px]" /></label>)}</div>}

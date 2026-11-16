@@ -144,9 +144,10 @@ function normalizedGlbScene(gltf,hex){
  });
  return obj;
 }
-export default function Garment3DViewer({ product, hex, frontArt, backArt, logoArt, modelUrl, frontPlacement, backPlacement }) {
+export default function Garment3DViewer({ product, hex, frontArt, backArt, logoArt, modelUrl, frontPlacement, backPlacement, onUnavailable }) {
  const box=useRef(null),engine=useRef(null);
  const [failure,setFailure]=useState(""),[side,setSide]=useState("DELANTE"),[zoomLabel,setZoomLabel]=useState("100%");
+ const [loading,setLoading]=useState(!!modelUrl);
  const [showPrint,setShowPrint]=useState(true);
  const kind=infer3DKind(product,{garmentKind:product?.garment3DKind});
  useEffect(()=>{
@@ -169,7 +170,8 @@ export default function Garment3DViewer({ product, hex, frontArt, backArt, logoA
    renderer.domElement.style.touchAction="none";
    holder.appendChild(renderer.domElement);
    const rig=new THREE.Group();scene.add(rig);
-   let garment=makeKind(kind,hex);
+   // A real customer must never see the former tube-and-cylinder placeholder.
+   let garment=modelUrl ? new THREE.Group() : makeKind(kind,hex);
    rig.add(garment);
    const decals=new THREE.Group();rig.add(decals);
    let current={yaw:0,pitch:.08,zoom:1};
@@ -216,9 +218,9 @@ export default function Garment3DViewer({ product, hex, frontArt, backArt, logoA
        try{
          const replacement=normalizedGlbScene(gltf,hex);
          rig.remove(garment);garment=replacement;rig.add(garment);
-         engine.current.garment=garment;engine.current.isGlb=true;
-       }catch{setFailure("No se pudo preparar el GLB. Se muestra el modelo 3D integrado.");}
-     },undefined,()=>{if(!dead)setFailure("El archivo 3D personalizado no está disponible. Se muestra el modelo integrado.");});
+         engine.current.garment=garment;engine.current.isGlb=true;setLoading(false);
+       }catch{setFailure("No se pudo preparar el modelo 3D.");setLoading(false);onUnavailable?.();}
+     },undefined,()=>{if(!dead){setFailure("No se pudo cargar el modelo 3D.");setLoading(false);onUnavailable?.();}});
    }
    return ()=>{
      dead=true;cancelAnimationFrame(raf);resize?.disconnect();
@@ -274,6 +276,7 @@ export default function Garment3DViewer({ product, hex, frontArt, backArt, logoA
  const reset=()=>{const r=engine.current;if(!r)return;r.current.yaw=0;r.current.pitch=.08;r.current.zoom=1;setSide("DELANTE");setZoomLabel("100%");};
  return <div className="w-full h-full relative overflow-hidden" style={{background:"#454248"}} aria-label="Modelo tridimensional de prenda con color y estampados configurables">
    <div ref={box} className="absolute inset-0"/>
+   {loading && <div role="status" className="absolute inset-0 flex items-center justify-center text-sm" style={{background:"#454248",color:"#fff"}}>Cargando modelo de prenda…</div>}
    <div className="absolute top-3 left-3 rounded-full px-2.5 py-1 text-[10px] font-bold" style={{background:"rgba(15,15,19,.9)",color:"#fff"}}>3D REAL · {side} · {zoomLabel}</div>
    {failure&&<div role="status" className="absolute top-10 left-3 right-3 text-[10px] rounded-lg p-2" style={{background:"rgba(15,15,19,.85)",color:"#fff"}}>{failure}</div>}
    <div className="absolute right-3 top-3 flex items-center gap-2">
