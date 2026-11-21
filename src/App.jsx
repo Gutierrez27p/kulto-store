@@ -20396,7 +20396,12 @@ export default function App() {
       // Cerrar el carrito o la ficha con la X equivale a "atrás": así no
       // quedan entradas de más en el historial.
       else if (prev.page === cur.page && ((prev.cart && !cur.cart && prev.sp === cur.sp) || (prev.sp && !cur.sp && prev.cart === cur.cart))) window.history.back();
-      else if (prev.page !== cur.page || prev.sp !== cur.sp || prev.cart !== cur.cart) window.history.pushState({ ...cur, idx: (prev.idx || 0) + 1 }, "");
+      // Cambiar de una ficha a otra relacionada sustituye la ficha actual:
+      // no acumula productos en el historial ni obliga a cerrar uno por uno.
+      else if (prev.page === cur.page && prev.sp && cur.sp && prev.sp !== cur.sp && !prev.cart && !cur.cart)
+        window.history.replaceState({ ...cur, idx: prev.idx || 0 }, "");
+      else if (prev.page !== cur.page || prev.sp !== cur.sp || prev.cart !== cur.cart)
+        window.history.pushState({ ...cur, idx: (prev.idx || 0) + 1 }, "");
     } catch { /* si el navegador no deja tocar el historial, la web sigue igual */ }
   }, [page, selectedProduct, cartOpen, loading]);
 
@@ -21638,6 +21643,7 @@ export default function App() {
 
       {selectedProduct && (
         <ProductModal
+          key={selectedProduct.id}
           product={selectedProduct}
           allProducts={sellableProducts}
           settings={settings}
