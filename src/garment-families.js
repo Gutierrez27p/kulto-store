@@ -6,6 +6,7 @@ const text = p => [p?.category,p?.subcategory,p?.garmentType,p?.garmentStyle,p?.
 export const GARMENT_FAMILIES = [
   { id:"camisetas", title:"Camisetas", subtitle:"Clásicas y oversize", fits:["Clásica","Oversize"] },
   { id:"sudaderas", title:"Sudaderas", subtitle:"Con capucha y sin capucha", fits:["Con capucha","Sin capucha"] },
+  { id:"chaquetas", title:"Chaquetas", subtitle:"La chaqueta clásica", fits:[] },
   { id:"tops", title:"Tops deportivos", subtitle:"Entrenamiento y estilo", fits:[] },
   { id:"tote", title:"Tote bags", subtitle:"Bolsas reutilizables", fits:[] },
   { id:"accesorios", title:"Accesorios", subtitle:"Complementos", fits:[] },
@@ -23,6 +24,7 @@ export const GARMENT_MODEL_TYPES = [
 export function garmentFamilyOf(product={}) {
   const s=text(product);
   if (/sudadera|hoodie|jersey|pulover|sweatshirt/.test(s)) return "sudaderas";
+  if (/chaqueta|chamarra|cazadora|jacket/.test(s)) return "chaquetas";
   if (/tote|bolsa de tela|bolsa tote|tote.?bag/.test(s)) return "tote";
   if (/top|bra sport|sujetador deportivo/.test(s)) return "tops";
   if (/llavero|lanyard|accesorio|gorra|taza/.test(s)) return "accesorios";
