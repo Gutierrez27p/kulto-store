@@ -62,3 +62,15 @@ export function menuTileMedia(media={},key="",fallbackImage=null){
     y:Number.isFinite(Number(m.y))?Math.max(0,Math.min(100,Number(m.y))):50
   };
 }
+
+export function megaMenuImageStyle(media){
+  // Translation moves the photograph itself, not just the object-position
+  // inside a fixed img element; the sliders remain effective even at zoom 100%.
+  const x=(Number(media.x)-50)*0.6;
+  const y=(Number(media.y)-50)*0.6;
+  return {
+    objectFit:media.fit,
+    objectPosition:"center center",
+    transform:`translate(${x}%, ${y}%) scale(${media.scale/100})`
+  };
+}
