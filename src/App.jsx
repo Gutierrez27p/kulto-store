@@ -17621,6 +17621,9 @@ function AdminPromotionsPanel({ products, settings, onSaveSettings }) {
   const [savingCampaign, setSavingCampaign] = useState(false);
   const [uploadingCampaignImage, setUploadingCampaignImage] = useState(false);
   const [term, setTerm] = useState("");
+  const [expandedPromoFolders,setExpandedPromoFolders] = useState({});
+  const [showIndividualPromoProducts,setShowIndividualPromoProducts] = useState(false);
+
   const uploadCampaignImage = async file => {
     if (!file) return;
     setSaveError(""); setUploadingCampaignImage(true);
@@ -17636,6 +17639,14 @@ function AdminPromotionsPanel({ products, settings, onSaveSettings }) {
   useEffect(() => { setDraft({enabled:false,title:"",description:"",productIds:[],excludeOversize:true,quantity:2,unitPrice:10,...(settings.storefrontPromotion || {})}); }, [settings.storefrontPromotion]);
   const eligible = products.filter(p => !p.tags?.template && (!draft.excludeOversize || !isOversizeGarment(p, {}, settings.garmentMockupLibrary || [])));
   const visible = eligible.filter(p => [p.name,p.sku,p.category].filter(Boolean).join(" ").toLowerCase().includes(term.toLowerCase()));
+  const promoFolders = GARMENT_FAMILIES.map(family=>({
+    id:family.id,label:family.title,items:eligible.filter(p=>garmentFamilyOf(p)===family.id)
+  })).filter(f=>f.items.length).map(f=>({
+    ...f,subfolders:Array.from(new Set(f.items.map(p=>p.subcategory||"Sin subcategoría"))).sort((a,b)=>a.localeCompare(b,"es")).map(name=>({name,items:f.items.filter(p=>(p.subcategory||"Sin subcategoría")===name)}))
+  }));
+  const setPromoFolder=(ids,checked)=>setDraft(prev=>({...prev,productIds:checked
+    ? Array.from(new Set([...(prev.productIds||[]),...ids]))
+    : (prev.productIds||[]).filter(id=>!ids.includes(id))}));
   const chosen = new Set(draft.productIds || []);
   const toggle = id => setDraft(prev => ({...prev,productIds:chosen.has(id)?prev.productIds.filter(x=>x!==id):[...(prev.productIds||[]),id]}));
   const save = async () => {
@@ -17671,16 +17682,33 @@ function AdminPromotionsPanel({ products, settings, onSaveSettings }) {
       </div>
       <label className="flex gap-3 items-center text-sm"><input type="checkbox" checked={!!draft.excludeOversize} onChange={e=>setDraft({...draft,excludeOversize:e.target.checked})}/> Excluir camisetas oversize aunque compartan diseño</label>
       <p className="text-xs" style={{color:"var(--slate)"}}>La selección se hace por prenda/producto, no por ilustración. Una camiseta clásica puede participar aunque exista el mismo diseño en una oversize. El descuento se calcula automáticamente en el carrito al alcanzar la cantidad mínima seleccionada, sin cambiar los precios originales.</p>
-      <input aria-label="Buscar productos para promoción" placeholder="Buscar por nombre, SKU o categoría…" className="w-full p-3 rounded-lg" style={{background:"var(--ink-3)",color:"var(--bone)"}} value={term} onChange={e=>setTerm(e.target.value)} />
-      <div className="max-h-80 overflow-y-auto grid sm:grid-cols-2 gap-2">
-        {visible.map(p=><label key={p.id} className="flex gap-3 items-center p-2 rounded-xl text-sm" style={{border:"1px solid var(--line)"}}>
-          <input type="checkbox" checked={chosen.has(p.id)} onChange={()=>toggle(p.id)}/>
-          <span className="min-w-0 flex-1"><strong className="block truncate">{p.name}</strong><small style={{color:"var(--slate)"}}>{p.category}{p.subcategory ? " · "+p.subcategory : ""}</small></span>
-        </label>)}
+      <h3 className="font-semibold">Seleccionar promociones por carpetas</h3>
+      <p className="text-xs" style={{color:"var(--slate)"}}>Incluí una categoría completa con un clic. Abrí sus subcarpetas para excluir un modelo o diseño concreto. No hace falta marcar todas las prendas una a una.</p>
+      <div className="space-y-2">
+        {promoFolders.map(folder=>{
+          const ids=folder.items.map(p=>p.id);
+          const count=ids.filter(id=>chosen.has(id)).length;
+          const open=!!expandedPromoFolders[folder.id];
+          return <div key={folder.id} className="rounded-xl overflow-hidden" style={{border:"1px solid var(--line)"}}>
+            <div className="flex items-center gap-3 p-3" style={{background:"var(--ink-3)"}}>
+              <input type="checkbox" aria-label={`Incluir categoría ${folder.label}`} checked={count===ids.length} ref={node=>{if(node)node.indeterminate=count>0&&count<ids.length;}} onChange={e=>setPromoFolder(ids,e.target.checked)}/>
+              <button type="button" className="flex-1 text-left text-sm font-semibold" onClick={()=>setExpandedPromoFolders(v=>({...v,[folder.id]:!v[folder.id]}))}>{open?"▾":"▸"} {folder.label} <small style={{color:"var(--slate)"}}>({count}/{ids.length})</small></button>
+              <button type="button" className="text-xs underline" onClick={()=>setPromoFolder(ids,count!==ids.length)}>{count===ids.length?"Quitar todos":"Incluir todos"}</button>
+            </div>
+            {open && <div className="p-3 space-y-2">{folder.subfolders.map(sub=>{
+              const subIds=sub.items.map(p=>p.id);
+              const subCount=subIds.filter(id=>chosen.has(id)).length;
+              return <div key={sub.name} className="rounded-lg p-2" style={{border:"1px solid var(--line)"}}>
+                <label className="flex gap-2 items-center text-sm"><input type="checkbox" checked={subCount===subIds.length} ref={node=>{if(node)node.indeterminate=subCount>0&&subCount<subIds.length;}} onChange={e=>setPromoFolder(subIds,e.target.checked)}/><span className="flex-1">{sub.name} ({subCount}/{subIds.length})</span></label>
+                <button type="button" className="text-xs underline mt-2" onClick={()=>setShowIndividualPromoProducts(v=>!v)}>{showIndividualPromoProducts?"Ocultar excepciones":"Excluir prendas concretas"}</button>
+                {showIndividualPromoProducts && <div className="mt-2 max-h-44 overflow-y-auto space-y-1">{sub.items.map(product=><label key={product.id} className="flex gap-2 items-center text-xs"><input type="checkbox" checked={chosen.has(product.id)} onChange={()=>toggle(product.id)}/><span>{product.name}</span></label>)}</div>}
+              </div>;
+            })}</div>}
+          </div>;
+        })}
       </div>
       <div className="flex flex-wrap gap-2">
-        <button type="button" className="kulto-btn text-xs rounded-full px-3 py-2" style={{background:"var(--ink-3)",color:"var(--bone)",border:"1px solid var(--line)"}} onClick={()=>setDraft(prev=>({...prev,productIds:eligible.filter(p=>garmentFamilyOf(p)==="camisetas").map(p=>p.id)}))}>Seleccionar todas las camisetas elegibles</button>
-        <button type="button" className="kulto-btn text-xs rounded-full px-3 py-2" style={{background:"var(--ink-3)",color:"var(--bone)",border:"1px solid var(--line)"}} onClick={()=>setDraft(prev=>({...prev,productIds:eligible.map(p=>p.id)}))}>Seleccionar todas las prendas elegibles</button>
+        <button type="button" className="kulto-btn text-xs rounded-full px-3 py-2" style={{background:"var(--ink-3)",color:"var(--bone)",border:"1px solid var(--line)"}} onClick={()=>setPromoFolder(eligible.map(p=>p.id),true)}>Incluir todas las categorías</button>
         <button type="button" className="kulto-btn text-xs rounded-full px-3 py-2" style={{background:"var(--ink-3)",color:"var(--bone)",border:"1px solid var(--line)"}} onClick={()=>setDraft(prev=>({...prev,productIds:[]}))}>Limpiar selección</button>
       </div>
       <p className="text-xs" style={{color:"var(--slate)"}}>{[...chosen].filter(id=>eligible.some(p=>p.id===id)).length} productos incluidos · {products.length-eligible.length} excluidos o no vendibles</p>
