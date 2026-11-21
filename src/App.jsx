@@ -7,7 +7,7 @@ import { isTshirtProduct } from "./shared-tshirt-mockup.js";
 import { availableMockupScopes, mockupScopeOfProduct, modelHasScope, resolveLibraryMockup, countMockupImpact } from "./mockup-routing.js";
 import { makeArtworkBatchPlan, applyArtworkBatch } from "./mockup-artwork-batch.js";
 import { coverForHomeCategory } from "./home-category-covers.js";
-import { getDisplayMenuItems, getMegaMenuTiles, menuTileMedia } from "./mega-menu-tiles.js";
+import { getDisplayMenuItems, getMegaMenuTiles, menuTileMedia, megaMenuImageStyle } from "./mega-menu-tiles.js";
 import "./editorial.css";
 import { escapeEmailHtml, secureSixDigitCode } from "./email-safety.js";
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
@@ -14850,7 +14850,7 @@ function AdminMegaMenuImages({products,items=[],settings,onSave}){
               return <div key={tile.key} className="rounded-xl p-3 flex flex-col gap-3" style={{background:"var(--ink-3)",border:"1px solid var(--line)"}}>
                 <strong className="text-sm" style={{color:"var(--bone)"}}>{tile.label}</strong>
                 <div className="kulto-mega-tile-media mx-auto w-full" style={{maxWidth:Math.min(width,260),aspectRatio:ratio==="1/1"?"1 / 1":ratio==="3/4"?"3 / 4":"4 / 3"}}>
-                  {media.image?<img src={media.image} alt={"Previsualización de "+tile.label} className="kulto-mega-tile-photo" style={{objectFit:media.fit,objectPosition:media.x+"% "+media.y+"%",transform:"scale("+(media.scale/100)+")"}}/>:<Shirt size={32}/>}
+                  {media.image?<img src={media.image} alt={"Previsualización de "+tile.label} className="kulto-mega-tile-photo" style={megaMenuImageStyle(media)}/>:<Shirt size={32}/>}
                 </div>
                 <label className="text-xs kulto-btn cursor-pointer rounded-lg p-2 text-center font-semibold" style={{background:"var(--sun)",color:"var(--ink)"}}>
                   <Upload size={13} className="inline mr-1"/>{uploading===tile.key?"Subiendo…":draft[tile.key]?.image?"Cambiar imagen":"Elegir imagen"}
@@ -19078,7 +19078,7 @@ function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, cus
                             return (
                               <button key={t.key} onClick={t.onClick} className="kulto-mega-tile kulto-btn text-left flex flex-col gap-2" title={t.label}>
                                 <span className="kulto-mega-tile-media" style={{aspectRatio:megaMenuCardRatio==="1/1"?"1 / 1":megaMenuCardRatio==="3/4"?"3 / 4":"4 / 3"}}>
-                                  {media.image ? <FastImg loading="lazy" src={media.image} alt={t.label} className="kulto-mega-tile-photo" style={{objectFit:media.fit,objectPosition:`${media.x}% ${media.y}%`,transform:`scale(${media.scale/100})`}}/> : <Shirt size={28} color="rgba(243,239,230,0.35)" />}
+                                  {media.image ? <FastImg loading="lazy" src={media.image} alt={t.label} className="kulto-mega-tile-photo" style={megaMenuImageStyle(media)}/> : <Shirt size={28} color="rgba(243,239,230,0.35)" />}
                                 </span>
                                 <span className="kulto-mega-tile-label">{t.label}</span>
                               </button>
