@@ -5241,33 +5241,26 @@ function CustomWorkCarousel({ items = [], speed = 0.5 }) {
    are replaced. The existing product editor and cart continue to own state. */
 function EditorialHomeIntro({ products, settings, onGoCatalog, onGoWizard }) {
   const uniqueCategories = [...new Set((products || []).flatMap(p => [p.category, ...(p.extraCategories || [])]).filter(Boolean))];
-  const categories = [...GARMENT_FAMILIES, {id:"personalizar",title:"Personaliza",subtitle:"Crea tu propio diseño"}].map(({id,title,subtitle}) => {
+  const categories = [...GARMENT_FAMILIES.filter(f=>products.some(p=>garmentFamilyOf(p)===f.id)), {id:"personalizar",title:"Personaliza",subtitle:"Crea tu propio diseño"}].map(({id,title,subtitle}) => {
     const item = products.find(p => garmentFamilyOf(p) === id && (p.photoPool?.[0] || getColorImages(p.colors?.[0])[0]));
     return {id,label:title,hint:subtitle,image:coverForHomeCategory(settings?.homeCategoryCovers,id,item?.photoPool?.[0] || getColorImages(item?.colors?.[0])[0] || null)};
   });
   const fallbackHero = "https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=1800&q=85";
   const hero = settings?.heroImage || settings?.heroImages?.[0] || fallbackHero;
-  const benefits = [
-    [Package, "Envío en España", "Consulta condiciones"],
-    [RotateCcw, "Devoluciones fáciles", "Atención personalizada"],
-    [Lock, "Pago seguro", "Compra con confianza"],
-    [Shirt, "Diseños originales", "Hecho para tu estilo"],
-  ];
   return (
     <>
       <section className="kulto-editorial-hero" aria-label="Colección KULTO">
         <img className="kulto-editorial-hero-photo" src={hero} alt="Moda urbana KULTO" />
         <div className="kulto-editorial-hero-inner">
+          <p className="kulto-editorial-eyebrow">KULTO STORE <span>·</span> MODA URBANA</p>
           <h1 style={{whiteSpace:"pre-line"}}>{settings?.editorialHeroTitle || "STREETWEAR\nSIN LÍMITES"}</h1>
           <p>{settings?.editorialHeroSubtitle || "Camisetas, oversize y sudaderas con diseños únicos. Moda urbana creada en España."}</p>
-          <button type="button" className="kulto-editorial-action" onClick={() => onGoCatalog({})}>Descubrir colección <ArrowRight size={16} /></button>
+          <div className="kulto-editorial-hero-actions">
+            <button type="button" className="kulto-editorial-action" onClick={() => onGoCatalog({})}>Ver colección <ArrowRight size={16} /></button>
+            <button type="button" className="kulto-editorial-action kulto-editorial-action-outline" onClick={onGoWizard}>Personalizar tu prenda <Sparkles size={16}/></button>
+          </div>
         </div>
       </section>
-      <div className="kulto-editorial-perks">
-        {benefits.map(([Icon, title, sub]) => <div className="kulto-editorial-perk" key={title}>
-          <Icon size={25} strokeWidth={1.5}/><div>{title}<small>{sub}</small></div>
-        </div>)}
-      </div>
       <section className="kulto-editorial-section" aria-label="Explora nuestras categorías">
         <div className="kulto-editorial-section-head">
           <h2>Explora <em>KULTO</em></h2>
@@ -5496,6 +5489,14 @@ function Home({ products, settings, reviews, customWorkGallery, onOpen, onGoCata
         </div>
         <FeaturedGrid list={dedupeByDesign([...products].reverse()).slice(0, 4)} collection="novedades" />
       </section>
+      <section className="kulto-editorial-section" aria-label="Personaliza tu prenda">
+        <div className="kulto-editorial-custom">
+          <div><small>HECHO A TU MANERA</small><h2>Tu idea. Tu prenda.</h2>
+            <p>Elegí la prenda y subí tu diseño. Nosotros nos encargamos de darle forma.</p>
+          </div>
+          <button type="button" className="kulto-editorial-action" onClick={onGoWizard}>Crear mi diseño <ArrowRight size={16}/></button>
+        </div>
+      </section>
       {settings.storefrontPromotion?.enabled && settings.storefrontPromotion?.title?.trim() && (
         <section className="kulto-editorial-section kulto-seasonal-promo" aria-label="Promoción activa">
           <div className="kulto-seasonal-promo-head">
@@ -5543,6 +5544,17 @@ function Home({ products, settings, reviews, customWorkGallery, onOpen, onGoCata
           );
         })}
       </div>
+      <section className="kulto-editorial-section kulto-editorial-trust" aria-label="Por qué comprar en KULTO">
+        <div className="kulto-editorial-section-head"><h2>El detalle <em>importa</em></h2></div>
+        <div className="kulto-editorial-perks">
+          {[
+            [Package,"Envíos en España","Consulta las condiciones de tu pedido"],
+            [RotateCcw,"Atención personalizada","Te ayudamos con tu compra"],
+            [Lock,"Compra segura","Tus datos protegidos"],
+            [Shirt,"Estampados originales","Tu estilo, tu elección"]
+          ].map(([Icon,title,sub])=><div className="kulto-editorial-perk" key={title}><Icon size={25} strokeWidth={1.5}/><div>{title}<small>{sub}</small></div>)}
+        </div>
+      </section>
     </div>
   );
 }
@@ -14867,7 +14879,7 @@ function AdminMegaMenuImages({products,items=[],settings,onSave}){
         </div>;
       })}
     </div>
-    <button type="button" disabled={!!uploading||saving} onClick={save} className="kulto-btn px-5 py-3 font-bold rounded-full" style={{background:"var(--sun)",color:"var(--ink)",opacity:uploading||saving?.6:1}}>
+    <button type="button" disabled={!!uploading||saving} onClick={save} className="kulto-btn px-5 py-3 font-bold rounded-full" style={{background:"var(--sun)",color:"var(--ink)",opacity:(uploading||saving)?0.6:1}}>
       {saving?"Guardando…":"Guardar imágenes y tamaños del menú"}
     </button>
     {message&&<p role="status" className="text-xs rounded-lg p-3" style={{background:"var(--ink-3)",color:"var(--bone)"}}>{message}</p>}
