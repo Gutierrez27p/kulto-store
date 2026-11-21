@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {getDisplayMenuItems,getMegaMenuTiles,menuTileMedia} from "../src/mega-menu-tiles.js";
+import {getDisplayMenuItems,getMegaMenuTiles,menuTileMedia,megaMenuImageStyle} from "../src/mega-menu-tiles.js";
 import {GARMENT_FAMILIES,garmentFamilyOf,garmentFitOf} from "../src/garment-families.js";
 const photo=p=>p.photoPool?.[0]||null;
 const shirts=[
@@ -35,4 +35,13 @@ test("uploaded images override fallback; zoom and position bounds are safe",()=>
  {image:"custom.png",scale:160,x:32,y:78,fit:"cover"});
  assert.deepEqual(menuTileMedia({},"missing","fallback.jpg"),{image:"fallback.jpg",fit:"contain",scale:100,x:50,y:50});
  assert.equal(menuTileMedia({a:{scale:900}},"a").scale,250);
+});
+
+test("menu photo sliders translate and scale the actual image, not the product asset",()=>{
+ const media=menuTileMedia({fit:{image:"my-cover.webp",scale:180,x:75,y:25,fit:"cover"}},"fit","fallback.jpg");
+ const style=megaMenuImageStyle(media);
+ assert.equal(style.objectFit,"cover");
+ assert.equal(style.objectPosition,"center center");
+ assert.match(style.transform,/translate\(15%, -15%\) scale\(1\.8\)/);
+ assert.equal(media.image,"my-cover.webp");
 });
