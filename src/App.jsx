@@ -4143,7 +4143,6 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
           }}
         >
           {activeImage ? (
-          ) : activeImage ? (
             <img
               src={activeImage}
               alt={color?.name}
