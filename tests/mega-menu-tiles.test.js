@@ -22,7 +22,7 @@ test("jackets in stock generate ONE navigation tile, not a tile for each product
  assert.equal(items.some(x=>x.type==="category"&&x.value==="Chaqueta"),false);
  const tiles=getMegaMenuTiles(items.find(x=>x.value==="chaquetas"),products,GARMENT_FAMILIES,garmentFamilyOf,garmentFitOf,photo);
  assert.equal(tiles.length,1);
- assert.equal(tiles[0].label,"Chaquetas");
+ assert.equal(tiles[0].label,"Chaqueta");
  assert.deepEqual(tiles[0].filter,{group:"",category:"__family_chaquetas"});
 });
 test("category with one implied variant shows a single category tile",()=>{
