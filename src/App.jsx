@@ -7,6 +7,7 @@ import { isTshirtProduct } from "./shared-tshirt-mockup.js";
 import { availableMockupScopes, mockupScopeOfProduct, modelHasScope, resolveLibraryMockup, countMockupImpact } from "./mockup-routing.js";
 import { makeArtworkBatchPlan, applyArtworkBatch } from "./mockup-artwork-batch.js";
 import { coverForHomeCategory } from "./home-category-covers.js";
+import { getDisplayMenuItems, getMegaMenuTiles, menuTileMedia } from "./mega-menu-tiles.js";
 import "./editorial.css";
 import { escapeEmailHtml, secureSixDigitCode } from "./email-safety.js";
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
@@ -2709,6 +2710,9 @@ const DEFAULT_SETTINGS = {
   heroImage: null,
   heroImages: [],
   homeCategoryCovers: {},
+  megaMenuTileMedia: {},
+  megaMenuCardWidth: 186,
+  megaMenuCardRatio: "4/3",
   editorialHeroTitle: "STREETWEAR\nSIN LÍMITES",
   editorialHeroSubtitle: "Camisetas, oversize y sudaderas con diseños únicos. Moda urbana creada en España.",
   howItWorksSteps: [],
@@ -18779,7 +18783,7 @@ function NavLink({ label, active, onClick }) {
   );
 }
 
-function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, customer, themeMode, onToggleThemeMode, fontStep, onDecreaseFont, onIncreaseFont, socialLinks = {}, showAdminMenu = false, onGoAdminTab, onPreviewAsCustomer, productsMenuItems = [], onGoCatalog, products = [], onBack }) {
+function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, customer, themeMode, onToggleThemeMode, fontStep, onDecreaseFont, onIncreaseFont, socialLinks = {}, showAdminMenu = false, onGoAdminTab, onPreviewAsCustomer, productsMenuItems = [], megaMenuTileSettings = {}, megaMenuCardWidth = 186, megaMenuCardRatio = "4/3", onGoCatalog, products = [], onBack }) {
   const [open, setOpen] = useState(false);
   const [adminMenuOpen, setAdminMenuOpen] = useState(false);
   const adminMenuRef = useRef(null);
@@ -18793,11 +18797,7 @@ function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, cus
   const catalogMenuRef = useRef(null);
   // Show garment families as top-level navigation; preserve custom design
   // categories/groups without duplicating shirt cuts as separate families.
-  const displayMenuItems = [
-    ...GARMENT_FAMILIES.filter(f=>products.some(p=>garmentFamilyOf(p)===f.id))
-      .map(f=>({id:"family:"+f.id,type:"family",value:f.id,label:f.title})),
-    ...productsMenuItems.filter(it=>it.type!=="category" || !garmentFamilyOf({category:it.value}))
-  ];
+  const displayMenuItems = getDisplayMenuItems(products, productsMenuItems, GARMENT_FAMILIES, garmentFamilyOf);
   // Qué acceso directo (de categoría) tiene desplegado su lista de
   // subcategorías ahora mismo — uno a la vez, y por separado en desktop y
   // celular porque son dos desplegables independientes.
@@ -18836,31 +18836,8 @@ function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, cus
   const [megaItemId, setMegaItemId] = useState(null);
   const closeMenus = () => { setOpen(false); setCatalogMenuOpen(false); setCatalogMenuOpenMobile(false); };
   const tileImage = (p) => (p ? (p.photoPool?.[0] || getColorImages(p.colors?.[0])[0] || null) : null);
-  const productsForItem = (it) => products.filter((p) => it.type === "family" ? garmentFamilyOf(p) === it.value : it.type === "group" ? (p.group || "") === it.value : (p.category === it.value || (p.extraCategories || []).includes(it.value)));
-  const megaTiles = (it) => {
-    const ps = productsForItem(it);
-    const withImg = (list) => list.find((p) => tileImage(p)) || list[0];
-    if (it.type === "family") {
-      const fits = (GARMENT_FAMILIES.find(f=>f.id===it.value)?.fits || []).filter(f=>ps.some(p=>garmentFitOf(p)===f));
-      if (fits.length) return fits.map(f => ({
-        key:"fit:"+f, label:f,
-        img:tileImage(withImg(ps.filter(p=>garmentFitOf(p)===f))),
-        onClick:()=>{onGoCatalog?.({category:"__family_"+it.value,fit:f});closeMenus();}
-      }));
-    }
-    const subs = [...new Set(ps.map((p) => p.subcategory).filter(Boolean))].sort((x, y) => x.localeCompare(y, "es"));
-    const base = { group: it.type === "group" ? it.value : "", category: it.type === "family" ? "__family_"+it.value : it.type === "category" ? it.value : "" };
-    if (subs.length) {
-      return subs.slice(0, 8).map((sc) => ({ key: `s:${sc}`, label: sc, img: tileImage(withImg(ps.filter((p) => p.subcategory === sc))), onClick: () => { onGoCatalog?.({ ...base, subcategory: sc }); closeMenus(); } }));
-    }
-    if (it.type === "group") {
-      const cats = [...new Set(ps.map((p) => p.category).filter(Boolean))];
-      if (cats.length > 1) {
-        return cats.slice(0, 8).map((c) => ({ key: `c:${c}`, label: c, img: tileImage(withImg(ps.filter((p) => p.category === c))), onClick: () => { onGoCatalog?.({ group: it.value, category: c }); closeMenus(); } }));
-      }
-    }
-    return ps.slice(0, 4).map((p) => ({ key: p.id, label: p.name, img: tileImage(p), onClick: () => goCatalog(it) }));
-  };
+  const megaTiles = (it) => getMegaMenuTiles(it,products,GARMENT_FAMILIES,garmentFamilyOf,garmentFitOf,tileImage)
+    .map(t=>({...t,onClick:()=>{onGoCatalog?.(t.filter);closeMenus();}}));
   const go = (p) => { setPage(p); setOpen(false); };
   useEffect(() => {
     if (!catalogMenuOpen) return;
@@ -18925,7 +18902,7 @@ function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, cus
             </button>
             {catalogMenuOpen && (() => {
               const activeItem = displayMenuItems.find((x) => x.id === megaItemId) || displayMenuItems[0] || null;
-              const tiles = activeItem ? [...(activeItem.image ? [{ key: "custom-img", label: activeItem.label || activeItem.value, img: activeItem.image, onClick: () => goCatalog(activeItem) }] : []), ...megaTiles(activeItem)] : [];
+              const tiles = activeItem ? megaTiles(activeItem) : [];
               return (
                 <div className="absolute left-0 right-0 top-full z-50" style={{ background: "var(--ink)", borderBottom: "1px solid var(--line)", boxShadow: "0 24px 40px rgba(0,0,0,0.25)" }}>
                   <div className="max-w-6xl mx-auto px-4 md:px-6 py-6 grid gap-8" style={{ gridTemplateColumns: "260px minmax(0, 1fr)" }}>
@@ -18961,15 +18938,18 @@ function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, cus
                         </div>
                       )}
                       {tiles.length > 0 ? (
-                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                          {tiles.map((t) => (
-                            <button key={t.key} onClick={t.onClick} className="kulto-btn text-left flex flex-col gap-2">
-                              <span className="block aspect-[4/3] rounded-2xl overflow-hidden flex items-center justify-center" style={{ background: "var(--ink-3)", border: "1px solid var(--line)" }}>
-                                {t.img ? <FastImg loading="lazy" src={t.img} alt={t.label} className="w-full h-full object-contain p-2" /> : <Shirt size={28} color="rgba(243,239,230,0.35)" />}
-                              </span>
-                              <span className="text-sm truncate" style={{ color: "var(--bone)" }}>{t.label}</span>
-                            </button>
-                          ))}
+                        <div className="kulto-mega-tiles" style={{gridTemplateColumns:`repeat(auto-fill,minmax(min(100%,${Math.max(140,Math.min(260,Number(megaMenuCardWidth)||186))}px),1fr))`}}>
+                          {tiles.map((t) => {
+                            const media=menuTileMedia(megaMenuTileSettings,t.key,t.img||activeItem?.image);
+                            return (
+                              <button key={t.key} onClick={t.onClick} className="kulto-mega-tile kulto-btn text-left flex flex-col gap-2" title={t.label}>
+                                <span className="kulto-mega-tile-media" style={{aspectRatio:megaMenuCardRatio==="1/1"?"1 / 1":megaMenuCardRatio==="3/4"?"3 / 4":"4 / 3"}}>
+                                  {media.image ? <FastImg loading="lazy" src={media.image} alt={t.label} className="kulto-mega-tile-photo" style={{objectFit:media.fit,objectPosition:`${media.x}% ${media.y}%`,transform:`scale(${media.scale/100})`}}/> : <Shirt size={28} color="rgba(243,239,230,0.35)" />}
+                                </span>
+                                <span className="kulto-mega-tile-label">{t.label}</span>
+                              </button>
+                            );
+                          })}
                         </div>
                       ) : (
                         <p className="text-sm" style={{ color: "var(--slate)" }}>Elegí una opción de la izquierda para ver sus productos.</p>
@@ -21179,6 +21159,9 @@ export default function App() {
 
   const handleSaveSettings = async (partial) => {
     if (Object.prototype.hasOwnProperty.call(partial, "storefrontPromotion")
+      || Object.prototype.hasOwnProperty.call(partial, "megaMenuTileMedia")
+      || Object.prototype.hasOwnProperty.call(partial, "megaMenuCardWidth")
+      || Object.prototype.hasOwnProperty.call(partial, "megaMenuCardRatio")
       || Object.prototype.hasOwnProperty.call(partial, "homeCategoryCovers")
       || Object.prototype.hasOwnProperty.call(partial, "editorialHeroTitle")
       || Object.prototype.hasOwnProperty.call(partial, "editorialHeroSubtitle")) {
@@ -21242,7 +21225,7 @@ export default function App() {
   return (
     <div className="kulto-root min-h-screen flex flex-col" data-mode={themeMode}>
       <GlobalStyle colors={settings.theme} />
-      <Header page={page} setPage={setPage} onBack={goBack} cartCount={cartCount} onOpenCart={() => setCartOpen(true)} logoImage={settings.logoImage} logoText={settings.logoText} customer={customer} themeMode={themeMode} onToggleThemeMode={toggleThemeMode} fontStep={fontStep} onDecreaseFont={decreaseFont} onIncreaseFont={increaseFont} socialLinks={{ instagram: settings.socialInstagram, facebook: settings.socialFacebook, tiktok: settings.socialTiktok }} showAdminMenu={hasAdminAccess} onGoAdminTab={jumpToAdminTab} onPreviewAsCustomer={() => { setPreviewAsCustomer(true); setPage("home"); }} productsMenuItems={settings.productsMenuItems || []} onGoCatalog={goToCatalog} products={sellableProducts} />
+      <Header page={page} setPage={setPage} onBack={goBack} cartCount={cartCount} onOpenCart={() => setCartOpen(true)} logoImage={settings.logoImage} logoText={settings.logoText} customer={customer} themeMode={themeMode} onToggleThemeMode={toggleThemeMode} fontStep={fontStep} onDecreaseFont={decreaseFont} onIncreaseFont={increaseFont} socialLinks={{ instagram: settings.socialInstagram, facebook: settings.socialFacebook, tiktok: settings.socialTiktok }} showAdminMenu={hasAdminAccess} onGoAdminTab={jumpToAdminTab} onPreviewAsCustomer={() => { setPreviewAsCustomer(true); setPage("home"); }} productsMenuItems={settings.productsMenuItems || []} megaMenuTileSettings={settings.megaMenuTileMedia || {}} megaMenuCardWidth={settings.megaMenuCardWidth || 186} megaMenuCardRatio={settings.megaMenuCardRatio || "4/3"} onGoCatalog={goToCatalog} products={sellableProducts} />
       {hasAdminAccess && previewAsCustomer && (
         <div className="sticky top-16 z-30 flex items-center justify-center gap-3 px-4 py-2 text-sm font-semibold" style={{ background: "var(--sun)", color: "var(--ink)" }}>
           <span>Estás viendo la web como la vería un cliente.</span>
