@@ -4532,9 +4532,31 @@ function RelatedProducts({ product, allProducts, onOpen, favorites, onToggleFavo
 // Cuando el mismo diseño se vende en más de una prenda/estilo (ej: la misma
 // estampa en la Beagle y en la Oversize, a distinto precio), esto muestra un
 // acceso directo entre esas fichas — sin fusionarlas en un solo producto.
+// Una alternativa debe representar otro tipo de prenda, no otra ficha del
+// mismo modelo. Se compara familia, ajuste y subtipo sin depender del ID.
+function isDifferentGarmentStyle(a, b) {
+  const normalized = (value) => String(value || "").trim().toLocaleLowerCase("es");
+  return normalized(garmentFamilyOf(a)) !== normalized(garmentFamilyOf(b))
+    || normalized(garmentFitOf(a)) !== normalized(garmentFitOf(b))
+    || normalized(a.subcategory) !== normalized(b.subcategory);
+}
+
+function linkedGarmentAlternatives(product, allProducts) {
+  const group = String(product.designGroup || "").trim();
+  if (!group) return [];
+  const seen = new Set();
+  return allProducts.filter((candidate) => {
+    if (candidate.id === product.id || String(candidate.designGroup || "").trim() !== group || !isDifferentGarmentStyle(product, candidate)) return false;
+    const key = [garmentFamilyOf(candidate), garmentFitOf(candidate), candidate.subcategory].map((v) => String(v || "").trim().toLocaleLowerCase("es")).join("|");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function LinkedStyleProducts({ product, allProducts, onOpen, favorites, onToggleFavorite }) {
   if (!product.designGroup) return null;
-  const linked = allProducts.filter((p) => p.designGroup === product.designGroup && p.id !== product.id);
+  const linked = linkedGarmentAlternatives(product, allProducts);
   if (!linked.length) return null;
   return (
     <div className="mt-6 pt-6" style={{ borderTop: "1px solid var(--line)" }}>
@@ -4557,7 +4579,7 @@ function GarmentPicker({ product, allProducts, onPick }) {
   const [open, setOpen] = useState(false);
   if (!product.designGroup) return null;
   const options = allProducts
-    .filter((p) => p.designGroup === product.designGroup)
+    .filter((p) => p.id === product.id || linkedGarmentAlternatives(product, allProducts).some((other) => other.id === p.id))
     .sort((a, b) => (a.category || "").localeCompare(b.category || "", "es") || (a.subcategory || "").localeCompare(b.subcategory || "", "es"));
   if (options.length < 2) return null;
   const labelOf = (p) => [p.category, p.subcategory].filter(Boolean).join(" · ") || p.name;
