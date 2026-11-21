@@ -2715,6 +2715,8 @@ const DEFAULT_SETTINGS = {
   megaMenuCardRatio: "4/3",
   editorialHeroTitle: "STREETWEAR\nSIN LÍMITES",
   editorialHeroSubtitle: "Camisetas, oversize y sudaderas con diseños únicos. Moda urbana creada en España.",
+  editorialHeroMedia: {zoom:100,x:50,y:50,height:700},
+  editorialCustomBackground: null,
   howItWorksSteps: [],
   howItWorksCardSize: "md",
   howItWorksImageShape: "auto",
@@ -5269,10 +5271,12 @@ function EditorialHomeIntro({ products, settings, onGoCatalog, onGoWizard }) {
   });
   const fallbackHero = "https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=1800&q=85";
   const hero = settings?.heroImage || settings?.heroImages?.[0] || fallbackHero;
+  const heroMedia = settings?.editorialHeroMedia || {};
+  const customBackground = settings?.editorialCustomBackground;
   return (
     <>
-      <section className="kulto-editorial-hero" aria-label="Colección KULTO">
-        <img className="kulto-editorial-hero-photo" src={hero} alt="Moda urbana KULTO" />
+      <section className="kulto-editorial-hero" aria-label="Colección KULTO" style={{minHeight:`${Math.max(420,Math.min(1100,Number(heroMedia.height)||700))}px`}}>
+        <img className="kulto-editorial-hero-photo" src={hero} alt="Moda urbana KULTO" style={{objectPosition:`${heroMedia.x ?? 50}% ${heroMedia.y ?? 50}%`,transform:`scale(${Math.max(50,Math.min(250,Number(heroMedia.zoom)||100))/100})`}} />
         <div className="kulto-editorial-hero-inner">
           <p className="kulto-editorial-eyebrow">KULTO STORE <span>·</span> MODA URBANA</p>
           <h1 style={{whiteSpace:"pre-line"}}>{settings?.editorialHeroTitle || "STREETWEAR\nSIN LÍMITES"}</h1>
@@ -5512,7 +5516,7 @@ function Home({ products, settings, reviews, customWorkGallery, onOpen, onGoCata
         <FeaturedGrid list={dedupeByDesign([...products].reverse()).slice(0, 4)} collection="novedades" />
       </section>
       <section className="kulto-editorial-section" aria-label="Personaliza tu prenda">
-        <div className="kulto-editorial-custom">
+        <div className="kulto-editorial-custom" style={customBackground ? {backgroundImage:`linear-gradient(90deg,rgba(12,12,14,.83),rgba(12,12,14,.60)),url("${customBackground}")`,backgroundSize:"cover",backgroundPosition:"center"} : undefined}>
           <div><small>HECHO A TU MANERA</small><h2>Tu idea. Tu prenda.</h2>
             <p>Elegí la prenda y subí tu diseño. Nosotros nos encargamos de darle forma.</p>
           </div>
@@ -6938,7 +6942,7 @@ function Wizard({ products, categories, settings, designLibrary, designFolders, 
   const switchLayers = [...frontDesigns, ...backDesigns, ...sleeveLeftDesigns, ...sleeveRightDesigns];
   const switchFolderIds = [...new Set(switchLayers.map((l) => l.folderId).filter(Boolean))];
   const switchOptions = prod
-    ? productsWithColors.filter((p) => p.id !== prod.id && switchFolderIds.every((fid) => {
+    ? productsWithColors.filter((p) => p.id !== prod.id && garmentFamilyOf(p) === garmentFamilyOf(prod) && garmentFitOf(p) !== garmentFitOf(prod) && switchFolderIds.every((fid) => {
         const f = designFolders.find((x) => x.id === fid);
         return !f || folderAppliesTo(f, p);
       }))
@@ -7333,7 +7337,7 @@ function Wizard({ products, categories, settings, designLibrary, designFolders, 
           {switchOptions.length > 0 && (
             <div className="rounded-2xl p-3 mb-5" style={{ background: "var(--ink-2)", border: "1px solid var(--line)" }}>
               <p className="text-xs mb-2" style={{ color: "var(--slate)" }}>
-                Tu prenda: <span className="font-semibold" style={{ color: "var(--bone)" }}>{prod.name}</span> · <span className="font-semibold" style={{ color: "var(--sun)" }}>{formatPrice(unitPrice)}</span>. ¿Lo querés en otra prenda? Elegila y el precio se actualiza (tu diseño se mantiene):
+                Modelo elegido: <span className="font-semibold" style={{ color: "var(--bone)" }}>{prod.name}</span> · <span className="font-semibold" style={{ color: "var(--sun)" }}>{formatPrice(unitPrice)}</span>. También disponible en otro corte de esta prenda. Tu diseño se mantiene:
               </p>
               <div className="flex gap-2 overflow-x-auto kulto-scrollbar pb-1">
                 {switchOptions.map((p) => (
