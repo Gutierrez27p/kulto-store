@@ -1,7 +1,7 @@
 import { GARMENT_FAMILIES, GARMENT_MODEL_TYPES, garmentFamilyOf, garmentFitOf, modelMatchesProduct } from "./garment-families.js";
 import { seasonalPricing, isOversizeGarment } from "./promotion-pricing.js";
 import { backgroundSilhouette } from "./garment-mask.js";
-import { safeRecolorPixel, growSilhouette } from "./garment-color.js";
+import { growSilhouette } from "./garment-color.js";
 import { photoGalleryForColor } from "./storefront-photo-policy.js";
 import { isTshirtProduct } from "./shared-tshirt-mockup.js";
 import { availableMockupScopes, mockupScopeOfProduct, modelHasScope, resolveLibraryMockup, countMockupImpact } from "./mockup-routing.js";
@@ -1091,7 +1091,6 @@ function resolveProductMockup(product) {
   };
 }
 const mockupPrepCache = new Map(); // src -> Promise<prep>
-const mockupTintedCache = new Map(); // `${src}|${hex}` -> canvas
 const mockupImgCache = new Map(); // src -> Promise<Image>
 function loadMockupImg(src) {
   if (!mockupImgCache.has(src)) {
@@ -1264,30 +1263,6 @@ function prepareMockupBase(src, explicitMask = null) {
   return p;
 }
 
-function tintedMockupCanvas(src, prep, hex) {
-  const key = `${src}|${prep.maskKey || ""}|${hex}`;
-  if (mockupTintedCache.has(key)) return mockupTintedCache.get(key);
-  const { w, h, orig, soft, shade, background, cutout } = prep;
-  const { r: tr, g: tg, b: tb } = hexToRgb(hex);
-  const cv = document.createElement("canvas");
-  cv.width = w; cv.height = h;
-  const ctx = cv.getContext("2d");
-  const out = ctx.createImageData(w, h);
-  const d = orig.data, o = out.data;
-  for (let i = 0; i < w * h; i++) {
-    const p = i * 4;
-    const rgb = safeRecolorPixel(
-      [d[p], d[p + 1], d[p + 2]], [tr, tg, tb],
-      soft[i], shade[i], background, cutout
-    );
-    o[p] = rgb[0]; o[p + 1] = rgb[1]; o[p + 2] = rgb[2]; o[p + 3] = d[p + 3];
-  }
-  ctx.putImageData(out, 0, 0);
-  mockupTintedCache.set(key, cv);
-  if (mockupTintedCache.size > 36) mockupTintedCache.delete(mockupTintedCache.keys().next().value);
-  return cv;
-}
-
 function activeMockup(product) {
   const m = resolveProductMockup(product);
   return m && m.enabled && m.base && (m.design || m.backDesign || m.logoLight || m.logoDark) ? m : null;
@@ -1313,7 +1288,7 @@ function MockupComposite({ mockup, hex, innerRef, designProps }) {
     cv.width = prep.w; cv.height = prep.h;
     const ctx = cv.getContext("2d");
     ctx.clearRect(0, 0, prep.w, prep.h);
-    ctx.drawImage(tintedMockupCanvas(mockup.base, prep, hex || "#ffffff"), 0, 0);
+    ctx.putImageData(prep.orig, 0, 0);
     const drawLayer = (im, px, py, pw, pr) => {
       const layer = document.createElement("canvas");
       layer.width = prep.w; layer.height = prep.h;
@@ -1342,7 +1317,7 @@ function MockupComposite({ mockup, hex, innerRef, designProps }) {
             <img src={mockup.base} alt="" draggable={false} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "fill", pointerEvents: "none" }} />
             {mockup.design && <img src={mockup.design} alt="" draggable={false} style={{ position: "absolute", left: `${mockup.x ?? 50}%`, top: `${mockup.y ?? 38}%`, width: `${mockup.w ?? 40}%`, transform: `translate(-50%, -50%) rotate(${mockup.rot || 0}deg)`, objectFit: "contain", pointerEvents: "none" }} />}
             {logoSrc && <img src={logoSrc} alt="" draggable={false} style={{ position: "absolute", left: `${mockup.lx ?? 30}%`, top: `${mockup.ly ?? 20}%`, width: `${mockup.lw ?? 15}%`, transform: `translate(-50%, -50%) rotate(${mockup.lrot || 0}deg)`, objectFit: "contain", pointerEvents: "none" }} />}
-            <span role="status" className="absolute bottom-1 left-1 right-1 text-center text-[10px] rounded p-1" style={{ background: "rgba(25,19,26,.85)", color: "#fff" }}>No se pudo aplicar este color. Revisá la máscara de la prenda.</span>
+            <span role="status" className="absolute bottom-1 left-1 right-1 text-center text-[10px] rounded p-1" style={{ background: "rgba(25,19,26,.85)", color: "#fff" }}>No se pudo cargar la composición. Se muestra la foto original.</span>
           </>
         ) : (
           <canvas ref={canvasRef} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }} />
@@ -1467,7 +1442,6 @@ async function detectDesignPlacement(baseSrc, exampleSrc, designSrc) {
 function AdminMockupEditor({ draft, setDraft, inputStyle }) {
   const m = draft.mockup || { enabled: true, base: null, ar: 0.8, design: null, x: 50, y: 38, w: 40, rot: 0, cover: null };
   const set = (patch) => setDraft((d) => ({ ...d, mockup: { ...(d.mockup || { enabled: true, base: null, ar: 0.8, design: null, x: 50, y: 38, w: 40, rot: 0, cover: null }), ...patch } }));
-  const [previewHex, setPreviewHex] = useState(draft.colors?.[0]?.hex || "#E8452C");
   const [editorSide, setEditorSide] = useState("front");
   const [busy, setBusy] = useState(false);
   const innerRef = useRef(null);
@@ -1547,9 +1521,9 @@ function AdminMockupEditor({ draft, setDraft, inputStyle }) {
   return (
     <div className="rounded-2xl p-3 flex flex-col gap-3" style={{ background: "var(--ink-3)", border: "1px dashed var(--line)" }}>
       <div>
-        <p className="text-sm font-semibold" style={{ color: "var(--bone)" }}>Mockup con diseño (los colores se generan solos)</p>
+        <p className="text-sm font-semibold" style={{ color: "var(--bone)" }}>Mockup de diseño (sin cambio automático de color)</p>
         <p className="text-xs mt-1" style={{ color: "var(--slate)" }}>
-          Subí la prenda vacía (mejor blanca o muy clara), el diseño en PNG sin fondo y una foto de portada de cómo querés que se vea. Cuando el cliente cambie de color, solo se pinta la prenda y el diseño queda en el mismo lugar.
+          Subí la fotografía de la prenda y el PNG del estampado para organizar el diseño. La vista no cambia el color de la tela. En la tienda se muestran las fotografías cargadas para cada color.
         </p>
       </div>
       <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer" style={{ color: "var(--bone)" }}>
@@ -1589,7 +1563,7 @@ function AdminMockupEditor({ draft, setDraft, inputStyle }) {
             )}
             <p className="text-xs mb-1" style={{ color: "var(--slate)" }}>Tocá o arrastrá sobre la prenda para mover {target === "logo" ? "el texto" : "el diseño"}:</p>
             <div className="rounded-xl overflow-hidden mx-auto relative" style={{ aspectRatio: "4 / 5", maxWidth: 280, background: "var(--ink-2)", border: "1px solid var(--line)" }}>
-              <MockupComposite mockup={editorSide === "back" && m.backBase ? { ...m, base: m.backBase, mask: m.backMask, ar: m.backAr, design: m.backDesign || null, x: m.backX ?? 50, y: m.backY ?? 38, w: m.backW ?? 40, rot: m.backRot ?? 0, logoLight: null, logoDark: null } : m} hex={previewHex} innerRef={innerRef} designProps={designProps} />
+              <MockupComposite mockup={editorSide === "back" && m.backBase ? { ...m, base: m.backBase, mask: m.backMask, ar: m.backAr, design: m.backDesign || null, x: m.backX ?? 50, y: m.backY ?? 38, w: m.backW ?? 40, rot: m.backRot ?? 0, logoLight: null, logoDark: null } : m} hex="#ffffff" innerRef={innerRef} designProps={designProps} />
               {showExample && m.cover && <img src={m.cover} alt="" draggable={false} className="absolute inset-0 w-full h-full object-contain" style={{ opacity: 0.45, pointerEvents: "none" }} />}
             </div>
             {m.cover && (
@@ -1610,19 +1584,11 @@ function AdminMockupEditor({ draft, setDraft, inputStyle }) {
               </label>
               );
             })}
-            <div>
-              <p className="text-xs mb-1" style={{ color: "var(--slate)" }}>Probar en otro color:</p>
-              <div className="flex flex-wrap items-center gap-1.5">
-                {(draft.colors || []).slice(0, 14).map((c, i) => (
-                  <button key={i} type="button" onClick={() => setPreviewHex(c.hex)} className="kulto-btn kulto-tip kulto-tip-l rounded-full" data-tip={c.name} aria-label={c.name} style={{ width: 22, height: 22, background: c.hex, border: previewHex === c.hex ? "2px solid var(--sun)" : "2px solid #737373" }} />
-                ))}
-                <input type="color" value={previewHex} onChange={(e) => setPreviewHex(e.target.value)} className="w-8 h-7 rounded" style={{ background: "transparent" }} aria-label="Otro color" />
-              </div>
-            </div>
+
           </div>
         </div>
       )}
-      <p className="text-[11px]" style={{ color: "var(--slate)" }}>Guardá el producto para publicar ambos lados. Elegir un color actualizará frente y espalda a la vez. Los productos anteriores siguen funcionando.</p>
+      <p className="text-[11px]" style={{ color: "var(--slate)" }}>Guardá el producto para conservar el diseño y sus vistas. Los colores de compra se muestran con las fotografías disponibles, sin recoloreado automático.</p>
     </div>
   );
 }
@@ -17134,7 +17100,6 @@ function AdminGarmentMockupLibrary({ products, models, designLibrary = [], onSav
   const [frontMask,setFrontMask] = useState(null);
   const [backMask,setBackMask] = useState(null);
   const [removeBackground,setRemoveBackground] = useState(false);
-  const [previewColor,setPreviewColor] = useState("#ffffff");
   const [previewId,setPreviewId] = useState(null);
   const [editId,setEditId] = useState(null);
   const [selectedProductId,setSelectedProductId] = useState("");
@@ -17196,7 +17161,7 @@ function AdminGarmentMockupLibrary({ products, models, designLibrary = [], onSav
       });
       await onSaveModels(next);
       setName("");setFront(null);setBack(null);setFrontMask(null);setBackMask(null);
-      setStatus("Mockup guardado para "+impact.total+" productos del tipo "+selectedScope.label+". "+impact.withArt+" tienen estampado reutilizable; los demás conservan su foto hasta vincular el PNG.");
+      setStatus("Mockup guardado en la biblioteca de "+selectedScope.label+". La tienda no simula colores; muestra las fotografías existentes.");
     }catch(e){setStatus("Error al guardar: "+(e?.message||"sin conexión"))}
     finally{setSaving(false)}
   };
@@ -17223,7 +17188,7 @@ function AdminGarmentMockupLibrary({ products, models, designLibrary = [], onSav
         backX:model.backX??50,backY:model.backY??38,backW:model.backW??40
       });
       await onSaveModels(updated);
-      setStatus("Mockup anterior recuperado y seleccionado para la familia de "+countMockupImpact(products,target).total+" productos. Los que no tienen arte PNG mantienen su foto original.");
+      setStatus("Mockup anterior recuperado como recurso de "+target+". La tienda sigue mostrando fotografías originales.");
     }catch(e){setStatus("No se pudo recuperar el mockup: "+(e?.message||"Error"))}
     finally{setSaving(false)}
   };
@@ -17238,7 +17203,7 @@ function AdminGarmentMockupLibrary({ products, models, designLibrary = [], onSav
         isDefaultForScope:m.id===model.id?true:modelHasScope(m,target)?false:m.isDefaultForScope,
         sharedForAllTshirts:target==="camisetas"?m.id===model.id:m.sharedForAllTshirts
       })));
-      setStatus("Mockup seleccionado para "+countMockupImpact(products,target).total+" productos de "+target+".");
+      setStatus("Mockup guardado como recurso de "+target+". El visor de color ya no aparece en la tienda.");
     }catch(e){setStatus(e?.message||"No se pudo seleccionar el mockup");}
     finally{setSaving(false)}
   };
@@ -17336,7 +17301,7 @@ function AdminGarmentMockupLibrary({ products, models, designLibrary = [], onSav
   return <section className="space-y-6">
     <header>
       <h2 className="kulto-display text-2xl" style={{color:"var(--bone)"}}>Mockups de prendas</h2>
-      <p className="text-sm mt-2" style={{color:"var(--slate)"}}>Una foto limpia compartida por tipo de prenda. Las camisetas clásicas y oversize usan el mismo mockup. Las sudaderas con/sin capucha, las tote bags y nuevas categorías tienen sus propias bases. No modifica fotografías originales ni diseños.</p>
+      <p className="text-sm mt-2" style={{color:"var(--slate)"}}>Los mockups se conservan como archivos de la biblioteca por tipo de prenda, pero ya no se recolorean ni se muestran como visor en la tienda. El comprador verá fotografías cargadas para cada color, o una foto de referencia si no existe. No se borran tus fotos ni diseños.</p>
     </header>
     <div className="rounded-2xl p-5 space-y-4" style={{background:"var(--ink-2)",border:"1px solid var(--line)"}}>
       <h3 className="font-bold text-lg">1. Crear o seleccionar un mockup</h3>
@@ -17366,7 +17331,7 @@ function AdminGarmentMockupLibrary({ products, models, designLibrary = [], onSav
           <input type="file" accept="image/png,image/webp" disabled={saving} className="sr-only" onChange={e=>{pick(e.target.files?.[0],field);e.target.value=""}}/>
         </label>)}
       </div>
-      <button type="button" disabled={saving||!front?.url} onClick={saveNew} className="kulto-btn rounded-full px-5 py-2.5 font-bold" style={{background:"var(--sun)",color:"var(--ink)",opacity:saving?0.5:1}}>{saving?"Guardando...":"Guardar mockup común para "+impact.total+" productos"}</button>
+      <button type="button" disabled={saving||!front?.url} onClick={saveNew} className="kulto-btn rounded-full px-5 py-2.5 font-bold" style={{background:"var(--sun)",color:"var(--ink)",opacity:saving?0.5:1}}>{saving?"Guardando...":"Guardar mockup en biblioteca"}</button>
     </div>
     {previousMockups.length>0&&<div className="rounded-2xl p-5 space-y-3" style={{background:"var(--ink-2)",border:"1px solid var(--line)"}}>
       <h3 className="font-bold">Recuperar mockups que ya habías subido</h3>
@@ -17403,12 +17368,12 @@ function AdminGarmentMockupLibrary({ products, models, designLibrary = [], onSav
             <p className="text-xs" style={{color:"var(--slate)"}}>{affected.total} productos de esta familia · {affected.withArt} con PNG</p>
             <button type="button" disabled={saving||!m.base} onClick={()=>activate(m)} className="kulto-btn rounded-lg w-full p-2 text-sm font-semibold" style={{background:selected?"var(--sun)":"var(--ink-3)",color:selected?"var(--ink)":"var(--bone)",border:"1px solid var(--line)"}}>{selected?"✓ Mockup actualmente seleccionado":"Usar en estos productos"}</button>
             <div className="flex gap-4 flex-wrap text-xs">
-              <button type="button" className="underline" onClick={()=>setPreviewId(previewId===m.id?null:m.id)}>Probar colores</button>
+              <button type="button" className="underline" onClick={()=>setPreviewId(previewId===m.id?null:m.id)}>Ver fotografías</button>
               <button type="button" className="underline" onClick={()=>setEditId(editId===m.id?null:m.id)}>Cambiar fotos/máscaras</button>
             </div>
-            {previewId===m.id&&<div className="space-y-2">
-              <label className="text-xs flex items-center gap-2">Color de prueba <input type="color" value={previewColor} onChange={e=>setPreviewColor(e.target.value)}/></label>
-              <div className="grid grid-cols-2 h-40 gap-1"><MockupComposite mockup={{...m,design:null}} hex={previewColor}/>{m.backBase?<MockupComposite mockup={{...m,base:m.backBase,mask:m.backMask,design:null}} hex={previewColor}/>:null}</div>
+            {previewId===m.id&&<div className="grid grid-cols-2 gap-2">
+              <img src={m.base} alt="Foto original del frente" className="h-40 w-full object-contain"/>
+              {m.backBase&&<img src={m.backBase} alt="Foto original de la espalda" className="h-40 w-full object-contain"/>}
             </div>}
             {editId===m.id&&<div className="grid grid-cols-2 gap-2">
               {[["base","Frente"],["backBase","Espalda"],["mask","Máscara delante"],["backMask","Máscara detrás"]].map(([field,label])=><label key={field} className="cursor-pointer text-xs rounded-lg p-2" style={{border:"1px dashed var(--line)"}}>{label}<input type="file" accept="image/png,image/webp" disabled={saving} className="block w-full text-[10px]" onChange={e=>{updateExisting(m,e.target.files?.[0],field);e.target.value=""}}/></label>)}
