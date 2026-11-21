@@ -3992,41 +3992,13 @@ function ProductReviewsBlock({ product, reviews }) {
 }
 
 
-/* Photographic front and back only: no 3D engine or simulated spinning. */
-function GarmentPhotoViewer({front,back,hex}) {
-  const [side,setSide]=useState("front");
-  const [zoom,setZoom]=useState(1);
-  useEffect(()=>{setSide("front");setZoom(1)},[front?.base,back?.base]);
-  const b={background:"rgba(21,19,26,.92)",color:"var(--bone)",border:"1px solid var(--line)"};
-  return <div className="w-full h-full relative overflow-hidden" style={{background:"var(--ink-3)"}}>
-    <div className="absolute inset-0" style={{transform:"scale("+zoom+")",transition:"transform .2s ease"}}>
-      <MockupComposite mockup={side==="back"&&back?back:front} hex={hex}/>
-    </div>
-    <span aria-live="polite" className="absolute top-3 left-3 rounded-full px-3 py-1 text-xs font-semibold" style={b}>
-      {side==="back"&&back?"ESPALDA":"DELANTE"} · {Math.round(zoom*100)}%
-    </span>
-    <div className="absolute bottom-3 left-2 right-2 flex justify-between gap-1" style={{pointerEvents:"none"}}>
-      <div className="flex gap-1" style={{pointerEvents:"auto"}}>
-        {back&&["front","back"].map(value=><button type="button" key={value} onClick={()=>setSide(value)} aria-pressed={side===value} className="kulto-btn rounded-full px-3 py-2 text-xs font-semibold" style={{...b,border:side===value?"2px solid var(--sun)":"1px solid var(--line)"}}>{value==="front"?"Delante":"Espalda"}</button>)}
-      </div>
-      <div className="flex gap-1" style={{pointerEvents:"auto"}}>
-        <button type="button" className="kulto-btn rounded-full p-2" style={b} onClick={()=>setZoom(z=>Math.max(1,z-.25))} aria-label="Alejar" disabled={zoom<=1}><ZoomOut size={17}/></button>
-        <button type="button" className="kulto-btn rounded-full p-2" style={b} onClick={()=>setZoom(z=>Math.min(3,z+.25))} aria-label="Acercar" disabled={zoom>=3}><ZoomIn size={17}/></button>
-        <button type="button" className="kulto-btn rounded-full p-2" style={b} onClick={()=>{setZoom(1);setSide("front")}} aria-label="Restablecer vista"><RotateCcw size={17}/></button>
-      </div>
-    </div>
-  </div>;
-}
-
 function ProductConfigurator({ product, settings, onAddToCart, compact, reviews = [] }) {
   const firstPhoto = product.__entryFromCard
     ? (product.__entryCardImage || null)
-    : (activeMockup(product)?.cover || getColorImages(product.colors?.[0])[0] || product.photoPool?.[0] || null);
+    : (getColorImages(product.colors?.[0])[0] || product.photoPool?.[0] || product.mockup?.cover || null);
   const [colorIdx, setColorIdx] = useState(product.__entryColorIdx ?? 0);
   const [imgIdx, setImgIdx] = useState(0);
-  const [showUploadedPhoto, setShowUploadedPhoto] = useState(!!firstPhoto);
   const [showEntryCover, setShowEntryCover] = useState(!!firstPhoto);
-  const [viewMode, setViewMode] = useState(product.__entryFromCard && product.__entryColorIdx!=null && activeMockup(product) ? "mockup" : "photo");
   const [sizeIdx, setSizeIdx] = useState(0);
   const [aud, setAud] = useState(() => audsOf(product)[0] || "h");
   const [designMode, setDesignMode] = useState(product.designs && product.designs.length ? "design" : "custom");
@@ -4048,9 +4020,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
   useEffect(() => {
     setColorIdx(product.__entryColorIdx ?? 0);
     setImgIdx(0);
-    setShowUploadedPhoto(!!firstPhoto);
     setShowEntryCover(!!firstPhoto);
-    setViewMode(product.__entryFromCard && product.__entryColorIdx!=null && activeMockup(product) ? "mockup" : "photo");
     setSizeIdx(0);
     setAud(audsOf(product)[0] || "h");
     setDesignMode(product.designs && product.designs.length ? "design" : "custom");
@@ -4070,19 +4040,17 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
   useEffect(() => { setImgIdx(0); }, [colorIdx]);
 
   const color = product.colors && product.colors[colorIdx];
-  // Si el color no tiene fotos propias, se muestran las fotos generales del
-  // producto (las mismas de la tarjeta) y, si hace falta, se repintan solas con
-  // el color elegido (ver recolorExistingPhoto).
   const colorImages = color ? getColorImages(color) : [];
-  const images = colorImages.length > 0 ? colorImages : (product.photoPool || []);
-  const mock = activeMockup(product);
-  // Always honor the explicitly configured mockup; other uploaded photos remain in the gallery.
-  const mockActive = !!mock;
-  const mockHex = color?.hex || "#ffffff";
-  const autoImage = useAutoColorImage(product, color, !mockActive && colorImages.length === 0, imgIdx);
-  const activeImage = (showEntryCover && firstPhoto) || (colorImages.length === 0 && autoImage) || images[imgIdx] || null;
+  const photoSelection = photoGalleryForColor({
+    colorPhotos:colorImages,
+    generalPhotos:product.photoPool,
+    otherColorPhotos:(product.colors||[]).flatMap(c=>getColorImages(c)),
+    cover:product.mockup?.cover||null,
+  });
+  const images = photoSelection.images;
+  const activeImage = (showEntryCover && firstPhoto) || images[imgIdx] || null;
   const isCover = product.imageFit === "cover";
-  const previewBg = product.imageBackground || (color && !mock && colorImages.length > 0 ? color.hex : "var(--ink-3)");
+  const previewBg = product.imageBackground || "var(--ink-3)";
   const hasSizes = product.sizes && product.sizes.length > 0;
   const size = hasSizes ? product.sizes[sizeIdx] : null;
   const design = product.designs && product.designs[designIdx];
@@ -4094,20 +4062,6 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
   const showDesignStep = hasPresetDesigns || allowCustomDesign;
   const unitPrice = product.tags?.oferta && product.salePrice ? product.salePrice : product.price;
   const finalCustomImage = customImage ? (useProcessed && customImageProcessed ? customImageProcessed : customImage) : null;
-  // Compositing inside each canvas prevents duplicate artwork floating over both garments.
-  // Keep the product's original transparent art when no new custom PNG was selected.
-  // Many existing products do not use the optional "choose a design" step.
-  const selectedArtOverride = designMode === "custom" && finalCustomImage ? finalCustomImage
-    : designMode === "design" && design?.image ? design.image : undefined;
-  const art = selectGarmentArt(mock, product, selectedArtOverride);
-  const productMockPreview = mockActive ? { ...mock, design: art.front } : null;
-  const backMock = productMockPreview?.backBase ? {
-    ...productMockPreview, base: productMockPreview.backBase, mask: productMockPreview.backMask,
-    ar: productMockPreview.backAr, design: art.back,
-    x: productMockPreview.backX ?? 50, y: productMockPreview.backY ?? 38,
-    w: productMockPreview.backW ?? 40, rot: productMockPreview.backRot ?? 0,
-    logoLight: null, logoDark: null
-  } : null;
   // El stock es un número total del producto (no por talle/color todavía), así
   // que cuando llega a 0 bloqueamos la compra entera en vez de un talle puntual.
   const outOfStock = (product.stock ?? 0) <= 0;
@@ -4157,7 +4111,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
       // no se resolvió acá, se usa el general de Ajustes al momento de sumar
       // — ver handleCheckout, que hace lo mismo que ya hacíamos con el precio).
       points: product.points ?? null,
-      previewImage: activeImage || (mock && mock.cover) || null,
+      previewImage: activeImage || null,
     };
     onAddToCart(item);
     setJustAdded(true);
@@ -4188,14 +4142,12 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
             setZoomOrigin({ x: ((e.clientX - rect.left) / rect.width) * 100, y: ((e.clientY - rect.top) / rect.height) * 100 });
           }}
         >
-          {viewMode === "mockup" && mockActive ? (
-            <GarmentPhotoViewer front={productMockPreview} back={backMock} hex={mockHex}/>
-
+          {activeImage ? (
           ) : activeImage ? (
             <img
               src={activeImage}
               alt={color?.name}
-              className={`w-full h-full ${isCover || (showEntryCover && firstPhoto && firstPhoto === mock?.cover) ? "object-cover" : "object-contain"}`}
+              className={`w-full h-full ${isCover ? "object-cover" : "object-contain"}`}
               style={{
                 transform: hoverZoom ? "scale(2.2)" : "scale(1)",
                 transformOrigin: `${zoomOrigin.x}% ${zoomOrigin.y}%`,
@@ -4206,7 +4158,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
           ) : (
             <Shirt size={64} style={{ color: "rgba(243,239,230,0.35)" }} />
           )}
-          {viewMode === "photo" && !showEntryCover && (!mockActive || showUploadedPhoto) && designMode === "design" && design && design.image && (
+          {!showEntryCover && designMode === "design" && design && design.image && (
             <img
               src={design.image}
               alt={design.name}
@@ -4214,7 +4166,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
               style={{ width: "48%", top: "26%", left: "26%", objectFit: "contain", filter: "drop-shadow(0 6px 14px rgba(0,0,0,0.35))" }}
             />
           )}
-          {viewMode === "photo" && !showEntryCover && (!mockActive || showUploadedPhoto) && designMode === "custom" && finalCustomImage && !removingBg && (
+          {!showEntryCover && designMode === "custom" && finalCustomImage && !removingBg && (
             <img
               src={finalCustomImage}
               alt="Tu diseño"
@@ -4222,7 +4174,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
               style={{ width: "48%", top: "26%", left: "26%", objectFit: "contain", filter: "drop-shadow(0 6px 14px rgba(0,0,0,0.35))" }}
             />
           )}
-          {viewMode === "photo" && !mockActive && images.length > 1 && (
+          {images.length > 1 && (
             <>
               <button
                 type="button"
@@ -4247,7 +4199,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
               </div>
             </>
           )}
-          {viewMode === "photo" && activeImage && (!mockActive || showUploadedPhoto) && (
+          {activeImage && (
             <button
               type="button"
               onClick={() => setZoomOpen(true)}
@@ -4259,25 +4211,25 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
             </button>
           )}
         </div>
-        {(mockActive || images.length > 1) && (
+        {(images.length > 1 || (firstPhoto && firstPhoto !== images[0])) && (
           <div className="flex gap-2 mt-2 overflow-x-auto kulto-scrollbar pb-1">
-            {firstPhoto && <button type="button" onClick={() => { setShowUploadedPhoto(true); setShowEntryCover(true); setHoverZoom(false); setViewMode("photo"); }} className="kulto-btn shrink-0 rounded-lg px-3 text-xs font-bold" style={{ minWidth: 82, height: 44, border: viewMode==="photo" && showUploadedPhoto && showEntryCover ? "2px solid var(--sun)" : "1px solid var(--line)", background: "var(--ink-3)", color: "var(--bone)" }}>Portada</button>}
-            {mockActive && <button type="button" onClick={() => { setShowUploadedPhoto(false); setShowEntryCover(false); setViewMode("mockup"); }} className="kulto-btn shrink-0 rounded-lg px-3 text-xs font-bold" style={{ minWidth: 104, height: 44, border: viewMode==="mockup" ? "2px solid var(--sun)" : "1px solid var(--line)", background: "var(--ink-3)", color: "var(--bone)" }}>Mockup fotográfico</button>}
+            {firstPhoto && <button type="button" onClick={() => { setShowEntryCover(true); setHoverZoom(false); }} className="kulto-btn shrink-0 rounded-lg px-3 text-xs font-bold" style={{ minWidth: 82, height: 44, border: showEntryCover ? "2px solid var(--sun)" : "1px solid var(--line)", background: "var(--ink-3)", color: "var(--bone)" }}>Portada</button>}
             {images.map((img, i) => (
               <button
                 key={i}
-                onClick={() => { setImgIdx(i); setShowUploadedPhoto(true); setShowEntryCover(false); setHoverZoom(false); setViewMode("photo"); }}
+                onClick={() => { setImgIdx(i); setShowEntryCover(false); setHoverZoom(false); }}
                 className="kulto-btn shrink-0 rounded-lg overflow-hidden"
-                style={{ width: 44, height: 44, border: viewMode==="photo" && i === imgIdx && showUploadedPhoto && !showEntryCover ? "2px solid var(--sun)" : "1px solid var(--line)", background: "var(--ink-3)" }}
+                style={{ width: 44, height: 44, border: i === imgIdx && !showEntryCover ? "2px solid var(--sun)" : "1px solid var(--line)", background: "var(--ink-3)" }}
               >
                 <FastImg loading="lazy" src={img} className="w-full h-full object-contain" alt="" />
               </button>
             ))}
           </div>
         )}
-        <p className="text-xs mt-2" style={{ color: "var(--slate)" }}>
-          Vista previa orientativa. Los colores y el estampado final pueden variar ligeramente.
-        </p>
+        {photoSelection.referenceOnly && color && <p role="status" className="text-xs mt-2" style={{color:"var(--slate)"}}>
+          Fotografía de referencia: no hay imagen específica del color {color.name}. El pedido se registrará con el color seleccionado.
+        </p>}
+
       </div>
 
       {zoomOpen && activeImage && (
@@ -4323,9 +4275,7 @@ function ProductConfigurator({ product, settings, onAddToCart, compact, reviews 
             <div className="flex flex-wrap gap-2">
               {product.colors.map((c, i) => !colorOkForAud(product, c, aud) ? null : (
                 <ColorSwatch key={i} hex={c.hex} title={c.name} selected={i === colorIdx} onClick={() => {
-                    const nextView = preferredPhotoOrMockup({hasColorPhotos:getColorImages(c).length>0,hasMockup:mockActive,preferMockup:isTshirtProduct(product)});
-                    setColorIdx(i);setShowEntryCover(false);setShowUploadedPhoto(nextView==="photo");
-                    setViewMode(nextView);
+                    setColorIdx(i);setImgIdx(0);setShowEntryCover(false);
                     if(product.sizes && !sizeOkForColor(product,product.sizes[sizeIdx],product.colors[i]))setSizeIdx(firstOkSizeIdx(product,product.colors[i]));
                   }} />
               ))}
