@@ -18912,6 +18912,14 @@ function NavLink({ label, active, onClick }) {
 function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, customer, themeMode, onToggleThemeMode, fontStep, onDecreaseFont, onIncreaseFont, socialLinks = {}, showAdminMenu = false, onGoAdminTab, onPreviewAsCustomer, productsMenuItems = [], megaMenuTileSettings = {}, megaMenuCardWidth = 186, megaMenuCardRatio = "4/3", onGoCatalog, products = [], onBack }) {
   const [open, setOpen] = useState(false);
   const [adminMenuOpen, setAdminMenuOpen] = useState(false);
+  const [searchOpen,setSearchOpen]=useState(false);
+  const [searchValue,setSearchValue]=useState("");
+  const submitHeaderSearch=(e)=>{
+    e.preventDefault();
+    const q=searchValue.trim();
+    if(!q)return;
+    onGoCatalog?.({search:q});setSearchOpen(false);setCatalogMenuOpen(false);setOpen(false);
+  };
   const adminMenuRef = useRef(null);
   // Menú flotante de "Productos" (desktop) — lista "Catálogo" + los accesos
   // directos que el admin haya elegido a mano en Ajustes (no se arma solo
@@ -19093,6 +19101,7 @@ function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, cus
           <NavLink label={customer ? "Mi cuenta" : "Ingresar"} active={page === "cuenta"} onClick={() => go("cuenta")} />
         </nav>
         <div className="flex items-center gap-1">
+          <button type="button" onClick={()=>setSearchOpen(v=>!v)} className="kulto-btn p-2 rounded-full" style={{color:"var(--bone)"}} aria-label="Buscar productos" aria-expanded={searchOpen} title="Buscar prendas y diseños"><Search size={20}/></button>
           <button
             onClick={onToggleThemeMode}
             className="kulto-btn w-8 h-8 rounded-full flex items-center justify-center shrink-0"
@@ -19190,6 +19199,12 @@ function Header({ page, setPage, cartCount, onOpenCart, logoImage, logoText, cus
           </button>
         </div>
       </div>
+      {searchOpen&&<form role="search" onSubmit={submitHeaderSearch} className="max-w-6xl mx-auto px-4 md:px-6 pb-3 flex items-center gap-2">
+        <Search size={18} style={{color:"var(--slate)"}} aria-hidden="true"/>
+        <input autoFocus type="search" value={searchValue} onChange={e=>setSearchValue(e.target.value)} placeholder="Buscar camisetas, sudaderas, diseños…" aria-label="Buscar en la tienda" className="flex-1 min-w-0 rounded-lg px-4 py-2.5 text-sm" style={{background:"var(--ink-2)",color:"var(--bone)",border:"1px solid var(--line)"}}/>
+        <button type="submit" className="kulto-btn rounded-lg px-4 py-2.5 text-sm font-semibold" style={{background:"var(--sun)",color:"var(--ink)"}}>Buscar</button>
+        <button type="button" onClick={()=>setSearchOpen(false)} className="kulto-btn p-2" aria-label="Cerrar buscador" style={{color:"var(--bone)"}}><X size={18}/></button>
+      </form>}
       {open && (
         <div className="md:hidden px-4 pb-4 flex flex-col gap-3" style={{ borderTop: "1px solid var(--line)" }}>
           <div className="sm:hidden flex items-center justify-center gap-1 rounded-full px-1.5 py-1 mt-3 self-center" style={{ border: "1px solid var(--line)" }}>
@@ -19991,7 +20006,7 @@ export default function App() {
     setCatalogInitialSubcategory(f.subcategory || "");
     setCatalogInitialFit(f.fit || "");
     setCatalogInitialCollection(f.collection || "");
-    setCatalogSearchQuery("");
+    setCatalogSearchQuery(f.search || "");
     setPage("catalog");
   };
   const [selectedProduct, setSelectedProduct] = useState(null);
