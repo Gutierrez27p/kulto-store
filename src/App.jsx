@@ -5516,7 +5516,7 @@ function Home({ products, settings, reviews, customWorkGallery, onOpen, onGoCata
         <FeaturedGrid list={dedupeByDesign([...products].reverse()).slice(0, 4)} collection="novedades" />
       </section>
       <section className="kulto-editorial-section" aria-label="Personaliza tu prenda">
-        <div className="kulto-editorial-custom" style={customBackground ? {backgroundImage:`linear-gradient(90deg,rgba(12,12,14,.83),rgba(12,12,14,.60)),url("${customBackground}")`,backgroundSize:"cover",backgroundPosition:"center"} : undefined}>
+        <div className="kulto-editorial-custom" style={settings?.editorialCustomBackground ? {backgroundImage:`linear-gradient(90deg,rgba(12,12,14,.83),rgba(12,12,14,.60)),url("${settings.editorialCustomBackground}")`,backgroundSize:"cover",backgroundPosition:"center"} : undefined}>
           <div><small>HECHO A TU MANERA</small><h2>Tu idea. Tu prenda.</h2>
             <p>Elegí la prenda y subí tu diseño. Nosotros nos encargamos de darle forma.</p>
           </div>
