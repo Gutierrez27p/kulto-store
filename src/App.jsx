@@ -5552,7 +5552,7 @@ function Home({ products, settings, reviews, customWorkGallery, onOpen, onGoCata
             [RotateCcw,"Atención personalizada","Te ayudamos con tu compra"],
             [Lock,"Compra segura","Tus datos protegidos"],
             [Shirt,"Estampados originales","Tu estilo, tu elección"]
-          ].map(([Icon,title,sub])=><div className="kulto-editorial-perk" key={title}><Icon size={25} strokeWidth={1.5}/><div>{title}<small>{sub}</small></div>)}
+          ].map(([Icon,title,sub])=><div className="kulto-editorial-perk" key={title}><Icon size={25} strokeWidth={1.5}/><div>{title}<small>{sub}</small></div></div>)}
         </div>
       </section>
     </div>
