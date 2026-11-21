@@ -14761,6 +14761,119 @@ function AdminProductsMenu({ items, categories, groups, onSave }) {
   );
 }
 
+
+// The desktop menu thumbnails are fully independent from product pictures.
+// Each card is editable, with scale and image positioning but no automatic
+// garment color simulation. Save applies atomically to the storefront.
+function AdminMegaMenuImages({products,items=[],settings,onSave}){
+  const [draft,setDraft]=useState(()=>settings.megaMenuTileMedia||{});
+  const [width,setWidth]=useState(()=>settings.megaMenuCardWidth||186);
+  const [ratio,setRatio]=useState(()=>settings.megaMenuCardRatio||"4/3");
+  const [uploading,setUploading]=useState("");
+  const [saving,setSaving]=useState(false);
+  const [message,setMessage]=useState("");
+  const [expanded,setExpanded]=useState("family:camisetas");
+  useEffect(()=>setDraft(settings.megaMenuTileMedia||{}),[settings.megaMenuTileMedia]);
+  useEffect(()=>setWidth(settings.megaMenuCardWidth||186),[settings.megaMenuCardWidth]);
+  useEffect(()=>setRatio(settings.megaMenuCardRatio||"4/3"),[settings.megaMenuCardRatio]);
+  const displayItems=getDisplayMenuItems(products,items,GARMENT_FAMILIES,garmentFamilyOf);
+  const photoOf=p=>p?(p.photoPool?.[0]||getColorImages(p.colors?.[0])[0]||null):null;
+  const update=(key,patch)=>{setMessage("");setDraft(prev=>({...prev,[key]:{...(prev[key]||{}),...patch}}));};
+  const upload=async (key,file)=>{
+    if(!file)return;
+    if(!["image/png","image/jpeg","image/webp"].includes(file.type)){setMessage("Solo JPG, PNG o WebP.");return;}
+    setUploading(key);setMessage("");
+    try{
+      const output=await new Promise(resolve=>fileToBase64(file,resolve,1400,.9,file.type==="image/png"?"image/png":"image/jpeg"));
+      const url=output?.startsWith("data:")?await uploadDataUrlToStorage(output):output;
+      if(!url||!/^https:\/\//i.test(url))throw Error("No se pudo guardar la imagen en Storage. No se cambió el menú.");
+      update(key,{image:url});
+      setMessage("Imagen preparada. Pulsá «Guardar menú» para publicarla en esta versión.");
+    }catch(err){setMessage("Error al subir: "+(err?.message||"intentalo de nuevo"));}
+    finally{setUploading("");}
+  };
+  const save=async()=>{
+    if(uploading)return;
+    setSaving(true);setMessage("");
+    try{
+      await onSave({megaMenuTileMedia:draft,megaMenuCardWidth:width,megaMenuCardRatio:ratio});
+      setMessage("Menú guardado. Los visitantes verán las nuevas imágenes y tamaños.");
+    }catch(err){setMessage("No se guardó el menú: "+(err?.message||"error de conexión"));}
+    finally{setSaving(false);}
+  };
+  const inputStyle={background:"var(--ink)",color:"var(--bone)",border:"1px solid var(--line)"};
+  return <section className="rounded-2xl p-5 space-y-5" style={{background:"var(--ink-2)",border:"1px solid var(--line)"}}>
+    <div>
+      <h3 className="font-bold text-lg" style={{color:"var(--bone)"}}>Imágenes del menú «Productos»</h3>
+      <p className="text-xs mt-2" style={{color:"var(--slate)"}}>
+        Cambiá la foto de «Clásica», «Oversize», «Chaquetas» y cualquier categoría sin tocar las fotos de los artículos.
+        Ajustá el tamaño de la tarjeta, el encuadre y el zoom de cada imagen. «Chaquetas» tiene una sola tarjeta de modelo hasta que se creen modelos diferenciados.
+      </p>
+    </div>
+    <div className="grid sm:grid-cols-2 gap-4 rounded-xl p-4" style={{background:"var(--ink-3)"}}>
+      <label className="text-sm font-semibold" style={{color:"var(--bone)"}}>Ancho de las tarjetas: {width} px
+        <input type="range" min="140" max="260" step="5" value={width} onChange={e=>setWidth(Number(e.target.value))} className="block w-full mt-3" />
+      </label>
+      <label className="text-sm font-semibold" style={{color:"var(--bone)"}}>Proporción de la imagen
+        <select value={ratio} onChange={e=>setRatio(e.target.value)} className="block w-full p-2 rounded-lg mt-2" style={inputStyle}>
+          <option value="4/3">Horizontal (4:3)</option>
+          <option value="1/1">Cuadrada (1:1)</option>
+          <option value="3/4">Vertical (3:4)</option>
+        </select>
+      </label>
+    </div>
+    <div className="space-y-3">
+      {displayItems.map(item=>{
+        const tiles=getMegaMenuTiles(item,products,GARMENT_FAMILIES,garmentFamilyOf,garmentFitOf,photoOf);
+        if(!tiles.length)return null;
+        const isOpen=expanded===item.id;
+        return <div key={item.id} className="rounded-xl overflow-hidden" style={{border:"1px solid var(--line)"}}>
+          <button type="button" onClick={()=>setExpanded(isOpen?"":item.id)} className="kulto-btn w-full flex items-center justify-between p-3 text-left" style={{background:"var(--ink-3)",color:"var(--bone)"}}>
+            <span className="font-semibold text-sm">{item.label||item.value} <small style={{color:"var(--slate)"}}>· {tiles.length} imagen{tiles.length===1?"":"es"}</small></span>
+            <ChevronDown size={16} style={{transform:isOpen?"rotate(180deg)":"none"}}/>
+          </button>
+          {isOpen&&<div className="grid md:grid-cols-2 gap-3 p-3">
+            {tiles.map(tile=>{
+              const media=menuTileMedia(draft,tile.key,tile.img||item.image);
+              return <div key={tile.key} className="rounded-xl p-3 flex flex-col gap-3" style={{background:"var(--ink-3)",border:"1px solid var(--line)"}}>
+                <strong className="text-sm" style={{color:"var(--bone)"}}>{tile.label}</strong>
+                <div className="kulto-mega-tile-media mx-auto w-full" style={{maxWidth:Math.min(width,260),aspectRatio:ratio==="1/1"?"1 / 1":ratio==="3/4"?"3 / 4":"4 / 3"}}>
+                  {media.image?<img src={media.image} alt={"Previsualización de "+tile.label} className="kulto-mega-tile-photo" style={{objectFit:media.fit,objectPosition:media.x+"% "+media.y+"%",transform:"scale("+(media.scale/100)+")"}}/>:<Shirt size={32}/>}
+                </div>
+                <label className="text-xs kulto-btn cursor-pointer rounded-lg p-2 text-center font-semibold" style={{background:"var(--sun)",color:"var(--ink)"}}>
+                  <Upload size={13} className="inline mr-1"/>{uploading===tile.key?"Subiendo…":draft[tile.key]?.image?"Cambiar imagen":"Elegir imagen"}
+                  <input type="file" className="sr-only" accept="image/png,image/jpeg,image/webp" disabled={!!uploading||saving} onChange={e=>{upload(tile.key,e.target.files?.[0]);e.target.value="";}}/>
+                </label>
+                <label className="text-xs" style={{color:"var(--bone)"}}>Mostrar imagen
+                  <select value={media.fit} onChange={e=>update(tile.key,{fit:e.target.value})} className="block w-full mt-1 rounded-lg p-2" style={inputStyle}>
+                    <option value="contain">Completa, sin recorte</option><option value="cover">Rellenar el recuadro</option>
+                  </select>
+                </label>
+                <label className="text-xs" style={{color:"var(--bone)"}}>Tamaño / zoom: {media.scale}%
+                  <input type="range" min="50" max="250" step="5" value={media.scale} onChange={e=>update(tile.key,{scale:Number(e.target.value)})} className="block w-full mt-2"/>
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="text-xs" style={{color:"var(--bone)"}}>Mover horizontal: {media.x}%
+                    <input type="range" min="0" max="100" step="5" value={media.x} onChange={e=>update(tile.key,{x:Number(e.target.value)})} className="block w-full mt-2"/>
+                  </label>
+                  <label className="text-xs" style={{color:"var(--bone)"}}>Mover vertical: {media.y}%
+                    <input type="range" min="0" max="100" step="5" value={media.y} onChange={e=>update(tile.key,{y:Number(e.target.value)})} className="block w-full mt-2"/>
+                  </label>
+                </div>
+                <button type="button" onClick={()=>{setDraft(prev=>{const next={...prev};delete next[tile.key];return next;});setMessage("Se usará la imagen predeterminada cuando guardes el menú.");}} className="kulto-btn text-xs underline self-start" style={{color:"var(--slate)"}}>Restablecer imagen y tamaño</button>
+              </div>;
+            })}
+          </div>}
+        </div>;
+      })}
+    </div>
+    <button type="button" disabled={!!uploading||saving} onClick={save} className="kulto-btn px-5 py-3 font-bold rounded-full" style={{background:"var(--sun)",color:"var(--ink)",opacity:uploading||saving?.6:1}}>
+      {saving?"Guardando…":"Guardar imágenes y tamaños del menú"}
+    </button>
+    {message&&<p role="status" className="text-xs rounded-lg p-3" style={{background:"var(--ink-3)",color:"var(--bone)"}}>{message}</p>}
+  </section>;
+}
+
 function AdminSectionSettings({ settings, onSave }) {
   const [sections, setSections] = useState(getEffectiveHomeSections(settings));
   const [dragIndex, setDragIndex] = useState(null);
@@ -18746,6 +18859,7 @@ function AdminPanel({ products, categories, groups, orders, customers, onAdjustC
           <AdminBrandSettings settings={settings} onSave={onSaveSettings} />
           <AdminBannerSettings settings={settings} groups={groups} onSave={onSaveSettings} />
           <AdminProductsMenu items={settings.productsMenuItems || []} categories={categories} groups={groups} onSave={onSaveSettings} />
+          <AdminMegaMenuImages products={sellableProducts} items={settings.productsMenuItems || []} settings={settings} onSave={onSaveSettings} />
           <AdminHowItWorksSettings settings={settings} onSave={onSaveSettings} />
           <AdminSectionSettings settings={settings} onSave={onSaveSettings} />
           <AdminThemeSettings settings={settings} onSave={onSaveSettings} />
