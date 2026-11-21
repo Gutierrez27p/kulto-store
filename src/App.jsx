@@ -4729,133 +4729,6 @@ function ClampText({ text, lines = 3, className = "", style = {}, buttonStyle = 
   );
 }
 
-function Hero({ onGoCatalog, onGoWizard, onSearch, heroTitle, heroSubtitle, heroImage, heroImages, banners = [] }) {
-  const [query, setQuery] = useState("");
-  const submit = (e) => {
-    e.preventDefault();
-    if (query.trim()) onSearch(query.trim());
-  };
-
-  const activeBanners = (banners || []).filter((b) => b.active !== false && b.placement !== "section");
-  const [slide, setSlide] = useState(0);
-
-  useEffect(() => { setSlide(0); }, [activeBanners.length]);
-
-  useEffect(() => {
-    if (activeBanners.length < 2) return;
-    const t = setInterval(() => setSlide((s) => (s + 1) % activeBanners.length), 5500);
-    return () => clearInterval(t);
-  }, [activeBanners.length]);
-
-  // Cuando no hay ningún banner activo arriba de todo, la imagen decorativa
-  // puede tener varias fotos cargadas — van rotando solas cada tantos
-  // segundos, cada una tal cual se subió (sin recortarla ni deformarla).
-  const heroImgList = heroImages && heroImages.length ? heroImages : (heroImage ? [heroImage] : []);
-  const [heroImgIdx, setHeroImgIdx] = useState(0);
-  useEffect(() => { setHeroImgIdx(0); }, [heroImgList.length]);
-  useEffect(() => {
-    if (activeBanners.length > 0 || heroImgList.length < 2) return;
-    const t = setInterval(() => setHeroImgIdx((i) => (i + 1) % heroImgList.length), 4000);
-    return () => clearInterval(t);
-  }, [activeBanners.length, heroImgList.length]);
-
-  const runCta = (banner) => {
-    if (!banner || banner.ctaAction === "none") return;
-    if (banner.ctaAction === "wizard") onGoWizard();
-    else if (banner.ctaAction === "url" && banner.ctaUrl) window.open(banner.ctaUrl, "_blank", "noreferrer");
-    else if (banner.ctaAction === "group" && banner.ctaGroup) onGoCatalog(banner.ctaGroup);
-    else onGoCatalog();
-  };
-
-  const current = activeBanners.length ? activeBanners[slide % activeBanners.length] : null;
-  const title = current ? current.title : heroTitle;
-  const subtitle = current ? current.subtitle : heroSubtitle;
-  const image = current ? current.image : (heroImgList[heroImgIdx] || null);
-
-  const prevSlide = () => setSlide((s) => (s - 1 + activeBanners.length) % activeBanners.length);
-  const nextSlide = () => setSlide((s) => (s + 1) % activeBanners.length);
-
-  return (
-    <section className="relative overflow-hidden" style={{ borderBottom: "1px solid var(--line)" }}>
-      <div className="max-w-6xl mx-auto px-4 md:px-6 py-14 md:py-24 grid md:grid-cols-2 gap-10 items-center">
-        <div>
-          <div key={`text-${slide}`} className="kulto-hero-fade">
-            <h1 className="kulto-display leading-[0.95] text-4xl sm:text-5xl md:text-6xl whitespace-pre-line" style={{ color: "var(--bone)", ...textOutlineStyle(current?.textOutlineWidth, current?.textOutlineColor) }}>
-              {title}
-            </h1>
-            <div className="mt-5 flex flex-col gap-1 max-w-md">
-              <ClampText text={subtitle} lines={4} className="text-base md:text-lg" style={{ color: "var(--slate)", ...subtitleOutline(current) }} />
-            </div>
-          </div>
-          <form onSubmit={submit} className="mt-6 max-w-sm relative">
-            <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2" style={{ color: "var(--slate)" }} />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Buscar productos..."
-              className="w-full rounded-full pl-10 pr-4 py-3 text-sm"
-              style={{ background: "var(--ink-2)", color: "var(--bone)", border: "1px solid var(--line)" }}
-            />
-          </form>
-          <div className="mt-5 flex flex-wrap gap-3">
-            {current ? (
-              <button onClick={() => runCta(current)} className="kulto-btn rounded-full px-6 py-3 font-semibold" style={{ background: "var(--signal)", color: "var(--bone)" }}>
-                {current.ctaLabel || "Ver catálogo"}
-              </button>
-            ) : (
-              <button onClick={onGoCatalog} className="kulto-btn rounded-full px-6 py-3 font-semibold" style={{ background: "var(--signal)", color: "var(--bone)" }}>
-                Ver catálogo
-              </button>
-            )}
-            <button onClick={onGoWizard} className="kulto-btn rounded-full px-6 py-3 font-semibold flex items-center gap-2" style={{ background: "transparent", color: "var(--bone)", border: "1px solid var(--line)" }}>
-              Personalizar mi prenda <ArrowRight size={16} />
-            </button>
-          </div>
-          {activeBanners.length > 1 && (
-            <div className="mt-6 flex items-center gap-3">
-              <button onClick={prevSlide} aria-label="Banner anterior" className="kulto-btn w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "var(--ink-2)", border: "1px solid var(--line)", color: "var(--bone)" }}>
-                <ChevronLeft size={14} />
-              </button>
-              <div className="flex items-center gap-2">
-                {activeBanners.map((b, i) => (
-                  <button
-                    key={b.id || i}
-                    onClick={() => setSlide(i)}
-                    aria-label={`Banner ${i + 1}`}
-                    className="kulto-btn rounded-full"
-                    style={{ width: i === slide ? 22 : 8, height: 8, background: i === slide ? "var(--signal)" : "var(--line)", transition: "width .2s" }}
-                  />
-                ))}
-              </div>
-              <button onClick={nextSlide} aria-label="Banner siguiente" className="kulto-btn w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "var(--ink-2)", border: "1px solid var(--line)", color: "var(--bone)" }}>
-                <ChevronRight size={14} />
-              </button>
-            </div>
-          )}
-        </div>
-        <div className="relative h-64 md:h-96 flex items-center justify-center">
-          {image ? (
-            <img key={`img-${slide}-${heroImgIdx}`} src={image} alt="" className="w-full h-full object-contain kulto-hero-fade" />
-          ) : (
-            <>
-              <div className="absolute rounded-3xl" style={{ width: "70%", height: "70%", background: "var(--ink-2)", border: "1px solid var(--line)", transform: "rotate(-6deg)" }} />
-              <div className="absolute rounded-3xl flex items-center justify-center" style={{ width: "58%", height: "58%", background: "var(--signal)", transform: "rotate(8deg)" }}>
-                <Shirt size={64} color="var(--bone)" />
-              </div>
-              <div className="absolute rounded-full px-4 py-2 font-semibold text-sm kulto-display" style={{ top: "6%", right: "8%", background: "var(--sun)", color: "var(--ink)", transform: "rotate(-10deg)" }}>
-                Diseños originales
-              </div>
-              <div className="absolute rounded-full px-4 py-2 font-semibold text-sm kulto-display" style={{ bottom: "8%", left: "2%", background: "var(--bone)", color: "var(--ink)", transform: "rotate(6deg)" }}>
-                Pide por WhatsApp
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-    </section>
-  );
-}
-
 // Banner promocional para usar como una sección más del inicio (entre
 // "Tendencia", "En oferta", etc.) — no solo arriba de todo como el Hero.
 const BANNER_SIZES = { sm: 220, md: 340, lg: 460 };
@@ -13789,54 +13662,22 @@ function AdminHomeCategoryCovers({ settings, products, onSave }) {
 }
 
 function AdminBannerSettings({ settings, groups = [], onSave }) {
-  const [heroTitle, setHeroTitle] = useState(settings.heroTitle);
-  const [heroSubtitle, setHeroSubtitle] = useState(settings.heroSubtitle);
-  // Compatibilidad: si la tienda todavía tiene la imagen vieja de portada
-  // (un solo campo, "heroImage") y nunca cargó varias, arrancamos la lista
-  // con esa — así no se pierde nada al actualizar.
-  const initialHeroImages = () => (settings.heroImages && settings.heroImages.length ? settings.heroImages : (settings.heroImage ? [settings.heroImage] : []));
-  const [heroImages, setHeroImages] = useState(initialHeroImages());
   const [banners, setBanners] = useState(settings.banners || []);
   const [draft, setDraft] = useState(null);
-  const [saved, setSaved] = useState(false);
   const [cropSource, setCropSource] = useState(null);
 
   useEffect(() => {
-    setHeroTitle(settings.heroTitle);
-    setHeroSubtitle(settings.heroSubtitle);
-    setHeroImages(initialHeroImages());
     setBanners(settings.banners || []);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings]);
 
   const inputStyle = { background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" };
 
-  // Las fotos de portada son lo primero que carga CUALQUIER visitante, así
-  // que acá sí conviene comprimirlas siempre que se pueda. Pero esta misma
-  // sección también se usa para imágenes decorativas con transparencia (ej:
-  // el logo, que tiene que verse flotando sobre el fondo oscuro, no en un
-  // recuadro). fileToBase64 ya detecta solo si la imagen tiene transparencia
-  // de verdad: si no la tiene, la comprime como JPG liviano; si la tiene
-  // (como un logo en PNG), la mantiene en PNG para no taparla con un fondo
-  // negro — por eso acá pedimos "image/png" y dejamos que decida sola.
-  const addHeroImages = (fileList) => {
-    Array.from(fileList || []).forEach((f) => {
-      fileToBase64(f, (b64) => setHeroImages((imgs) => [...imgs, b64]), 1200, 0.85, "image/png");
-    });
-  };
-  const removeHeroImage = (img) => setHeroImages((imgs) => imgs.filter((i) => i !== img));
-
-  const saveDefault = async () => {
-    await onSave({ heroTitle, heroSubtitle, heroImages, heroImage: heroImages[0] || null });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-  };
-
   const openNew = () => setDraft({
     id: genId("banner"),
-    title: banners.length === 0 ? heroTitle : "",
-    subtitle: banners.length === 0 ? heroSubtitle : "",
-    image: banners.length === 0 ? (heroImages[0] || null) : null,
+    title: banners.length === 0 ? (settings.editorialHeroTitle || "") : "",
+    subtitle: banners.length === 0 ? (settings.editorialHeroSubtitle || "") : "",
+    image: banners.length === 0 ? (settings.heroImage || settings.heroImages?.[0] || null) : null,
     ctaLabel: "Ver catálogo",
     ctaAction: "catalog",
     ctaUrl: "",
@@ -14161,54 +14002,6 @@ function AdminBannerSettings({ settings, groups = [], onSave }) {
           </div>
         </div>
       )}
-
-      <div className="pt-4 flex flex-col gap-4" style={{ borderTop: "1px solid var(--line)" }}>
-        <div>
-          <h5 className="text-sm font-semibold" style={{ color: "var(--bone)" }}>Cartel por defecto</h5>
-          <p className="text-xs mt-1" style={{ color: "var(--slate)" }}>Se usa solo cuando no tenés ningún banner activo arriba.</p>
-        </div>
-        <div>
-          <label className="text-sm mb-1 block" style={{ color: "var(--bone)" }}>Título</label>
-          <textarea value={heroTitle} onChange={(e) => setHeroTitle(e.target.value)} rows={2} className="w-full rounded-xl p-3 text-sm" style={inputStyle} />
-        </div>
-        <div>
-          <label className="text-sm mb-1 block" style={{ color: "var(--bone)" }}>Subtítulo</label>
-          <textarea value={heroSubtitle} onChange={(e) => setHeroSubtitle(e.target.value)} rows={3} className="w-full rounded-xl p-3 text-sm" style={inputStyle} />
-        </div>
-        <div>
-          <label className="text-sm mb-1 block" style={{ color: "var(--bone)" }}>Imagen decorativa (PNG o JPG)</label>
-          <p className="text-xs mb-2" style={{ color: "var(--slate)" }}>
-            Subí una o varias — cada una se ve tal cual la subiste, sin recortarla. Si cargás más de una, van cambiando solas cada 4 segundos.
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {heroImages.map((img, i) => (
-              <div key={i} className="relative w-20 h-20 rounded-xl overflow-hidden shrink-0" style={{ background: "var(--ink-3)", border: "1px solid var(--line)" }}>
-                <img loading="lazy" src={img} alt="" className="w-full h-full object-contain p-1" />
-                <button
-                  onClick={() => removeHeroImage(img)}
-                  className="kulto-btn absolute top-0.5 right-0.5 w-5 h-5 rounded-full flex items-center justify-center"
-                  style={{ background: "rgba(21,19,26,0.8)", color: "var(--bone)" }}
-                  title="Quitar"
-                  aria-label="Quitar imagen"
-                >
-                  <X size={11} />
-                </button>
-              </div>
-            ))}
-            <label
-              className="kulto-btn w-20 h-20 rounded-xl flex flex-col items-center justify-center gap-1 shrink-0"
-              style={{ background: "var(--ink-3)", border: "1px dashed var(--line)", color: "var(--slate)" }}
-            >
-              <Upload size={16} />
-              <span className="text-[10px]">Agregar</span>
-              <input type="file" accept="image/png,image/jpeg" multiple className="hidden" onChange={(e) => { addHeroImages(e.target.files); e.target.value = ""; }} />
-            </label>
-          </div>
-        </div>
-        <button onClick={saveDefault} className="kulto-btn rounded-full py-3 font-semibold flex items-center justify-center gap-2" style={{ background: saved ? "var(--sun)" : "var(--signal)", color: saved ? "var(--ink)" : "var(--bone)" }}>
-          {saved ? <><Check size={16} /> Guardado</> : "Guardar cartel por defecto"}
-        </button>
-      </div>
 
       {cropSource && (
         <CropModal
