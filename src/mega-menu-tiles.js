@@ -33,7 +33,7 @@ export function getMegaMenuTiles(item,products=[],families=[],familyOf=()=>null,
     }));
     // Tops, jackets, tote bags and other single-model families get ONE tile,
     // not one misleading tile per individual product in the database.
-    return [{key:megaTileId(item,"all",item.value),label:family?.title||item.label||item.value,img:firstPhoto(ps),filter:base}];
+    return [{key:megaTileId(item,"all",item.value),label:item.value==="chaquetas"?"Chaqueta":(family?.title||item.label||item.value),img:firstPhoto(ps),filter:base}];
   }
   // Ordinary categories without explicitly distinct subcategories are ONE
   // category tile. Product variants must not masquerade as garment models.
