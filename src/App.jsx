@@ -13663,6 +13663,30 @@ function AdminHomeCategoryCovers({ settings, products, onSave }) {
   const [covers, setCovers] = useState(() => settings?.homeCategoryCovers || {});
   const [title, setTitle] = useState(() => settings?.editorialHeroTitle || "STREETWEAR\nSIN LÍMITES");
   const [subtitle, setSubtitle] = useState(() => settings?.editorialHeroSubtitle || "Camisetas, oversize y sudaderas con diseños únicos. Moda urbana creada en España.");
+  const [heroDraft, setHeroDraft] = useState(() => ({image:settings?.heroImage || settings?.heroImages?.[0] || "",zoom:100,x:50,y:50,height:700,...(settings?.editorialHeroMedia||{})}));
+  const [customDraft, setCustomDraft] = useState(() => settings?.editorialCustomBackground || "");
+  const [mediaBusy,setMediaBusy] = useState(false);
+  const uploadPreview = async (file,target) => {
+    if(!file)return;
+    if(!["image/jpeg","image/png","image/webp"].includes(file.type)){setMessage("Elegí JPG, PNG o WebP.");return;}
+    setMediaBusy(true);setMessage("");
+    try{
+      const data=await new Promise(resolve=>fileToBase64(file,resolve,1900,.9,"image/jpeg"));
+      const url=data?.startsWith("data:")?await uploadDataUrlToStorage(data):data;
+      if(!url || !/^https:\/\//i.test(url))throw Error("No se pudo subir a Storage.");
+      if(target==="hero")setHeroDraft(prev=>({...prev,image:url}));else setCustomDraft(url);
+      setMessage("Vista previa preparada. Aún no se ha guardado en la tienda.");
+    }catch(e){setMessage(e?.message||"Error al preparar imagen");}
+    finally{setMediaBusy(false);}
+  };
+  const saveHomeMedia=async()=>{
+    setMediaBusy(true);setMessage("");
+    try{
+      await onSave({heroImage:heroDraft.image||null,editorialHeroMedia:{zoom:Number(heroDraft.zoom),x:Number(heroDraft.x),y:Number(heroDraft.y),height:Number(heroDraft.height)},editorialCustomBackground:customDraft||null});
+      setMessage("Imágenes y ajustes guardados.");
+    }catch(e){setMessage("No se pudieron guardar los cambios: "+(e?.message||"error"));}
+    finally{setMediaBusy(false);}
+  };
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   useEffect(() => { setCovers(settings?.homeCategoryCovers || {}); }, [settings?.homeCategoryCovers]);
@@ -13712,6 +13736,22 @@ function AdminHomeCategoryCovers({ settings, products, onSave }) {
         <p className="text-sm mt-2" style={{color:"var(--slate)"}}>Elegí una imagen independiente para cada recuadro de «Explora KULTO». No hace falta cambiar las fotos de tus productos y las categorías originales se conservan.</p>
       </div>
       <div className="rounded-2xl p-5 space-y-3" style={{background:"var(--ink-2)",border:"1px solid var(--line)"}}>
+        <h3 className="font-semibold">Imagen principal — vista previa antes de guardar</h3>
+        <label className="block cursor-pointer p-3 text-center rounded-xl text-sm" style={{border:"1px dashed var(--line)"}}>Elegir imagen principal<input type="file" className="sr-only" accept="image/jpeg,image/png,image/webp" disabled={mediaBusy} onChange={e=>{uploadPreview(e.target.files?.[0],"hero");e.target.value="";}}/></label>
+        <div className="relative overflow-hidden rounded-xl" style={{height:Math.max(180,Math.min(440,heroDraft.height*.48)),background:"#171717"}}>
+          <img alt="Previsualización portada" src={heroDraft.image||"https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=1800&q=85"} className="w-full h-full object-cover" style={{objectPosition:`${heroDraft.x}% ${heroDraft.y}%`,transform:`scale(${heroDraft.zoom/100})`}}/>
+          <div className="absolute inset-0 p-6 flex flex-col justify-center pointer-events-none" style={{background:"linear-gradient(90deg,rgba(0,0,0,.65),transparent)",color:"#fff"}}><strong className="text-xl font-black whitespace-pre-line">{title}</strong><small className="mt-2">{subtitle}</small></div>
+        </div>
+        <div className="grid sm:grid-cols-2 gap-3">{[["zoom","Zoom",50,250,"%"],["x","Posición horizontal",0,100,"%"],["y","Posición vertical",0,100,"%"],["height","Altura de portada",420,1100,"px"]].map(([key,label,min,max,unit])=><label key={key} className="text-xs">{label}: {heroDraft[key]}{unit}<input type="range" className="block w-full mt-2" min={min} max={max} value={heroDraft[key]} onChange={e=>setHeroDraft(d=>({...d,[key]:Number(e.target.value)}))}/></label>)}</div>
+        <button type="button" className="underline text-xs" onClick={()=>setHeroDraft(d=>({...d,image:""}))}>Usar fondo predeterminado</button>
+        <h3 className="font-semibold mt-5">Fondo de «Tu idea. Tu prenda.»</h3>
+        <p className="text-xs" style={{color:"var(--slate)"}}>Sin imagen se mantiene exactamente el fondo oscuro actual.</p>
+        <label className="block cursor-pointer p-3 text-center rounded-xl text-sm" style={{border:"1px dashed var(--line)"}}>Elegir imagen de fondo<input type="file" className="sr-only" accept="image/jpeg,image/png,image/webp" disabled={mediaBusy} onChange={e=>{uploadPreview(e.target.files?.[0],"custom");e.target.value="";}}/></label>
+        <div className="rounded-xl p-7" style={{background:customDraft?`linear-gradient(90deg,rgba(12,12,14,.83),rgba(12,12,14,.6)),url("${customDraft}") center/cover`:"#252525",color:"white"}}><small>HECHO A TU MANERA</small><h3 className="text-2xl font-black">TU IDEA. TU PRENDA.</h3><p className="text-xs mt-2">Elegí la prenda y subí tu diseño.</p></div>
+        {customDraft && <button type="button" className="underline text-xs" onClick={()=>setCustomDraft("")}>Quitar foto y recuperar fondo original</button>}
+        <button type="button" disabled={mediaBusy} onClick={saveHomeMedia} className="kulto-btn rounded-full font-semibold px-4 py-2.5 text-sm" style={{background:"var(--sun)",color:"var(--ink)"}}>{mediaBusy?"Procesando…":"Guardar las imágenes y tamaños"}</button>
+        {message && <p role="status" className="text-xs">{message}</p>}
+        <hr style={{borderColor:"var(--line)"}}/>
         <h3 className="font-semibold">Texto principal de la portada</h3>
         <label className="block text-xs">Título<textarea rows={2} className="block w-full p-3 rounded-xl mt-1" style={fields} value={title} onChange={e=>setTitle(e.target.value)}/></label>
         <label className="block text-xs">Descripción<textarea rows={3} className="block w-full p-3 rounded-xl mt-1" style={fields} value={subtitle} onChange={e=>setSubtitle(e.target.value)}/></label>
