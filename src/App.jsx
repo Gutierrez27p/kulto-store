@@ -2,8 +2,8 @@ import { GARMENT_FAMILIES, GARMENT_MODEL_TYPES, garmentFamilyOf, garmentFitOf, m
 import { seasonalPricing, isOversizeGarment } from "./promotion-pricing.js";
 import { backgroundSilhouette } from "./garment-mask.js";
 import { safeRecolorPixel, growSilhouette } from "./garment-color.js";
-import { selectGarmentArt } from "./garment-art.js";
-import { isTshirtProduct, preferredPhotoOrMockup } from "./shared-tshirt-mockup.js";
+import { photoGalleryForColor } from "./storefront-photo-policy.js";
+import { isTshirtProduct } from "./shared-tshirt-mockup.js";
 import { availableMockupScopes, mockupScopeOfProduct, modelHasScope, resolveLibraryMockup, countMockupImpact } from "./mockup-routing.js";
 import { makeArtworkBatchPlan, applyArtworkBatch } from "./mockup-artwork-batch.js";
 import { coverForHomeCategory } from "./home-category-covers.js";
@@ -1944,31 +1944,6 @@ async function guessRefColorHex(src, colors) {
   }
 }
 
-const autoRecolorCache = new Map();
-// Foto generada para un color que no tiene foto propia (ver arriba).
-function useAutoColorImage(product, color, enabled, imgIdx = 0) {
-  const info = enabled && color && getColorImages(color).length === 0 && !activeMockup(product) ? autoColorSource(product, imgIdx) : null;
-  const key = info ? `${info.src}|${info.refHex || ""}|${info.guessFrom ? "g" : ""}|${info.clean ? 1 : 0}|${color.hex}` : null;
-  const [url, setUrl] = useState(() => (key ? autoRecolorCache.get(key) || null : null));
-  useEffect(() => {
-    if (!key) { setUrl(null); return; }
-    if (autoRecolorCache.has(key)) { setUrl(autoRecolorCache.get(key)); return; }
-    let alive = true;
-    (async () => {
-      if (info.clean) return tintImageToColor(info.src, color.hex);
-      const ref = info.guessFrom ? (await guessRefColorHex(info.src, info.guessFrom)) || info.refHex : info.refHex;
-      // la foto ya es de este color: se muestra tal cual
-      if (ref && ref.toLowerCase() === (color.hex || "").toLowerCase()) return null;
-      return recolorExistingPhoto(info.src, ref, color.hex);
-    })().then((r) => {
-      autoRecolorCache.set(key, r || null);
-      if (alive) setUrl(r || null);
-    });
-    return () => { alive = false; };
-  }, [key]);
-  return key ? url : null;
-}
-
 // Genera las 4 fotos de UN color a partir de una tanda de fotos base (ya
 // subidas a Storage o como dataURL), pintando cada zona disponible. Es el
 // mismo paso que usa AdminTemplateForm para "Foto base" — lo dejamos acá
@@ -3584,37 +3559,33 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
     combined = product.photoPool;
   }
   const images = combined;
-  const mock = activeMockup(product);
-  const [mockColor, setMockColor] = useState(null);
-  const [autoColorIdx, setAutoColorIdx] = useState(null);
-
+  const [selectedColorIdx, setSelectedColorIdx] = useState(null);
   const [idx, setIdx] = useState(0);
   // A qué color pertenece la foto que se está mostrando, para resaltar el
   // punto correspondiente aunque se haya llegado ahí con las flechitas.
   let activeColorIdx = -1;
   starts.forEach((s, i) => { if (s !== null && s <= idx) activeColorIdx = i; });
-  if (mock) activeColorIdx = mockColor === null ? -1 : mockColor;
-  else if (autoColorIdx !== null) activeColorIdx = autoColorIdx;
+  if (selectedColorIdx !== null) activeColorIdx = selectedColorIdx;
   const activeColor = activeColorIdx >= 0 ? colors[activeColorIdx] : colors[0];
 
   const onSale = product.tags?.oferta && product.salePrice;
   const isCover = product.imageFit === "cover";
-  const bg = product.imageBackground || (activeColor && !mock ? activeColor.hex : "var(--ink-3)");
+  const bg = product.imageBackground || "var(--ink-3)";
+  const selectedPhotos = selectedColorIdx !== null ? getColorImages(colors[selectedColorIdx]) : [];
+  const referenceOnly = selectedColorIdx !== null && selectedPhotos.length === 0;
+  const fallbackImage = product.photoPool?.[0] || product.mockup?.cover || images[idx] || null;
+  const cardImage = referenceOnly ? fallbackImage : (images[idx] || product.photoPool?.[0] || product.mockup?.cover || null);
 
-  const prev = (e) => { e.stopPropagation(); setIdx((i) => (i - 1 + images.length) % images.length); };
-  const next = (e) => { e.stopPropagation(); setIdx((i) => (i + 1) % images.length); };
-  const cardAutoImg = useAutoColorImage(product, autoColorIdx !== null ? colors[autoColorIdx] : null, autoColorIdx !== null);
+
+  const prev = (e) => { e.stopPropagation(); setSelectedColorIdx(null); setIdx((i) => (i - 1 + images.length) % images.length); };
+  const next = (e) => { e.stopPropagation(); setSelectedColorIdx(null); setIdx((i) => (i + 1) % images.length); };
   const openFromCard = () => onOpen({
-    ...product,
-    __entryFromCard: true,
-    __entryCardImage: mock ? (mockColor === null ? mock.cover || null : null) : (autoColorIdx !== null ? cardAutoImg || images[idx] || null : images[idx] || null),
-    __entryColorIdx: mock ? mockColor : autoColorIdx,
+    ...product, __entryFromCard:true, __entryCardImage:cardImage, __entryColorIdx:selectedColorIdx,
   });
-  const pickColor = (e, i) => {
+  const pickColor = (e,i) => {
     e.stopPropagation();
-    if (mock) { setMockColor(i); return; }
-    if (starts[i] !== null) { setAutoColorIdx(null); setIdx(starts[i]); return; }
-    if (autoColorSource(product)) setAutoColorIdx(i);
+    setSelectedColorIdx(i);
+    if(starts[i]!==null)setIdx(starts[i]);
   };
 
   // "Agregar rápido" — solo para productos que no necesitan que el cliente
@@ -3672,7 +3643,7 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
       qty: quickQty,
       unitPrice: onSale ? product.salePrice : product.price,
       points: product.points ?? null,
-      previewImage: (mock ? mock.cover : images[idx]) || null,
+      previewImage: cardImage || null,
     };
     onAddToCart(item);
     setQuickJustAdded(true);
@@ -3692,19 +3663,16 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
         className="relative overflow-hidden"
         style={{ background: bg, aspectRatio: "4 / 5" }}
       >
-        {mock ? (
-          mockColor === null && mock.cover ? (
-            <FastImg loading="lazy" src={mock.cover} alt={product.name} className="kulto-card-img w-full h-full object-cover" />
-          ) : (
-            <MockupComposite mockup={mock} hex={colors[mockColor ?? 0]?.hex || "#ffffff"} />
-          )
-        ) : autoColorIdx !== null && cardAutoImg ? (
-          <FastImg loading="lazy" src={cardAutoImg} alt={product.name} className="kulto-card-img w-full h-full object-contain" />
-        ) : images.length > 0 ? (
-          <FastImg loading="lazy" src={images[idx]} alt={product.name} className={`kulto-card-img w-full h-full ${isCover ? "object-cover" : "object-contain"}`} />
+        {cardImage ? (
+          <FastImg loading="lazy" src={cardImage} alt={product.name} className={`kulto-card-img w-full h-full ${isCover ? "object-cover" : "object-contain"}`} />
         ) : (
           <div className="w-full h-full flex items-center justify-center">
             <Shirt size={36} style={{ color: "rgba(243,239,230,0.35)" }} />
+          </div>
+        )}
+        {referenceOnly && (
+          <div className="absolute bottom-2 left-2 right-2 rounded-md px-2 py-1 text-[10px] font-semibold text-center" style={{background:"rgba(21,19,26,.88)",color:"#fff"}}>
+            Foto de referencia · color elegido: {activeColor?.name}
           </div>
         )}
         {(product.tags?.oferta || product.tags?.bestseller || (product.stock ?? 0) <= 0) && (
@@ -3724,7 +3692,7 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
             <Heart size={16} style={{ color: isFavorite ? "var(--signal)" : "var(--bone)" }} fill={isFavorite ? "var(--signal)" : "none"} />
           </button>
         )}
-        {!mock && images.length > 1 && (
+        {images.length > 1 && !referenceOnly && (
           <>
             <button
               onClick={prev}
@@ -3783,7 +3751,7 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
                   boxShadow: i === activeColorIdx ? "0 0 0 2px var(--sun)" : "0 0 0 1px rgba(255,255,255,.55)",
                 }}
                 data-tip={c.name}
-                aria-label={`Ver ${product.name} en color ${c.name}`}
+                aria-label={`Seleccionar color ${c.name} de ${product.name}`}
               />
             ))}
             {colors.length > 5 && (
