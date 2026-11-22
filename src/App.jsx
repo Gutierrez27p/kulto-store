@@ -11,6 +11,7 @@ import { getDisplayMenuItems, getMegaMenuTiles, menuTileMedia, megaMenuImageStyl
 import "./editorial.css";
 import { escapeEmailHtml, secureSixDigitCode } from "./email-safety.js";
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
 import {
   ShoppingBag, X, Menu, Plus, Minus, Trash2, Pencil, ChevronRight, ChevronLeft, ChevronDown, ChevronUp,
   MessageCircle, Lock, Check, Shirt, Upload, Package, Star, Sparkles, ArrowRight,
@@ -3259,6 +3260,11 @@ function GlobalStyle({ colors }) {
       .kulto-root[data-mode="light"]{ filter:invert(1) hue-rotate(180deg); }
       .kulto-root[data-mode="light"] img,
       .kulto-root[data-mode="light"] video{ filter:invert(1) hue-rotate(180deg) !important; }
+      /* The product dialog is portaled outside the filtered storefront. Invert only
+         its scrollable contents so position:fixed remains viewport-relative. */
+      .kulto-product-modal-panel[data-mode="light"]{ filter:invert(1) hue-rotate(180deg); }
+      .kulto-product-modal-panel[data-mode="light"] img,
+      .kulto-product-modal-panel[data-mode="light"] video{ filter:invert(1) hue-rotate(180deg) !important; }
       @media (prefers-reduced-motion: reduce){
         .kulto-root{ transition:none !important; }
       }
@@ -4617,20 +4623,21 @@ function GarmentPicker({ product, allProducts, onPick }) {
   );
 }
 
-function ProductModal({ product, allProducts, settings, onClose, onSwitchProduct, onAddToCart, favorites, onToggleFavorite, reviews, onGoHome, onGoCatalog, onView }) {
+function ProductModal({ product, allProducts, settings, themeMode, onClose, onSwitchProduct, onAddToCart, favorites, onToggleFavorite, reviews, onGoHome, onGoCatalog, onView }) {
   const isFavorite = favorites?.includes(product.id);
   // Cuenta como "vista" cada vez que se abre la ficha de un producto — es la
   // señal (junto a las ventas) que alimenta el "en tendencia" automático.
   useEffect(() => { onView?.(product.id); }, [product.id]);
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-6"
+      className="kulto-root fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-6"
       style={{ background: "rgba(0,0,0,0.6)" }}
       onClick={onClose}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full md:max-w-3xl max-h-[92vh] overflow-y-auto kulto-scrollbar rounded-t-3xl md:rounded-3xl p-5 md:p-8"
+        data-mode={themeMode}
+        className="kulto-product-modal-panel w-full md:max-w-3xl max-h-[92vh] overflow-y-auto kulto-scrollbar rounded-t-3xl md:rounded-3xl p-5 md:p-8"
         style={{ background: "var(--ink)", border: "1px solid var(--line)" }}
       >
         <div className="flex justify-between items-center mb-2">
@@ -4660,7 +4667,8 @@ function ProductModal({ product, allProducts, settings, onClose, onSwitchProduct
         <LinkedStyleProducts product={product} allProducts={allProducts} onOpen={onSwitchProduct} favorites={favorites} onToggleFavorite={onToggleFavorite} />
         <RelatedProducts product={product} allProducts={allProducts} onOpen={onSwitchProduct} favorites={favorites} onToggleFavorite={onToggleFavorite} />
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -21438,6 +21446,7 @@ export default function App() {
         <ProductModal
           key={selectedProduct.id}
           product={selectedProduct}
+          themeMode={themeMode}
           allProducts={sellableProducts}
           settings={settings}
           onClose={() => setSelectedProduct(null)}
