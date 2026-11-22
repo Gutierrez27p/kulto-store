@@ -7131,9 +7131,9 @@ function Wizard({ products, categories, settings, designLibrary, designFolders, 
           </div>
         {colorConfirm !== null && colorsForProduct[colorConfirm] && (() => {
           const cc = colorsForProduct[colorConfirm];
-          return (
-            <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.7)" }} onClick={() => setColorConfirm(null)}>
-              <div onClick={(e) => e.stopPropagation()} className="rounded-3xl p-6 max-w-xs w-full text-center" style={{ background: "var(--ink)", border: "1px solid var(--line)" }}>
+          return createPortal(
+            <div className="kulto-root fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.7)" }} onClick={() => setColorConfirm(null)}>
+              <div onClick={(e) => e.stopPropagation()} data-mode={document.querySelector('.kulto-root[data-mode="light"]') ? "light" : "dark"} className="kulto-product-modal-panel rounded-3xl p-6 max-w-xs w-full text-center" style={{ background: "var(--ink)", border: "1px solid var(--line)" }}>
                 <span className="w-28 h-28 rounded-full mx-auto flex items-center justify-center mb-4" style={{ background: cc.hex, border: "3px solid var(--sun)" }}>
                   {(cc.frontImage || cc.images?.[0]) && <FastImg loading="lazy" src={cc.frontImage || cc.images[0]} className="w-20 h-20 object-contain rounded-full" alt="" />}
                 </span>
@@ -7155,7 +7155,8 @@ function Wizard({ products, categories, settings, designLibrary, designFolders, 
                   Elegir otro
                 </button>
               </div>
-            </div>
+            </div>,
+            document.body
           );
         })()}
         </div>
@@ -19790,7 +19791,7 @@ function WhatsAppFloat({ liftForMobileBar, whatsappNumber, enabled }) {
   // No se muestra si está apagado o si todavía no hay número cargado
   // (Ajustes → Marca) — las dos cosas se controlan por separado.
   if (!enabled || !whatsappNumber) return null;
-  return (
+  return createPortal(
     <button
       onClick={() => openWhatsApp("Hola Kulto, tengo una duda sobre un producto.", whatsappNumber)}
       className={`kulto-btn fixed right-5 z-30 w-14 h-14 rounded-full flex items-center justify-center ${liftForMobileBar ? "bottom-24 md:bottom-5" : "bottom-5"}`}
@@ -19798,21 +19799,23 @@ function WhatsAppFloat({ liftForMobileBar, whatsappNumber, enabled }) {
       title="Escríbenos por WhatsApp"
     >
       <MessageCircle size={26} />
-    </button>
+    </button>,
+    document.body
   );
 }
 
 function MobileCartBar({ count, total, onOpen }) {
-  return (
+  return createPortal(
     // paddingBottom extra con env(safe-area-inset-bottom): en iPhones sin
     // botón físico de inicio, evita que la franja del "home indicator" tape
     // parte del botón.
-    <div className="md:hidden fixed bottom-0 left-0 right-0 z-30 px-4 pt-3" style={{ background: "var(--ink-2)", borderTop: "1px solid var(--line)", paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom))" }}>
+    <div data-mode={document.querySelector('.kulto-root[data-mode="light"]') ? "light" : "dark"} className="kulto-root kulto-product-modal-panel md:hidden fixed bottom-0 left-0 right-0 z-30 px-4 pt-3" style={{ background: "var(--ink-2)", borderTop: "1px solid var(--line)", paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom))" }}>
       <button onClick={onOpen} className="kulto-btn w-full rounded-full py-3 px-4 font-semibold flex items-center justify-between" style={{ background: "var(--signal)", color: "var(--bone)" }}>
         <span className="flex items-center gap-2"><ShoppingBag size={18} /> {count} artículo{count === 1 ? "" : "s"}</span>
         <span>{formatPrice(total)} · Ver carrito</span>
       </button>
-    </div>
+    </div>,
+    document.body
   );
 }
 
