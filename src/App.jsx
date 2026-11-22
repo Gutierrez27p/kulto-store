@@ -1,5 +1,5 @@
 import { GARMENT_FAMILIES, GARMENT_MODEL_TYPES, garmentFamilyOf, garmentFitOf, modelMatchesProduct } from "./garment-families.js";
-import { seasonalPricing, isOversizeGarment } from "./promotion-pricing.js";
+import { seasonalPricing, isOversizeGarment, discountableSubtotal } from "./promotion-pricing.js";
 import { backgroundSilhouette } from "./garment-mask.js";
 import { growSilhouette } from "./garment-color.js";
 import { photoGalleryForColor } from "./storefront-photo-policy.js";
@@ -7525,7 +7525,7 @@ function isValidEmail(v) {
 
 function CartDrawer({ cart, products, onClose, onUpdateQty, onRemove, onCheckout, customerName, setCustomerName, customerPhone, setCustomerPhone, customerEmail, setCustomerEmail, comment, setComment, deliveryMethod, setDeliveryMethod, address, setAddress, settings, sending, customer }) {
   const subtotal = cart.reduce((s, it) => s + it.qty * it.unitPrice, 0);
-  const seasonal = seasonalPricing(cart, settings, products || []);
+  const { subtotal: eligibleSubtotal, seasonal, hasExcluded } = discountableSubtotal(cart, settings, products || []);
   const itemCount = cart.reduce((s, it) => s + it.qty, 0);
   // Suma el puntaje propio de cada prenda (si el admin le puso uno) y si no
   // usa el general de Ajustes → Fidelización, en vez de una cifra pareja por
@@ -7545,7 +7545,11 @@ function CartDrawer({ cart, products, onClose, onUpdateQty, onRemove, onCheckout
     const found = findPromo(code, settings, customer, usage);
     setPromoBusy(false);
     if (!found.ok) { setPromoError(found.error); return; }
-    const chk = evalPromo(found.promo, subtotal, customer);
+    if (eligibleSubtotal <= 0) {
+      setPromoError("Este descuento no se puede aplicar a artículos en oferta o promoción. Añadí una prenda sin rebaja para usarlo.");
+      return;
+    }
+    const chk = evalPromo(found.promo, eligibleSubtotal, customer);
     if (!chk.ok) { setPromoError(chk.error); return; }
     setAppliedPromo(found.promo);
     setPromoInput("");
@@ -7584,19 +7588,17 @@ function CartDrawer({ cart, products, onClose, onUpdateQty, onRemove, onCheckout
     return byRegion != null ? byRegion : settings.shippingFlatRate;
   };
   const shippingCostBase = deliveryMethod === "envio" ? (freeShipping ? 0 : shippingCostForRegion(address.state)) : 0;
-  const promoEval = appliedPromo ? evalPromo(appliedPromo, subtotal, customer) : null;
-  const promoActive = !!promoEval && promoEval.ok;
+  // Coupons and rewards are valid only on regular-price products. A
+  // seasonal promotion remains applied to its own products in a mixed basket.
+  const promoEval = appliedPromo && eligibleSubtotal > 0 ? evalPromo(appliedPromo, eligibleSubtotal, customer) : null;
+  const promoActive = !!promoEval?.ok;
   const promoDiscount = promoActive ? promoEval.discount : 0;
   const shippingCost = promoActive && promoEval.freeShipping ? 0 : shippingCostBase;
   const welcomePercent = getWelcomePercent(settings, customer);
   const eligibleForSignupDiscount = !!customer && !!settings?.signupDiscountEnabled && !customer.firstDiscountUsed;
-  // El código de descuento reemplaza al de bienvenida (no se suman): así el
-  // descuento de bienvenida no se "gasta" si el cliente usa un código mejor.
-  // Do not stack seasonal bundles with promo codes or welcome discounts.
-  // When no code is used, grant the better of the welcome discount and the seasonal deal.
-  const welcomeDiscount = eligibleForSignupDiscount && !promoActive ? subtotal * (welcomePercent / 100) : 0;
-  const seasonalDiscount = promoActive || welcomeDiscount > seasonal.discount ? 0 : seasonal.discount;
-  const discountAmount = seasonalDiscount > 0 ? 0 : welcomeDiscount;
+  const welcomeDiscount = eligibleForSignupDiscount && !promoActive ? Math.round(eligibleSubtotal * welcomePercent) / 100 : 0;
+  const seasonalDiscount = seasonal.discount;
+  const discountAmount = welcomeDiscount;
   const total = Math.round((Math.max(0, subtotal - discountAmount - promoDiscount - seasonalDiscount) + shippingCost) * 100) / 100;
   const addressOk = deliveryMethod !== "envio" || (address.street.trim() && address.city.trim() && address.state.trim() && address.postalCode.trim());
   const canCheckout = emailOk && addressOk;
@@ -7826,11 +7828,15 @@ function CartDrawer({ cart, products, onClose, onUpdateQty, onRemove, onCheckout
                     ))}
                   </div>
                 )}
-                {(promoError || (appliedPromo && promoEval && !promoEval.ok)) && (
-                  <p className="text-xs" style={{ color: "var(--signal)" }}>{promoError || promoEval.error}</p>
+                {(promoError || (appliedPromo && eligibleSubtotal > 0 && promoEval && !promoEval.ok)) && (
+                  <p role="alert" className="text-xs" style={{ color: "var(--signal)" }}>{promoError || promoEval?.error}</p>
                 )}
               </div>
 
+              <p className="text-xs rounded-lg p-3" style={{background:"var(--ink-2)",color:"var(--slate)",border:"1px solid var(--line)"}}>
+                Los descuentos de bienvenida, cupones y recompensas de puntos no se aplican a prendas en oferta ni a promociones. {hasExcluded ? "En este pedido, cualquier descuento adicional se calcula solo sobre las prendas sin rebaja." : "Si añadís productos rebajados, quedarán excluidos del descuento."}
+              </p>
+              {appliedPromo && eligibleSubtotal <= 0 && <p role="status" className="text-xs" style={{color:"var(--signal)"}}>El código quedó sin efecto: las prendas de este carrito están en oferta o promoción.</p>}
               <div className="flex flex-col gap-1 text-sm" style={{ color: "var(--slate)" }}>
                 <div className="flex items-center justify-between">
                   <span>Subtotal</span>
@@ -19591,6 +19597,7 @@ function RewardsWidget({ settings, customer, onLogin, onRedeem, liftForMobileBar
     setBusyId(null);
     setMsg(res.ok ? { ok: true, code: res.code, name: r.name } : { ok: false, text: res.error });
   };
+  const discountsNotice = "Los descuentos y recompensas canjeadas por puntos no se pueden combinar con ofertas ni promociones. Solo se aplican a prendas sin rebaja.";
   const rowStyle = { background: "var(--ink-3)", border: "1px solid var(--line)" };
 
   if (!open) {
@@ -19630,6 +19637,7 @@ function RewardsWidget({ settings, customer, onLogin, onRedeem, liftForMobileBar
       </div>
 
       <div className="p-5 flex flex-col gap-3 overflow-y-auto kulto-scrollbar">
+        <p className="text-xs rounded-lg p-3" style={{background:"var(--ink-3)",color:"var(--slate)",border:"1px solid var(--line)"}}>{discountsNotice}</p>
         {view === "home" && (
           <>
             {!customer ? (
