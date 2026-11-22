@@ -5112,13 +5112,13 @@ function CustomWorkCarousel({ items = [], speed = 0.5 }) {
           </button>
         ))}
       </div>
-      {lightboxItem && (
+      {lightboxItem && createPortal(
         <div
-          className="fixed inset-0 flex items-center justify-center p-4"
+          className="kulto-root fixed inset-0 flex items-center justify-center p-4"
           style={{ background: "rgba(0,0,0,0.9)", zIndex: 200 }}
           onClick={() => { setLightboxItem(null); resume(); }}
         >
-          <div className="relative max-w-2xl w-full" onClick={(e) => e.stopPropagation()}>
+          <div data-mode={document.querySelector('.kulto-root[data-mode="light"]') ? "light" : "dark"} className="kulto-product-modal-panel relative max-w-2xl w-full" onClick={(e) => e.stopPropagation()}>
             <img
               src={lightboxItem.image}
               alt={lightboxItem.caption || "Trabajo personalizado"}
@@ -5138,7 +5138,8 @@ function CustomWorkCarousel({ items = [], speed = 0.5 }) {
               <X size={18} />
             </button>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </section>
   );
@@ -6283,13 +6284,13 @@ function DesignPlacer({ garmentImage, designs, setDesigns, sideLabel, mode = "se
         </p>
       )}
 
-      {showZoom && (
+      {showZoom && createPortal(
         <div
-          className="fixed inset-0 flex items-center justify-center p-4 overflow-y-auto"
+          className="kulto-root fixed inset-0 flex items-center justify-center p-4 overflow-y-auto"
           style={{ background: "rgba(0,0,0,0.85)", zIndex: 200 }}
           onClick={() => setShowZoom(false)}
         >
-          <div className="relative w-full max-w-2xl my-auto" onClick={(e) => e.stopPropagation()}>
+          <div data-mode={document.querySelector('.kulto-root[data-mode="light"]') ? "light" : "dark"} className="kulto-product-modal-panel relative w-full max-w-2xl my-auto" onClick={(e) => e.stopPropagation()}>
             <div
               className="rounded-2xl overflow-auto mx-auto"
               style={{ background: "var(--ink-3)", maxHeight: "80vh" }}
@@ -6344,7 +6345,8 @@ function DesignPlacer({ garmentImage, designs, setDesigns, sideLabel, mode = "se
               {zoom > 1 ? "Recorré la tela con scroll — arrastrá el diseño para ubicarlo." : designs.length > 0 ? "Usá +/- para acercarte, o arrastrá el diseño para ubicarlo." : "Tocá afuera para cerrar"}
             </p>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {selected && (
@@ -19282,9 +19284,9 @@ function InstallAppBanner() {
           </button>
         </div>
       </div>
-      {showIosHelp && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.65)" }} onClick={() => setShowIosHelp(false)}>
-          <div onClick={(e) => e.stopPropagation()} className="rounded-2xl p-6 max-w-sm w-full" style={{ background: "var(--ink)", border: "1px solid var(--line)" }}>
+      {showIosHelp && createPortal(
+        <div className="kulto-root fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.65)" }} onClick={() => setShowIosHelp(false)}>
+          <div onClick={(e) => e.stopPropagation()} data-mode={document.querySelector('.kulto-root[data-mode="light"]') ? "light" : "dark"} className="kulto-product-modal-panel rounded-2xl p-6 max-w-sm w-full" style={{ background: "var(--ink)", border: "1px solid var(--line)" }}>
             <h4 className="font-semibold mb-3" style={{ color: "var(--bone)" }}>Instalar en iPhone/iPad — 2 toques</h4>
             <p className="text-xs mb-3" style={{ color: "var(--slate)" }}>
               En iPhone, Apple no deja que las webs se instalen solas con un botón — hay que hacerlo así (una sola vez):
@@ -19298,7 +19300,8 @@ function InstallAppBanner() {
               Entendido
             </button>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );
@@ -19556,9 +19559,9 @@ function Footer({ settings }) {
       <div className="mt-4 text-center">
         <span className="kulto-display text-sm" style={{ color: "var(--slate)" }}>KULTO</span>
       </div>
-      {policyOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.65)" }} onClick={() => setPolicyOpen(false)}>
-          <div onClick={(e) => e.stopPropagation()} className="rounded-2xl p-6 max-w-sm w-full" style={{ background: "var(--ink)", border: "1px solid var(--line)" }}>
+      {policyOpen && createPortal(
+        <div className="kulto-root fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.65)" }} onClick={() => setPolicyOpen(false)}>
+          <div onClick={(e) => e.stopPropagation()} data-mode={document.querySelector('.kulto-root[data-mode="light"]') ? "light" : "dark"} className="kulto-product-modal-panel rounded-2xl p-6 max-w-sm w-full" style={{ background: "var(--ink)", border: "1px solid var(--line)" }}>
             <div className="flex items-center justify-between mb-3">
               <h4 className="font-semibold text-sm" style={{ color: "var(--bone)" }}>Calidad y devoluciones</h4>
               <button onClick={() => setPolicyOpen(false)} className="kulto-btn" style={{ color: "var(--slate)" }}><X size={18} /></button>
@@ -19568,7 +19571,8 @@ function Footer({ settings }) {
               {hasReturns && <p className="text-xs leading-relaxed" style={{ color: "var(--slate)" }}>{settings.returnsPolicyText}</p>}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
       <ContactFormModal open={contactOpen} onClose={() => setContactOpen(false)} settings={settings} />
     </footer>
