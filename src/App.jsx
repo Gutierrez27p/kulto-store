@@ -3760,13 +3760,13 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
           )}
         </div>
       </div>
-      {quickOpen && (
+      {quickOpen && createPortal(
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          className="kulto-root fixed inset-0 z-50 flex items-center justify-center p-4"
           style={{ background: "rgba(0,0,0,0.65)" }}
           onClick={(e) => { e.stopPropagation(); setQuickOpen(false); }}
         >
-          <div onClick={(e) => e.stopPropagation()} className="rounded-2xl p-5 max-w-xs w-full" style={{ background: "var(--ink)", border: "1px solid var(--line)" }}>
+          <div onClick={(e) => e.stopPropagation()} data-mode={document.querySelector('.kulto-root[data-mode="light"]') ? "light" : "dark"} className="kulto-product-modal-panel rounded-2xl p-5 max-w-xs w-full" style={{ background: "var(--ink)", border: "1px solid var(--line)" }}>
             <div className="flex items-center justify-between mb-4">
               <p className="text-sm font-semibold pr-3" style={{ color: "var(--bone)" }}>{product.name}</p>
               <button onClick={() => setQuickOpen(false)} className="kulto-btn shrink-0" style={{ color: "var(--slate)" }}><X size={18} /></button>
@@ -3839,7 +3839,8 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
               {quickJustAdded ? "Añadido" : hasSizes && quickSizeIdx === null ? "Elegí un talle" : "Añadir al carrito"}
             </button>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
@@ -3856,9 +3857,9 @@ function ImageLightbox({ image, overlay, background, onClose }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+      className="kulto-root fixed inset-0 z-[60] flex items-center justify-center p-4"
       style={{ background: "rgba(0,0,0,0.85)" }}
       onClick={onClose}
     >
@@ -3867,7 +3868,8 @@ function ImageLightbox({ image, overlay, background, onClose }) {
       </button>
       <div
         onClick={(e) => e.stopPropagation()}
-        className="relative w-full max-w-md rounded-2xl overflow-hidden flex items-center justify-center"
+        data-mode={document.querySelector('.kulto-root[data-mode="light"]') ? "light" : "dark"}
+        className="kulto-product-modal-panel relative w-full max-w-md rounded-2xl overflow-hidden flex items-center justify-center"
         style={{ background: background || "var(--ink-3)", aspectRatio: "4 / 5" }}
       >
         <img loading="lazy" src={image} alt="" className="w-full h-full object-contain" />
@@ -3880,7 +3882,8 @@ function ImageLightbox({ image, overlay, background, onClose }) {
           />
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
