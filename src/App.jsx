@@ -5651,9 +5651,9 @@ function CompareModal({ products, onClose, onRemove, onOpen }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
   const cols = { display: "grid", gridTemplateColumns: `110px repeat(${products.length}, minmax(0, 1fr))`, gap: 12 };
-  return (
-    <div className="fixed inset-0 flex items-center justify-center p-3" style={{ zIndex: 95, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }} onClick={onClose} role="dialog" aria-modal="true" aria-label="Comparar productos">
-      <div className="w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-2xl p-5 flex flex-col gap-4" style={{ background: "var(--ink-2)", border: "1px solid var(--line)", boxShadow: "0 20px 60px rgba(0,0,0,0.5)" }} onClick={(e) => e.stopPropagation()}>
+  return createPortal(
+    <div className="kulto-root fixed inset-0 flex items-center justify-center p-3" style={{ zIndex: 95, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }} onClick={onClose} role="dialog" aria-modal="true" aria-label="Comparar productos">
+      <div data-mode={document.querySelector('.kulto-root[data-mode="light"]') ? "light" : "dark"} className="kulto-product-modal-panel w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-2xl p-5 flex flex-col gap-4" style={{ background: "var(--ink-2)", border: "1px solid var(--line)", boxShadow: "0 20px 60px rgba(0,0,0,0.5)" }} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between">
           <h3 className="kulto-display text-xl" style={{ color: "var(--bone)" }}>Comparar productos</h3>
           <button onClick={onClose} className="kulto-btn p-1.5 rounded-full" style={{ color: "var(--slate)" }} aria-label="Cerrar"><X size={18} /></button>
@@ -5687,7 +5687,8 @@ function CompareModal({ products, onClose, onRemove, onOpen }) {
         </div>
         <p className="text-[11px]" style={{ color: "var(--slate)" }}>Las filas resaltadas son donde los productos se diferencian.</p>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -7523,7 +7524,7 @@ function isValidEmail(v) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
 }
 
-function CartDrawer({ cart, products, onClose, onUpdateQty, onRemove, onCheckout, customerName, setCustomerName, customerPhone, setCustomerPhone, customerEmail, setCustomerEmail, comment, setComment, deliveryMethod, setDeliveryMethod, address, setAddress, settings, sending, customer }) {
+function CartDrawer({ themeMode, cart, products, onClose, onUpdateQty, onRemove, onCheckout, customerName, setCustomerName, customerPhone, setCustomerPhone, customerEmail, setCustomerEmail, comment, setComment, deliveryMethod, setDeliveryMethod, address, setAddress, settings, sending, customer }) {
   const subtotal = cart.reduce((s, it) => s + it.qty * it.unitPrice, 0);
   const { subtotal: eligibleSubtotal, seasonal, hasExcluded } = discountableSubtotal(cart, settings, products || []);
   const itemCount = cart.reduce((s, it) => s + it.qty, 0);
@@ -7603,11 +7604,12 @@ function CartDrawer({ cart, products, onClose, onUpdateQty, onRemove, onCheckout
   const addressOk = deliveryMethod !== "envio" || (address.street.trim() && address.city.trim() && address.state.trim() && address.postalCode.trim());
   const canCheckout = emailOk && addressOk;
 
-  return (
-    <div className="fixed inset-0 z-50 flex justify-end" style={{ background: "rgba(0,0,0,0.6)" }} onClick={onClose}>
+  return createPortal(
+    <div className="kulto-root fixed inset-0 z-50 flex justify-end" style={{ background: "rgba(0,0,0,0.6)" }} onClick={onClose}>
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full sm:w-[420px] h-full overflow-y-auto kulto-scrollbar p-5 flex flex-col"
+        data-mode={themeMode}
+        className="kulto-product-modal-panel w-full sm:w-[420px] h-full overflow-y-auto kulto-scrollbar p-5 flex flex-col"
         style={{ background: "var(--ink)", borderLeft: "1px solid var(--line)" }}
       >
         <div className="flex items-center justify-between mb-5">
@@ -7966,7 +7968,8 @@ function CartDrawer({ cart, products, onClose, onUpdateQty, onRemove, onCheckout
           </>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -19601,7 +19604,7 @@ function RewardsWidget({ settings, customer, onLogin, onRedeem, liftForMobileBar
   const rowStyle = { background: "var(--ink-3)", border: "1px solid var(--line)" };
 
   if (!open) {
-    return (
+    return createPortal(
       <button
         onClick={() => setOpen(true)}
         onMouseEnter={() => setHover(true)}
@@ -19615,13 +19618,15 @@ function RewardsWidget({ settings, customer, onLogin, onRedeem, liftForMobileBar
       >
         <Gift size={20} className="shrink-0" />
         <span style={{ display: "inline-block", overflow: "hidden", whiteSpace: "nowrap", maxWidth: hover ? 180 : 0, opacity: hover ? 1 : 0, marginLeft: hover ? 8 : 0, transition: "max-width 0.3s ease, opacity 0.25s ease, margin 0.3s ease" }}>{label}</span>
-      </button>
+      </button>,
+      document.body
     );
   }
 
-  return (
+  return createPortal(
     <div
-      className="fixed z-40 right-3 bottom-3 left-3 sm:left-auto sm:right-5 sm:bottom-5 sm:w-[360px] rounded-2xl overflow-hidden flex flex-col"
+      data-mode={document.querySelector('.kulto-root[data-mode="light"]') ? "light" : "dark"}
+      className="kulto-root kulto-product-modal-panel fixed z-40 right-3 bottom-3 left-3 sm:left-auto sm:right-5 sm:bottom-5 sm:w-[360px] rounded-2xl overflow-hidden flex flex-col"
       style={{ background: "var(--ink-2)", border: "1px solid var(--line)", boxShadow: "0 20px 50px rgba(0,0,0,0.55)", maxHeight: "calc(100vh - 24px)" }}
     >
       <div className="px-5 py-4 flex items-center justify-between" style={{ background: accent, color: "#fff" }}>
@@ -19766,7 +19771,8 @@ function RewardsWidget({ settings, customer, onLogin, onRedeem, liftForMobileBar
           </>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -21473,6 +21479,7 @@ export default function App() {
 
       {cartOpen && (
         <CartDrawer
+          themeMode={themeMode}
           cart={cart}
           onClose={() => setCartOpen(false)}
           onUpdateQty={handleUpdateQty}
