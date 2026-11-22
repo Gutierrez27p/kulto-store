@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { seasonalPricing, isOversizeGarment } from "../src/promotion-pricing.js";
+import { seasonalPricing, isOversizeGarment, discountableSubtotal } from "../src/promotion-pricing.js";
 
 const shirt = { id: "classic", name: "CROMO_06", category: "Camisetas", subcategory: "Clásica" };
 const big = { id: "big", name: "CROMO_06", category: "Camisetas", subcategory: "Oversize" };
@@ -36,4 +36,26 @@ test("unselected products never qualify", () => {
 });
 test("oversize detection uses assigned mockup name too", () => {
   assert.equal(isOversizeGarment(shirt,{garmentMockupId:"m1"},[{id:"m1",name:"Camiseta Oversize"}]),true);
+});
+
+test("discountable subtotal excludes sale-tagged products", () => {
+  const sale = {...shirt, id:"sale", tags:{oferta:true}, salePrice:12};
+  const result = discountableSubtotal([line("sale", 1, 12), line("classic", 1, 18)], {}, [sale, shirt]);
+  assert.equal(result.subtotal, 18);
+  assert.equal(result.hasExcluded, true);
+});
+test("promoted products cannot receive a second discount", () => {
+  const result = discountableSubtotal([line("classic", 2), line("regular", 1, 23)], opts, [shirt, { ...shirt, id:"regular" }]);
+  assert.equal(result.seasonal.discount, 16);
+  assert.equal(result.subtotal, 23);
+});
+test("a fully promotional basket has no eligible additional-discount amount", () => {
+  const result = discountableSubtotal([line("classic", 2)], opts, [shirt]);
+  assert.equal(result.subtotal, 0);
+  assert.equal(result.hasExcluded, true);
+});
+test("an inactive seasonal campaign does not exclude full-price products", () => {
+  const result = discountableSubtotal([line("classic", 1)], opts, [shirt]);
+  assert.equal(result.seasonal.applied, false);
+  assert.equal(result.subtotal, 18);
 });
