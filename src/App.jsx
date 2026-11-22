@@ -8024,9 +8024,9 @@ function LocalOrderProgress({ order, onSelect }) {
 
 function OrderConfirm({ orderId, hasCustom, whatsappText, whatsappNumber, onClose, isLocal, payment }) {
   const [codeCopied, setCodeCopied] = useState(false);
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.65)" }} onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} className="rounded-3xl p-6 sm:p-8 max-w-md w-full text-center overflow-y-auto kulto-scrollbar" style={{ background: "var(--ink)", border: "1px solid var(--line)", maxHeight: "92vh" }}>
+  return createPortal(
+    <div className="kulto-root fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.65)" }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} data-mode={document.querySelector('.kulto-root[data-mode="light"]') ? "light" : "dark"} className="kulto-product-modal-panel rounded-3xl p-6 sm:p-8 max-w-md w-full text-center overflow-y-auto kulto-scrollbar" style={{ background: "var(--ink)", border: "1px solid var(--line)", maxHeight: "92vh" }}>
         <div className="w-14 h-14 rounded-full mx-auto flex items-center justify-center mb-4" style={{ background: "var(--sun)" }}>
           <Check size={28} color="var(--ink)" />
         </div>
@@ -8091,7 +8091,8 @@ function OrderConfirm({ orderId, hasCustom, whatsappText, whatsappNumber, onClos
           Cerrar
         </button>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -14287,9 +14288,9 @@ function ImageFocalPointModal({ image, shape, initialFocalX, initialFocalY, init
     setDragging(true);
   };
 
-  return (
-    <div className="fixed inset-0 z-[999] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.7)" }}>
-      <div className="rounded-2xl p-5 flex flex-col gap-4 items-center" style={{ background: "var(--ink-2)", border: "1px solid var(--line)", maxWidth: 360 }}>
+  return createPortal(
+    <div className="kulto-root fixed inset-0 z-[999] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.7)" }}>
+      <div data-mode={document.querySelector('.kulto-root[data-mode="light"]') ? "light" : "dark"} className="kulto-product-modal-panel rounded-2xl p-5 flex flex-col gap-4 items-center" style={{ background: "var(--ink-2)", border: "1px solid var(--line)", maxWidth: 360 }}>
         <div className="w-full flex items-center justify-between">
           <h4 className="font-semibold text-sm" style={{ color: "var(--bone)" }}>Ajustá la posición de la foto</h4>
           <button onClick={onCancel} className="kulto-btn p-1 rounded-full" style={{ color: "var(--slate)" }} aria-label="Cerrar"><X size={18} /></button>
@@ -14344,7 +14345,8 @@ function ImageFocalPointModal({ image, shape, initialFocalX, initialFocalY, init
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -19382,9 +19384,9 @@ function ContactFormModal({ open, onClose, settings }) {
 
   const inputStyle = { background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.65)" }} onClick={close}>
-      <div onClick={(e) => e.stopPropagation()} className="rounded-2xl p-6 max-w-sm w-full" style={{ background: "var(--ink)", border: "1px solid var(--line)" }}>
+  return createPortal(
+    <div className="kulto-root fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.65)" }} onClick={close}>
+      <div onClick={(e) => e.stopPropagation()} data-mode={document.querySelector('.kulto-root[data-mode="light"]') ? "light" : "dark"} className="kulto-product-modal-panel rounded-2xl p-6 max-w-sm w-full" style={{ background: "var(--ink)", border: "1px solid var(--line)" }}>
         <div className="flex items-center justify-between mb-4">
           <h4 className="font-semibold" style={{ color: "var(--bone)" }}>Contacto</h4>
           <button onClick={close} className="kulto-btn" style={{ color: "var(--slate)" }}><X size={18} /></button>
@@ -19422,7 +19424,8 @@ function ContactFormModal({ open, onClose, settings }) {
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
