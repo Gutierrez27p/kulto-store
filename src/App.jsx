@@ -1,5 +1,5 @@
 import { GARMENT_FAMILIES, GARMENT_MODEL_TYPES, garmentFamilyOf, garmentFitOf, modelMatchesProduct } from "./garment-families.js";
-import { seasonalPricing, isOversizeGarment } from "./promotion-pricing.js";
+import { seasonalPricing, isOversizeGarment, discountableSubtotal } from "./promotion-pricing.js";
 import { backgroundSilhouette } from "./garment-mask.js";
 import { growSilhouette } from "./garment-color.js";
 import { photoGalleryForColor } from "./storefront-photo-policy.js";
@@ -11,6 +11,7 @@ import { getDisplayMenuItems, getMegaMenuTiles, menuTileMedia, megaMenuImageStyl
 import "./editorial.css";
 import { escapeEmailHtml, secureSixDigitCode } from "./email-safety.js";
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
 import {
   ShoppingBag, X, Menu, Plus, Minus, Trash2, Pencil, ChevronRight, ChevronLeft, ChevronDown, ChevronUp,
   MessageCircle, Lock, Check, Shirt, Upload, Package, Star, Sparkles, ArrowRight,
@@ -3259,6 +3260,11 @@ function GlobalStyle({ colors }) {
       .kulto-root[data-mode="light"]{ filter:invert(1) hue-rotate(180deg); }
       .kulto-root[data-mode="light"] img,
       .kulto-root[data-mode="light"] video{ filter:invert(1) hue-rotate(180deg) !important; }
+      /* The product dialog is portaled outside the filtered storefront. Invert only
+         its scrollable contents so position:fixed remains viewport-relative. */
+      .kulto-product-modal-panel[data-mode="light"]{ filter:invert(1) hue-rotate(180deg); }
+      .kulto-product-modal-panel[data-mode="light"] img,
+      .kulto-product-modal-panel[data-mode="light"] video{ filter:invert(1) hue-rotate(180deg) !important; }
       @media (prefers-reduced-motion: reduce){
         .kulto-root{ transition:none !important; }
       }
@@ -3754,13 +3760,13 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
           )}
         </div>
       </div>
-      {quickOpen && (
+      {quickOpen && createPortal(
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          className="kulto-root fixed inset-0 z-50 flex items-center justify-center p-4"
           style={{ background: "rgba(0,0,0,0.65)" }}
           onClick={(e) => { e.stopPropagation(); setQuickOpen(false); }}
         >
-          <div onClick={(e) => e.stopPropagation()} className="rounded-2xl p-5 max-w-xs w-full" style={{ background: "var(--ink)", border: "1px solid var(--line)" }}>
+          <div onClick={(e) => e.stopPropagation()} data-mode={document.querySelector('.kulto-root[data-mode="light"]') ? "light" : "dark"} className="kulto-product-modal-panel rounded-2xl p-5 max-w-xs w-full" style={{ background: "var(--ink)", border: "1px solid var(--line)" }}>
             <div className="flex items-center justify-between mb-4">
               <p className="text-sm font-semibold pr-3" style={{ color: "var(--bone)" }}>{product.name}</p>
               <button onClick={() => setQuickOpen(false)} className="kulto-btn shrink-0" style={{ color: "var(--slate)" }}><X size={18} /></button>
@@ -3833,7 +3839,8 @@ function ProductCard({ product, onOpen, isFavorite, onToggleFavorite, onAddToCar
               {quickJustAdded ? "Añadido" : hasSizes && quickSizeIdx === null ? "Elegí un talle" : "Añadir al carrito"}
             </button>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
@@ -3850,9 +3857,9 @@ function ImageLightbox({ image, overlay, background, onClose }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+      className="kulto-root fixed inset-0 z-[60] flex items-center justify-center p-4"
       style={{ background: "rgba(0,0,0,0.85)" }}
       onClick={onClose}
     >
@@ -3861,7 +3868,8 @@ function ImageLightbox({ image, overlay, background, onClose }) {
       </button>
       <div
         onClick={(e) => e.stopPropagation()}
-        className="relative w-full max-w-md rounded-2xl overflow-hidden flex items-center justify-center"
+        data-mode={document.querySelector('.kulto-root[data-mode="light"]') ? "light" : "dark"}
+        className="kulto-product-modal-panel relative w-full max-w-md rounded-2xl overflow-hidden flex items-center justify-center"
         style={{ background: background || "var(--ink-3)", aspectRatio: "4 / 5" }}
       >
         <img loading="lazy" src={image} alt="" className="w-full h-full object-contain" />
@@ -3874,7 +3882,8 @@ function ImageLightbox({ image, overlay, background, onClose }) {
           />
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -4617,20 +4626,21 @@ function GarmentPicker({ product, allProducts, onPick }) {
   );
 }
 
-function ProductModal({ product, allProducts, settings, onClose, onSwitchProduct, onAddToCart, favorites, onToggleFavorite, reviews, onGoHome, onGoCatalog, onView }) {
+function ProductModal({ product, allProducts, settings, themeMode, onClose, onSwitchProduct, onAddToCart, favorites, onToggleFavorite, reviews, onGoHome, onGoCatalog, onView }) {
   const isFavorite = favorites?.includes(product.id);
   // Cuenta como "vista" cada vez que se abre la ficha de un producto — es la
   // señal (junto a las ventas) que alimenta el "en tendencia" automático.
   useEffect(() => { onView?.(product.id); }, [product.id]);
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-6"
+      className="kulto-root fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-6"
       style={{ background: "rgba(0,0,0,0.6)" }}
       onClick={onClose}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full md:max-w-3xl max-h-[92vh] overflow-y-auto kulto-scrollbar rounded-t-3xl md:rounded-3xl p-5 md:p-8"
+        data-mode={themeMode}
+        className="kulto-product-modal-panel w-full md:max-w-3xl max-h-[92vh] overflow-y-auto kulto-scrollbar rounded-t-3xl md:rounded-3xl p-5 md:p-8"
         style={{ background: "var(--ink)", border: "1px solid var(--line)" }}
       >
         <div className="flex justify-between items-center mb-2">
@@ -4660,7 +4670,8 @@ function ProductModal({ product, allProducts, settings, onClose, onSwitchProduct
         <LinkedStyleProducts product={product} allProducts={allProducts} onOpen={onSwitchProduct} favorites={favorites} onToggleFavorite={onToggleFavorite} />
         <RelatedProducts product={product} allProducts={allProducts} onOpen={onSwitchProduct} favorites={favorites} onToggleFavorite={onToggleFavorite} />
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -4726,133 +4737,6 @@ function ClampText({ text, lines = 3, className = "", style = {}, buttonStyle = 
         </button>
       )}
     </>
-  );
-}
-
-function Hero({ onGoCatalog, onGoWizard, onSearch, heroTitle, heroSubtitle, heroImage, heroImages, banners = [] }) {
-  const [query, setQuery] = useState("");
-  const submit = (e) => {
-    e.preventDefault();
-    if (query.trim()) onSearch(query.trim());
-  };
-
-  const activeBanners = (banners || []).filter((b) => b.active !== false && b.placement !== "section");
-  const [slide, setSlide] = useState(0);
-
-  useEffect(() => { setSlide(0); }, [activeBanners.length]);
-
-  useEffect(() => {
-    if (activeBanners.length < 2) return;
-    const t = setInterval(() => setSlide((s) => (s + 1) % activeBanners.length), 5500);
-    return () => clearInterval(t);
-  }, [activeBanners.length]);
-
-  // Cuando no hay ningún banner activo arriba de todo, la imagen decorativa
-  // puede tener varias fotos cargadas — van rotando solas cada tantos
-  // segundos, cada una tal cual se subió (sin recortarla ni deformarla).
-  const heroImgList = heroImages && heroImages.length ? heroImages : (heroImage ? [heroImage] : []);
-  const [heroImgIdx, setHeroImgIdx] = useState(0);
-  useEffect(() => { setHeroImgIdx(0); }, [heroImgList.length]);
-  useEffect(() => {
-    if (activeBanners.length > 0 || heroImgList.length < 2) return;
-    const t = setInterval(() => setHeroImgIdx((i) => (i + 1) % heroImgList.length), 4000);
-    return () => clearInterval(t);
-  }, [activeBanners.length, heroImgList.length]);
-
-  const runCta = (banner) => {
-    if (!banner || banner.ctaAction === "none") return;
-    if (banner.ctaAction === "wizard") onGoWizard();
-    else if (banner.ctaAction === "url" && banner.ctaUrl) window.open(banner.ctaUrl, "_blank", "noreferrer");
-    else if (banner.ctaAction === "group" && banner.ctaGroup) onGoCatalog(banner.ctaGroup);
-    else onGoCatalog();
-  };
-
-  const current = activeBanners.length ? activeBanners[slide % activeBanners.length] : null;
-  const title = current ? current.title : heroTitle;
-  const subtitle = current ? current.subtitle : heroSubtitle;
-  const image = current ? current.image : (heroImgList[heroImgIdx] || null);
-
-  const prevSlide = () => setSlide((s) => (s - 1 + activeBanners.length) % activeBanners.length);
-  const nextSlide = () => setSlide((s) => (s + 1) % activeBanners.length);
-
-  return (
-    <section className="relative overflow-hidden" style={{ borderBottom: "1px solid var(--line)" }}>
-      <div className="max-w-6xl mx-auto px-4 md:px-6 py-14 md:py-24 grid md:grid-cols-2 gap-10 items-center">
-        <div>
-          <div key={`text-${slide}`} className="kulto-hero-fade">
-            <h1 className="kulto-display leading-[0.95] text-4xl sm:text-5xl md:text-6xl whitespace-pre-line" style={{ color: "var(--bone)", ...textOutlineStyle(current?.textOutlineWidth, current?.textOutlineColor) }}>
-              {title}
-            </h1>
-            <div className="mt-5 flex flex-col gap-1 max-w-md">
-              <ClampText text={subtitle} lines={4} className="text-base md:text-lg" style={{ color: "var(--slate)", ...subtitleOutline(current) }} />
-            </div>
-          </div>
-          <form onSubmit={submit} className="mt-6 max-w-sm relative">
-            <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2" style={{ color: "var(--slate)" }} />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Buscar productos..."
-              className="w-full rounded-full pl-10 pr-4 py-3 text-sm"
-              style={{ background: "var(--ink-2)", color: "var(--bone)", border: "1px solid var(--line)" }}
-            />
-          </form>
-          <div className="mt-5 flex flex-wrap gap-3">
-            {current ? (
-              <button onClick={() => runCta(current)} className="kulto-btn rounded-full px-6 py-3 font-semibold" style={{ background: "var(--signal)", color: "var(--bone)" }}>
-                {current.ctaLabel || "Ver catálogo"}
-              </button>
-            ) : (
-              <button onClick={onGoCatalog} className="kulto-btn rounded-full px-6 py-3 font-semibold" style={{ background: "var(--signal)", color: "var(--bone)" }}>
-                Ver catálogo
-              </button>
-            )}
-            <button onClick={onGoWizard} className="kulto-btn rounded-full px-6 py-3 font-semibold flex items-center gap-2" style={{ background: "transparent", color: "var(--bone)", border: "1px solid var(--line)" }}>
-              Personalizar mi prenda <ArrowRight size={16} />
-            </button>
-          </div>
-          {activeBanners.length > 1 && (
-            <div className="mt-6 flex items-center gap-3">
-              <button onClick={prevSlide} aria-label="Banner anterior" className="kulto-btn w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "var(--ink-2)", border: "1px solid var(--line)", color: "var(--bone)" }}>
-                <ChevronLeft size={14} />
-              </button>
-              <div className="flex items-center gap-2">
-                {activeBanners.map((b, i) => (
-                  <button
-                    key={b.id || i}
-                    onClick={() => setSlide(i)}
-                    aria-label={`Banner ${i + 1}`}
-                    className="kulto-btn rounded-full"
-                    style={{ width: i === slide ? 22 : 8, height: 8, background: i === slide ? "var(--signal)" : "var(--line)", transition: "width .2s" }}
-                  />
-                ))}
-              </div>
-              <button onClick={nextSlide} aria-label="Banner siguiente" className="kulto-btn w-8 h-8 rounded-full flex items-center justify-center" style={{ background: "var(--ink-2)", border: "1px solid var(--line)", color: "var(--bone)" }}>
-                <ChevronRight size={14} />
-              </button>
-            </div>
-          )}
-        </div>
-        <div className="relative h-64 md:h-96 flex items-center justify-center">
-          {image ? (
-            <img key={`img-${slide}-${heroImgIdx}`} src={image} alt="" className="w-full h-full object-contain kulto-hero-fade" />
-          ) : (
-            <>
-              <div className="absolute rounded-3xl" style={{ width: "70%", height: "70%", background: "var(--ink-2)", border: "1px solid var(--line)", transform: "rotate(-6deg)" }} />
-              <div className="absolute rounded-3xl flex items-center justify-center" style={{ width: "58%", height: "58%", background: "var(--signal)", transform: "rotate(8deg)" }}>
-                <Shirt size={64} color="var(--bone)" />
-              </div>
-              <div className="absolute rounded-full px-4 py-2 font-semibold text-sm kulto-display" style={{ top: "6%", right: "8%", background: "var(--sun)", color: "var(--ink)", transform: "rotate(-10deg)" }}>
-                Diseños originales
-              </div>
-              <div className="absolute rounded-full px-4 py-2 font-semibold text-sm kulto-display" style={{ bottom: "8%", left: "2%", background: "var(--bone)", color: "var(--ink)", transform: "rotate(6deg)" }}>
-                Pide por WhatsApp
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-    </section>
   );
 }
 
@@ -5228,13 +5112,13 @@ function CustomWorkCarousel({ items = [], speed = 0.5 }) {
           </button>
         ))}
       </div>
-      {lightboxItem && (
+      {lightboxItem && createPortal(
         <div
-          className="fixed inset-0 flex items-center justify-center p-4"
+          className="kulto-root fixed inset-0 flex items-center justify-center p-4"
           style={{ background: "rgba(0,0,0,0.9)", zIndex: 200 }}
           onClick={() => { setLightboxItem(null); resume(); }}
         >
-          <div className="relative max-w-2xl w-full" onClick={(e) => e.stopPropagation()}>
+          <div data-mode={document.querySelector('.kulto-root[data-mode="light"]') ? "light" : "dark"} className="kulto-product-modal-panel relative max-w-2xl w-full" onClick={(e) => e.stopPropagation()}>
             <img
               src={lightboxItem.image}
               alt={lightboxItem.caption || "Trabajo personalizado"}
@@ -5254,7 +5138,8 @@ function CustomWorkCarousel({ items = [], speed = 0.5 }) {
               <X size={18} />
             </button>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </section>
   );
@@ -5770,9 +5655,9 @@ function CompareModal({ products, onClose, onRemove, onOpen }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
   const cols = { display: "grid", gridTemplateColumns: `110px repeat(${products.length}, minmax(0, 1fr))`, gap: 12 };
-  return (
-    <div className="fixed inset-0 flex items-center justify-center p-3" style={{ zIndex: 95, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }} onClick={onClose} role="dialog" aria-modal="true" aria-label="Comparar productos">
-      <div className="w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-2xl p-5 flex flex-col gap-4" style={{ background: "var(--ink-2)", border: "1px solid var(--line)", boxShadow: "0 20px 60px rgba(0,0,0,0.5)" }} onClick={(e) => e.stopPropagation()}>
+  return createPortal(
+    <div className="kulto-root fixed inset-0 flex items-center justify-center p-3" style={{ zIndex: 95, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }} onClick={onClose} role="dialog" aria-modal="true" aria-label="Comparar productos">
+      <div data-mode={document.querySelector('.kulto-root[data-mode="light"]') ? "light" : "dark"} className="kulto-product-modal-panel w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-2xl p-5 flex flex-col gap-4" style={{ background: "var(--ink-2)", border: "1px solid var(--line)", boxShadow: "0 20px 60px rgba(0,0,0,0.5)" }} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between">
           <h3 className="kulto-display text-xl" style={{ color: "var(--bone)" }}>Comparar productos</h3>
           <button onClick={onClose} className="kulto-btn p-1.5 rounded-full" style={{ color: "var(--slate)" }} aria-label="Cerrar"><X size={18} /></button>
@@ -5806,7 +5691,8 @@ function CompareModal({ products, onClose, onRemove, onOpen }) {
         </div>
         <p className="text-[11px]" style={{ color: "var(--slate)" }}>Las filas resaltadas son donde los productos se diferencian.</p>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -6135,8 +6021,8 @@ function Catalog({ settings, initialCollection, products, categories, groups, on
         </div>
       </div>
 
-      {compareMode && comparedProducts.length > 0 && (
-        <div className="fixed left-1/2 -translate-x-1/2 flex items-center gap-3 rounded-2xl px-3 py-2.5 max-w-[95vw]" style={{ bottom: 16, zIndex: 80, background: "var(--ink-2)", border: "1px solid var(--signal)", boxShadow: "0 12px 40px rgba(0,0,0,0.45)" }}>
+      {compareMode && comparedProducts.length > 0 && createPortal(
+        <div data-mode={document.querySelector('.kulto-root[data-mode="light"]') ? "light" : "dark"} className="kulto-root kulto-product-modal-panel fixed left-1/2 -translate-x-1/2 flex items-center gap-3 rounded-2xl px-3 py-2.5 max-w-[95vw]" style={{ bottom: 16, zIndex: 80, background: "var(--ink-2)", border: "1px solid var(--signal)", boxShadow: "0 12px 40px rgba(0,0,0,0.45)" }}>
           <div className="flex items-center gap-1.5">
             {comparedProducts.map((p) => (
               <button key={p.id} onClick={() => toggleCompare(p.id)} title={`Quitar ${p.name}`} className="kulto-btn w-10 h-10 rounded-lg overflow-hidden flex items-center justify-center" style={{ background: "var(--ink-3)", border: "1px solid var(--line)" }}>
@@ -6158,7 +6044,8 @@ function Catalog({ settings, initialCollection, products, categories, groups, on
             Ver diferencias
           </button>
           <button type="button" onClick={() => { setCompareIds([]); setCompareNotice(""); }} className="kulto-btn text-xs underline" style={{ color: "var(--slate)" }}>Limpiar</button>
-        </div>
+        </div>,
+        document.body
       )}
       {showCompare && comparedProducts.length >= 2 && (
         <CompareModal
@@ -6398,13 +6285,13 @@ function DesignPlacer({ garmentImage, designs, setDesigns, sideLabel, mode = "se
         </p>
       )}
 
-      {showZoom && (
+      {showZoom && createPortal(
         <div
-          className="fixed inset-0 flex items-center justify-center p-4 overflow-y-auto"
+          className="kulto-root fixed inset-0 flex items-center justify-center p-4 overflow-y-auto"
           style={{ background: "rgba(0,0,0,0.85)", zIndex: 200 }}
           onClick={() => setShowZoom(false)}
         >
-          <div className="relative w-full max-w-2xl my-auto" onClick={(e) => e.stopPropagation()}>
+          <div data-mode={document.querySelector('.kulto-root[data-mode="light"]') ? "light" : "dark"} className="kulto-product-modal-panel relative w-full max-w-2xl my-auto" onClick={(e) => e.stopPropagation()}>
             <div
               className="rounded-2xl overflow-auto mx-auto"
               style={{ background: "var(--ink-3)", maxHeight: "80vh" }}
@@ -6459,7 +6346,8 @@ function DesignPlacer({ garmentImage, designs, setDesigns, sideLabel, mode = "se
               {zoom > 1 ? "Recorré la tela con scroll — arrastrá el diseño para ubicarlo." : designs.length > 0 ? "Usá +/- para acercarte, o arrastrá el diseño para ubicarlo." : "Tocá afuera para cerrar"}
             </p>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {selected && (
@@ -7244,9 +7132,9 @@ function Wizard({ products, categories, settings, designLibrary, designFolders, 
           </div>
         {colorConfirm !== null && colorsForProduct[colorConfirm] && (() => {
           const cc = colorsForProduct[colorConfirm];
-          return (
-            <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.7)" }} onClick={() => setColorConfirm(null)}>
-              <div onClick={(e) => e.stopPropagation()} className="rounded-3xl p-6 max-w-xs w-full text-center" style={{ background: "var(--ink)", border: "1px solid var(--line)" }}>
+          return createPortal(
+            <div className="kulto-root fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.7)" }} onClick={() => setColorConfirm(null)}>
+              <div onClick={(e) => e.stopPropagation()} data-mode={document.querySelector('.kulto-root[data-mode="light"]') ? "light" : "dark"} className="kulto-product-modal-panel rounded-3xl p-6 max-w-xs w-full text-center" style={{ background: "var(--ink)", border: "1px solid var(--line)" }}>
                 <span className="w-28 h-28 rounded-full mx-auto flex items-center justify-center mb-4" style={{ background: cc.hex, border: "3px solid var(--sun)" }}>
                   {(cc.frontImage || cc.images?.[0]) && <FastImg loading="lazy" src={cc.frontImage || cc.images[0]} className="w-20 h-20 object-contain rounded-full" alt="" />}
                 </span>
@@ -7268,7 +7156,8 @@ function Wizard({ products, categories, settings, designLibrary, designFolders, 
                   Elegir otro
                 </button>
               </div>
-            </div>
+            </div>,
+            document.body
           );
         })()}
         </div>
@@ -7642,9 +7531,9 @@ function isValidEmail(v) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
 }
 
-function CartDrawer({ cart, products, onClose, onUpdateQty, onRemove, onCheckout, customerName, setCustomerName, customerPhone, setCustomerPhone, customerEmail, setCustomerEmail, comment, setComment, deliveryMethod, setDeliveryMethod, address, setAddress, settings, sending, customer }) {
+function CartDrawer({ themeMode, cart, products, onClose, onUpdateQty, onRemove, onCheckout, customerName, setCustomerName, customerPhone, setCustomerPhone, customerEmail, setCustomerEmail, comment, setComment, deliveryMethod, setDeliveryMethod, address, setAddress, settings, sending, customer }) {
   const subtotal = cart.reduce((s, it) => s + it.qty * it.unitPrice, 0);
-  const seasonal = seasonalPricing(cart, settings, products || []);
+  const { subtotal: eligibleSubtotal, seasonal, hasExcluded } = discountableSubtotal(cart, settings, products || []);
   const itemCount = cart.reduce((s, it) => s + it.qty, 0);
   // Suma el puntaje propio de cada prenda (si el admin le puso uno) y si no
   // usa el general de Ajustes → Fidelización, en vez de una cifra pareja por
@@ -7664,7 +7553,11 @@ function CartDrawer({ cart, products, onClose, onUpdateQty, onRemove, onCheckout
     const found = findPromo(code, settings, customer, usage);
     setPromoBusy(false);
     if (!found.ok) { setPromoError(found.error); return; }
-    const chk = evalPromo(found.promo, subtotal, customer);
+    if (eligibleSubtotal <= 0) {
+      setPromoError("Este descuento no se puede aplicar a artículos en oferta o promoción. Añadí una prenda sin rebaja para usarlo.");
+      return;
+    }
+    const chk = evalPromo(found.promo, eligibleSubtotal, customer);
     if (!chk.ok) { setPromoError(chk.error); return; }
     setAppliedPromo(found.promo);
     setPromoInput("");
@@ -7703,28 +7596,27 @@ function CartDrawer({ cart, products, onClose, onUpdateQty, onRemove, onCheckout
     return byRegion != null ? byRegion : settings.shippingFlatRate;
   };
   const shippingCostBase = deliveryMethod === "envio" ? (freeShipping ? 0 : shippingCostForRegion(address.state)) : 0;
-  const promoEval = appliedPromo ? evalPromo(appliedPromo, subtotal, customer) : null;
-  const promoActive = !!promoEval && promoEval.ok;
+  // Coupons and rewards are valid only on regular-price products. A
+  // seasonal promotion remains applied to its own products in a mixed basket.
+  const promoEval = appliedPromo && eligibleSubtotal > 0 ? evalPromo(appliedPromo, eligibleSubtotal, customer) : null;
+  const promoActive = !!promoEval?.ok;
   const promoDiscount = promoActive ? promoEval.discount : 0;
   const shippingCost = promoActive && promoEval.freeShipping ? 0 : shippingCostBase;
   const welcomePercent = getWelcomePercent(settings, customer);
   const eligibleForSignupDiscount = !!customer && !!settings?.signupDiscountEnabled && !customer.firstDiscountUsed;
-  // El código de descuento reemplaza al de bienvenida (no se suman): así el
-  // descuento de bienvenida no se "gasta" si el cliente usa un código mejor.
-  // Do not stack seasonal bundles with promo codes or welcome discounts.
-  // When no code is used, grant the better of the welcome discount and the seasonal deal.
-  const welcomeDiscount = eligibleForSignupDiscount && !promoActive ? subtotal * (welcomePercent / 100) : 0;
-  const seasonalDiscount = promoActive || welcomeDiscount > seasonal.discount ? 0 : seasonal.discount;
-  const discountAmount = seasonalDiscount > 0 ? 0 : welcomeDiscount;
+  const welcomeDiscount = eligibleForSignupDiscount && !promoActive ? Math.round(eligibleSubtotal * welcomePercent) / 100 : 0;
+  const seasonalDiscount = seasonal.discount;
+  const discountAmount = welcomeDiscount;
   const total = Math.round((Math.max(0, subtotal - discountAmount - promoDiscount - seasonalDiscount) + shippingCost) * 100) / 100;
   const addressOk = deliveryMethod !== "envio" || (address.street.trim() && address.city.trim() && address.state.trim() && address.postalCode.trim());
   const canCheckout = emailOk && addressOk;
 
-  return (
-    <div className="fixed inset-0 z-50 flex justify-end" style={{ background: "rgba(0,0,0,0.6)" }} onClick={onClose}>
+  return createPortal(
+    <div className="kulto-root fixed inset-0 z-50 flex justify-end" style={{ background: "rgba(0,0,0,0.6)" }} onClick={onClose}>
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full sm:w-[420px] h-full overflow-y-auto kulto-scrollbar p-5 flex flex-col"
+        data-mode={themeMode}
+        className="kulto-product-modal-panel w-full sm:w-[420px] h-full overflow-y-auto kulto-scrollbar p-5 flex flex-col"
         style={{ background: "var(--ink)", borderLeft: "1px solid var(--line)" }}
       >
         <div className="flex items-center justify-between mb-5">
@@ -7945,11 +7837,15 @@ function CartDrawer({ cart, products, onClose, onUpdateQty, onRemove, onCheckout
                     ))}
                   </div>
                 )}
-                {(promoError || (appliedPromo && promoEval && !promoEval.ok)) && (
-                  <p className="text-xs" style={{ color: "var(--signal)" }}>{promoError || promoEval.error}</p>
+                {(promoError || (appliedPromo && eligibleSubtotal > 0 && promoEval && !promoEval.ok)) && (
+                  <p role="alert" className="text-xs" style={{ color: "var(--signal)" }}>{promoError || promoEval?.error}</p>
                 )}
               </div>
 
+              <p className="text-xs rounded-lg p-3" style={{background:"var(--ink-2)",color:"var(--slate)",border:"1px solid var(--line)"}}>
+                Los descuentos de bienvenida, cupones y recompensas de puntos no se aplican a prendas en oferta ni a promociones. {hasExcluded ? "En este pedido, cualquier descuento adicional se calcula solo sobre las prendas sin rebaja." : "Si añadís productos rebajados, quedarán excluidos del descuento."}
+              </p>
+              {appliedPromo && eligibleSubtotal <= 0 && <p role="status" className="text-xs" style={{color:"var(--signal)"}}>El código quedó sin efecto: las prendas de este carrito están en oferta o promoción.</p>}
               <div className="flex flex-col gap-1 text-sm" style={{ color: "var(--slate)" }}>
                 <div className="flex items-center justify-between">
                   <span>Subtotal</span>
@@ -8079,7 +7975,8 @@ function CartDrawer({ cart, products, onClose, onUpdateQty, onRemove, onCheckout
           </>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -8131,9 +8028,9 @@ function LocalOrderProgress({ order, onSelect }) {
 
 function OrderConfirm({ orderId, hasCustom, whatsappText, whatsappNumber, onClose, isLocal, payment }) {
   const [codeCopied, setCodeCopied] = useState(false);
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.65)" }} onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} className="rounded-3xl p-6 sm:p-8 max-w-md w-full text-center overflow-y-auto kulto-scrollbar" style={{ background: "var(--ink)", border: "1px solid var(--line)", maxHeight: "92vh" }}>
+  return createPortal(
+    <div className="kulto-root fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.65)" }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} data-mode={document.querySelector('.kulto-root[data-mode="light"]') ? "light" : "dark"} className="kulto-product-modal-panel rounded-3xl p-6 sm:p-8 max-w-md w-full text-center overflow-y-auto kulto-scrollbar" style={{ background: "var(--ink)", border: "1px solid var(--line)", maxHeight: "92vh" }}>
         <div className="w-14 h-14 rounded-full mx-auto flex items-center justify-center mb-4" style={{ background: "var(--sun)" }}>
           <Check size={28} color="var(--ink)" />
         </div>
@@ -8198,7 +8095,8 @@ function OrderConfirm({ orderId, hasCustom, whatsappText, whatsappNumber, onClos
           Cerrar
         </button>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -8331,7 +8229,7 @@ function LeaveReviewSection({ order }) {
 // el visitante no tiene cuenta) y ofrece el descuento de la primera compra a
 // cambio de registrarse. Si lo cierra, no vuelve a molestar por 7 días.
 const SIGNUP_POPUP_KEY = "kulto:signup-popup-dismissed";
-function SignupPromoPopup({ settings, customer, page, onSignup }) {
+function SignupPromoPopup({ settings, customer, page, themeMode, onSignup }) {
   const percent = Number(settings?.signupDiscountPercent) || 0;
   const eligible = !!settings?.signupDiscountEnabled && settings?.signupPopupEnabled !== false && percent > 0 && !customer && page !== "cuenta";
   const [open, setOpen] = useState(false);
@@ -8377,9 +8275,9 @@ function SignupPromoPopup({ settings, customer, page, onSignup }) {
     onSignup?.(v, "register");
   };
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 flex items-center justify-center p-4"
+      className="kulto-root fixed inset-0 flex items-center justify-center p-4"
       style={{ zIndex: 90, background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}
       onClick={dismiss}
       role="dialog"
@@ -8387,7 +8285,8 @@ function SignupPromoPopup({ settings, customer, page, onSignup }) {
       aria-label="Descuento por registrarte"
     >
       <div
-        className="relative w-full max-w-2xl rounded-2xl overflow-hidden flex flex-col sm:flex-row"
+        data-mode={themeMode}
+        className="kulto-product-modal-panel relative w-full max-w-2xl rounded-2xl overflow-hidden flex flex-col sm:flex-row"
         style={{ background: "var(--ink-2)", border: "1px solid var(--line)", boxShadow: "0 20px 60px rgba(0,0,0,0.5)" }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -8435,7 +8334,8 @@ function SignupPromoPopup({ settings, customer, page, onSignup }) {
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -9166,9 +9066,9 @@ function CropModal({ source, onConfirm, onCancel, frameW = CROP_FRAME_W, frameH 
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.85)" }}>
-      <div className="rounded-2xl p-5 max-w-sm w-full flex flex-col gap-4" style={{ background: "var(--ink)", border: "1px solid var(--line)" }}>
+  return createPortal(
+    <div className="kulto-root fixed inset-0 z-[70] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.85)" }}>
+      <div data-mode={document.querySelector('.kulto-root[data-mode="light"]') ? "light" : "dark"} className="kulto-product-modal-panel rounded-2xl p-5 max-w-sm w-full flex flex-col gap-4" style={{ background: "var(--ink)", border: "1px solid var(--line)" }}>
         <p className="text-sm font-semibold" style={{ color: "var(--bone)" }}>{title}</p>
         <div
           className="relative overflow-hidden rounded-xl mx-auto touch-none select-none"
@@ -9212,7 +9112,8 @@ function CropModal({ source, onConfirm, onCancel, frameW = CROP_FRAME_W, frameH 
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -13789,54 +13690,22 @@ function AdminHomeCategoryCovers({ settings, products, onSave }) {
 }
 
 function AdminBannerSettings({ settings, groups = [], onSave }) {
-  const [heroTitle, setHeroTitle] = useState(settings.heroTitle);
-  const [heroSubtitle, setHeroSubtitle] = useState(settings.heroSubtitle);
-  // Compatibilidad: si la tienda todavía tiene la imagen vieja de portada
-  // (un solo campo, "heroImage") y nunca cargó varias, arrancamos la lista
-  // con esa — así no se pierde nada al actualizar.
-  const initialHeroImages = () => (settings.heroImages && settings.heroImages.length ? settings.heroImages : (settings.heroImage ? [settings.heroImage] : []));
-  const [heroImages, setHeroImages] = useState(initialHeroImages());
   const [banners, setBanners] = useState(settings.banners || []);
   const [draft, setDraft] = useState(null);
-  const [saved, setSaved] = useState(false);
   const [cropSource, setCropSource] = useState(null);
 
   useEffect(() => {
-    setHeroTitle(settings.heroTitle);
-    setHeroSubtitle(settings.heroSubtitle);
-    setHeroImages(initialHeroImages());
     setBanners(settings.banners || []);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings]);
 
   const inputStyle = { background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" };
 
-  // Las fotos de portada son lo primero que carga CUALQUIER visitante, así
-  // que acá sí conviene comprimirlas siempre que se pueda. Pero esta misma
-  // sección también se usa para imágenes decorativas con transparencia (ej:
-  // el logo, que tiene que verse flotando sobre el fondo oscuro, no en un
-  // recuadro). fileToBase64 ya detecta solo si la imagen tiene transparencia
-  // de verdad: si no la tiene, la comprime como JPG liviano; si la tiene
-  // (como un logo en PNG), la mantiene en PNG para no taparla con un fondo
-  // negro — por eso acá pedimos "image/png" y dejamos que decida sola.
-  const addHeroImages = (fileList) => {
-    Array.from(fileList || []).forEach((f) => {
-      fileToBase64(f, (b64) => setHeroImages((imgs) => [...imgs, b64]), 1200, 0.85, "image/png");
-    });
-  };
-  const removeHeroImage = (img) => setHeroImages((imgs) => imgs.filter((i) => i !== img));
-
-  const saveDefault = async () => {
-    await onSave({ heroTitle, heroSubtitle, heroImages, heroImage: heroImages[0] || null });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-  };
-
   const openNew = () => setDraft({
     id: genId("banner"),
-    title: banners.length === 0 ? heroTitle : "",
-    subtitle: banners.length === 0 ? heroSubtitle : "",
-    image: banners.length === 0 ? (heroImages[0] || null) : null,
+    title: banners.length === 0 ? (settings.editorialHeroTitle || "") : "",
+    subtitle: banners.length === 0 ? (settings.editorialHeroSubtitle || "") : "",
+    image: banners.length === 0 ? (settings.heroImage || settings.heroImages?.[0] || null) : null,
     ctaLabel: "Ver catálogo",
     ctaAction: "catalog",
     ctaUrl: "",
@@ -14162,54 +14031,6 @@ function AdminBannerSettings({ settings, groups = [], onSave }) {
         </div>
       )}
 
-      <div className="pt-4 flex flex-col gap-4" style={{ borderTop: "1px solid var(--line)" }}>
-        <div>
-          <h5 className="text-sm font-semibold" style={{ color: "var(--bone)" }}>Cartel por defecto</h5>
-          <p className="text-xs mt-1" style={{ color: "var(--slate)" }}>Se usa solo cuando no tenés ningún banner activo arriba.</p>
-        </div>
-        <div>
-          <label className="text-sm mb-1 block" style={{ color: "var(--bone)" }}>Título</label>
-          <textarea value={heroTitle} onChange={(e) => setHeroTitle(e.target.value)} rows={2} className="w-full rounded-xl p-3 text-sm" style={inputStyle} />
-        </div>
-        <div>
-          <label className="text-sm mb-1 block" style={{ color: "var(--bone)" }}>Subtítulo</label>
-          <textarea value={heroSubtitle} onChange={(e) => setHeroSubtitle(e.target.value)} rows={3} className="w-full rounded-xl p-3 text-sm" style={inputStyle} />
-        </div>
-        <div>
-          <label className="text-sm mb-1 block" style={{ color: "var(--bone)" }}>Imagen decorativa (PNG o JPG)</label>
-          <p className="text-xs mb-2" style={{ color: "var(--slate)" }}>
-            Subí una o varias — cada una se ve tal cual la subiste, sin recortarla. Si cargás más de una, van cambiando solas cada 4 segundos.
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {heroImages.map((img, i) => (
-              <div key={i} className="relative w-20 h-20 rounded-xl overflow-hidden shrink-0" style={{ background: "var(--ink-3)", border: "1px solid var(--line)" }}>
-                <img loading="lazy" src={img} alt="" className="w-full h-full object-contain p-1" />
-                <button
-                  onClick={() => removeHeroImage(img)}
-                  className="kulto-btn absolute top-0.5 right-0.5 w-5 h-5 rounded-full flex items-center justify-center"
-                  style={{ background: "rgba(21,19,26,0.8)", color: "var(--bone)" }}
-                  title="Quitar"
-                  aria-label="Quitar imagen"
-                >
-                  <X size={11} />
-                </button>
-              </div>
-            ))}
-            <label
-              className="kulto-btn w-20 h-20 rounded-xl flex flex-col items-center justify-center gap-1 shrink-0"
-              style={{ background: "var(--ink-3)", border: "1px dashed var(--line)", color: "var(--slate)" }}
-            >
-              <Upload size={16} />
-              <span className="text-[10px]">Agregar</span>
-              <input type="file" accept="image/png,image/jpeg" multiple className="hidden" onChange={(e) => { addHeroImages(e.target.files); e.target.value = ""; }} />
-            </label>
-          </div>
-        </div>
-        <button onClick={saveDefault} className="kulto-btn rounded-full py-3 font-semibold flex items-center justify-center gap-2" style={{ background: saved ? "var(--sun)" : "var(--signal)", color: saved ? "var(--ink)" : "var(--bone)" }}>
-          {saved ? <><Check size={16} /> Guardado</> : "Guardar cartel por defecto"}
-        </button>
-      </div>
-
       {cropSource && (
         <CropModal
           source={cropSource}
@@ -14472,9 +14293,9 @@ function ImageFocalPointModal({ image, shape, initialFocalX, initialFocalY, init
     setDragging(true);
   };
 
-  return (
-    <div className="fixed inset-0 z-[999] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.7)" }}>
-      <div className="rounded-2xl p-5 flex flex-col gap-4 items-center" style={{ background: "var(--ink-2)", border: "1px solid var(--line)", maxWidth: 360 }}>
+  return createPortal(
+    <div className="kulto-root fixed inset-0 z-[999] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.7)" }}>
+      <div data-mode={document.querySelector('.kulto-root[data-mode="light"]') ? "light" : "dark"} className="kulto-product-modal-panel rounded-2xl p-5 flex flex-col gap-4 items-center" style={{ background: "var(--ink-2)", border: "1px solid var(--line)", maxWidth: 360 }}>
         <div className="w-full flex items-center justify-between">
           <h4 className="font-semibold text-sm" style={{ color: "var(--bone)" }}>Ajustá la posición de la foto</h4>
           <button onClick={onCancel} className="kulto-btn p-1 rounded-full" style={{ color: "var(--slate)" }} aria-label="Cerrar"><X size={18} /></button>
@@ -14529,7 +14350,8 @@ function ImageFocalPointModal({ image, shape, initialFocalX, initialFocalY, init
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -19465,9 +19287,9 @@ function InstallAppBanner() {
           </button>
         </div>
       </div>
-      {showIosHelp && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.65)" }} onClick={() => setShowIosHelp(false)}>
-          <div onClick={(e) => e.stopPropagation()} className="rounded-2xl p-6 max-w-sm w-full" style={{ background: "var(--ink)", border: "1px solid var(--line)" }}>
+      {showIosHelp && createPortal(
+        <div className="kulto-root fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.65)" }} onClick={() => setShowIosHelp(false)}>
+          <div onClick={(e) => e.stopPropagation()} data-mode={document.querySelector('.kulto-root[data-mode="light"]') ? "light" : "dark"} className="kulto-product-modal-panel rounded-2xl p-6 max-w-sm w-full" style={{ background: "var(--ink)", border: "1px solid var(--line)" }}>
             <h4 className="font-semibold mb-3" style={{ color: "var(--bone)" }}>Instalar en iPhone/iPad — 2 toques</h4>
             <p className="text-xs mb-3" style={{ color: "var(--slate)" }}>
               En iPhone, Apple no deja que las webs se instalen solas con un botón — hay que hacerlo así (una sola vez):
@@ -19481,7 +19303,8 @@ function InstallAppBanner() {
               Entendido
             </button>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );
@@ -19567,9 +19390,9 @@ function ContactFormModal({ open, onClose, settings }) {
 
   const inputStyle = { background: "var(--ink-3)", color: "var(--bone)", border: "1px solid var(--line)" };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.65)" }} onClick={close}>
-      <div onClick={(e) => e.stopPropagation()} className="rounded-2xl p-6 max-w-sm w-full" style={{ background: "var(--ink)", border: "1px solid var(--line)" }}>
+  return createPortal(
+    <div className="kulto-root fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.65)" }} onClick={close}>
+      <div onClick={(e) => e.stopPropagation()} data-mode={document.querySelector('.kulto-root[data-mode="light"]') ? "light" : "dark"} className="kulto-product-modal-panel rounded-2xl p-6 max-w-sm w-full" style={{ background: "var(--ink)", border: "1px solid var(--line)" }}>
         <div className="flex items-center justify-between mb-4">
           <h4 className="font-semibold" style={{ color: "var(--bone)" }}>Contacto</h4>
           <button onClick={close} className="kulto-btn" style={{ color: "var(--slate)" }}><X size={18} /></button>
@@ -19607,7 +19430,8 @@ function ContactFormModal({ open, onClose, settings }) {
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -19738,9 +19562,9 @@ function Footer({ settings }) {
       <div className="mt-4 text-center">
         <span className="kulto-display text-sm" style={{ color: "var(--slate)" }}>KULTO</span>
       </div>
-      {policyOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.65)" }} onClick={() => setPolicyOpen(false)}>
-          <div onClick={(e) => e.stopPropagation()} className="rounded-2xl p-6 max-w-sm w-full" style={{ background: "var(--ink)", border: "1px solid var(--line)" }}>
+      {policyOpen && createPortal(
+        <div className="kulto-root fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.65)" }} onClick={() => setPolicyOpen(false)}>
+          <div onClick={(e) => e.stopPropagation()} data-mode={document.querySelector('.kulto-root[data-mode="light"]') ? "light" : "dark"} className="kulto-product-modal-panel rounded-2xl p-6 max-w-sm w-full" style={{ background: "var(--ink)", border: "1px solid var(--line)" }}>
             <div className="flex items-center justify-between mb-3">
               <h4 className="font-semibold text-sm" style={{ color: "var(--bone)" }}>Calidad y devoluciones</h4>
               <button onClick={() => setPolicyOpen(false)} className="kulto-btn" style={{ color: "var(--slate)" }}><X size={18} /></button>
@@ -19750,7 +19574,8 @@ function Footer({ settings }) {
               {hasReturns && <p className="text-xs leading-relaxed" style={{ color: "var(--slate)" }}>{settings.returnsPolicyText}</p>}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
       <ContactFormModal open={contactOpen} onClose={() => setContactOpen(false)} settings={settings} />
     </footer>
@@ -19788,10 +19613,11 @@ function RewardsWidget({ settings, customer, onLogin, onRedeem, liftForMobileBar
     setBusyId(null);
     setMsg(res.ok ? { ok: true, code: res.code, name: r.name } : { ok: false, text: res.error });
   };
+  const discountsNotice = "Los descuentos y recompensas canjeadas por puntos no se pueden combinar con ofertas ni promociones. Solo se aplican a prendas sin rebaja.";
   const rowStyle = { background: "var(--ink-3)", border: "1px solid var(--line)" };
 
   if (!open) {
-    return (
+    return createPortal(
       <button
         onClick={() => setOpen(true)}
         onMouseEnter={() => setHover(true)}
@@ -19805,13 +19631,15 @@ function RewardsWidget({ settings, customer, onLogin, onRedeem, liftForMobileBar
       >
         <Gift size={20} className="shrink-0" />
         <span style={{ display: "inline-block", overflow: "hidden", whiteSpace: "nowrap", maxWidth: hover ? 180 : 0, opacity: hover ? 1 : 0, marginLeft: hover ? 8 : 0, transition: "max-width 0.3s ease, opacity 0.25s ease, margin 0.3s ease" }}>{label}</span>
-      </button>
+      </button>,
+      document.body
     );
   }
 
-  return (
+  return createPortal(
     <div
-      className="fixed z-40 right-3 bottom-3 left-3 sm:left-auto sm:right-5 sm:bottom-5 sm:w-[360px] rounded-2xl overflow-hidden flex flex-col"
+      data-mode={document.querySelector('.kulto-root[data-mode="light"]') ? "light" : "dark"}
+      className="kulto-root kulto-product-modal-panel fixed z-40 right-3 bottom-3 left-3 sm:left-auto sm:right-5 sm:bottom-5 sm:w-[360px] rounded-2xl overflow-hidden flex flex-col"
       style={{ background: "var(--ink-2)", border: "1px solid var(--line)", boxShadow: "0 20px 50px rgba(0,0,0,0.55)", maxHeight: "calc(100vh - 24px)" }}
     >
       <div className="px-5 py-4 flex items-center justify-between" style={{ background: accent, color: "#fff" }}>
@@ -19827,6 +19655,7 @@ function RewardsWidget({ settings, customer, onLogin, onRedeem, liftForMobileBar
       </div>
 
       <div className="p-5 flex flex-col gap-3 overflow-y-auto kulto-scrollbar">
+        <p className="text-xs rounded-lg p-3" style={{background:"var(--ink-3)",color:"var(--slate)",border:"1px solid var(--line)"}}>{discountsNotice}</p>
         {view === "home" && (
           <>
             {!customer ? (
@@ -19955,7 +19784,8 @@ function RewardsWidget({ settings, customer, onLogin, onRedeem, liftForMobileBar
           </>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -19963,7 +19793,7 @@ function WhatsAppFloat({ liftForMobileBar, whatsappNumber, enabled }) {
   // No se muestra si está apagado o si todavía no hay número cargado
   // (Ajustes → Marca) — las dos cosas se controlan por separado.
   if (!enabled || !whatsappNumber) return null;
-  return (
+  return createPortal(
     <button
       onClick={() => openWhatsApp("Hola Kulto, tengo una duda sobre un producto.", whatsappNumber)}
       className={`kulto-btn fixed right-5 z-30 w-14 h-14 rounded-full flex items-center justify-center ${liftForMobileBar ? "bottom-24 md:bottom-5" : "bottom-5"}`}
@@ -19971,21 +19801,23 @@ function WhatsAppFloat({ liftForMobileBar, whatsappNumber, enabled }) {
       title="Escríbenos por WhatsApp"
     >
       <MessageCircle size={26} />
-    </button>
+    </button>,
+    document.body
   );
 }
 
 function MobileCartBar({ count, total, onOpen }) {
-  return (
+  return createPortal(
     // paddingBottom extra con env(safe-area-inset-bottom): en iPhones sin
     // botón físico de inicio, evita que la franja del "home indicator" tape
     // parte del botón.
-    <div className="md:hidden fixed bottom-0 left-0 right-0 z-30 px-4 pt-3" style={{ background: "var(--ink-2)", borderTop: "1px solid var(--line)", paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom))" }}>
+    <div data-mode={document.querySelector('.kulto-root[data-mode="light"]') ? "light" : "dark"} className="kulto-root kulto-product-modal-panel md:hidden fixed bottom-0 left-0 right-0 z-30 px-4 pt-3" style={{ background: "var(--ink-2)", borderTop: "1px solid var(--line)", paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom))" }}>
       <button onClick={onOpen} className="kulto-btn w-full rounded-full py-3 px-4 font-semibold flex items-center justify-between" style={{ background: "var(--signal)", color: "var(--bone)" }}>
         <span className="flex items-center gap-2"><ShoppingBag size={18} /> {count} artículo{count === 1 ? "" : "s"}</span>
         <span>{formatPrice(total)} · Ver carrito</span>
       </button>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -20428,6 +20260,39 @@ export default function App() {
     if (cart.length === 0) return;
     // Nunca se registra un pedido con un mail sin confirmar (ver CartDrawer).
     if (!isCheckoutEmailVerified(customerEmail, customer)) return;
+    // Revalidate ALL discounts against the current basket, not a snapshot
+    // from before email verification or a cart update. Promotional items
+    // can never receive a welcome or rewards/coupon discount.
+    const pricing = discountableSubtotal(cart, settings, sellableProducts);
+    subtotal = Math.round(cart.reduce((sum, item) => sum + item.qty * item.unitPrice, 0) * 100) / 100;
+    itemCount = cart.reduce((sum, item) => sum + item.qty, 0);
+    let validPromo = null;
+    if (promo?.code && pricing.subtotal > 0) {
+      const result = findPromo(promo.code, settings, customer, await loadPromoUsage());
+      if (result.ok) {
+        const evaluated = evalPromo(result.promo, pricing.subtotal, customer);
+        if (evaluated.ok) validPromo = {
+          ...promo,
+          discount: evaluated.discount,
+          freeShipping: evaluated.freeShipping,
+          gift: evaluated.gift,
+        };
+      }
+    }
+    const welcomeAllowed = customer && settings.signupDiscountEnabled && !customer.firstDiscountUsed && !validPromo
+      ? Math.round(pricing.subtotal * getWelcomePercent(settings, customer)) / 100
+      : 0;
+    discountAmount = Math.min(Math.max(0, discountAmount), welcomeAllowed);
+    promo = validPromo;
+    seasonalPromotion = pricing.seasonal.applied
+      ? { title: pricing.seasonal.label, discount: pricing.seasonal.discount, productIds: pricing.seasonal.includedIds }
+      : null;
+    // A removed/invalid free-shipping code must not leave shipping free.
+    const defaultShipping = deliveryMethod !== "envio" || subtotal >= settings.freeShippingThreshold
+      ? 0
+      : (settings.shippingRegionPrices?.[address.state] ?? settings.shippingFlatRate ?? 0);
+    shippingCost = promo?.freeShipping ? 0 : defaultShipping;
+    total = Math.round((Math.max(0, subtotal - discountAmount - (promo?.discount || 0) - pricing.seasonal.discount) + shippingCost) * 100) / 100;
     setSending(true);
     const order = {
       id: `KULTO-${new Date().toISOString().slice(2, 10).replace(/-/g, "")}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
@@ -21625,7 +21490,7 @@ export default function App() {
       </main>
 
       <Footer settings={settings} />
-      <SignupPromoPopup settings={settings} customer={customer} page={page} onSignup={openSignup} />
+      <SignupPromoPopup settings={settings} customer={customer} page={page} themeMode={themeMode} onSignup={openSignup} />
       {!(page === "cuenta" && effectiveAdminView) && (
         <RewardsWidget
           settings={settings}
@@ -21645,6 +21510,7 @@ export default function App() {
         <ProductModal
           key={selectedProduct.id}
           product={selectedProduct}
+          themeMode={themeMode}
           allProducts={sellableProducts}
           settings={settings}
           onClose={() => setSelectedProduct(null)}
@@ -21661,6 +21527,7 @@ export default function App() {
 
       {cartOpen && (
         <CartDrawer
+          themeMode={themeMode}
           cart={cart}
           onClose={() => setCartOpen(false)}
           onUpdateQty={handleUpdateQty}
