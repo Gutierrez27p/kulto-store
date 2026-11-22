@@ -56,7 +56,8 @@ export function seasonalPricing(cart = [], settings = {}, products = []) {
  */
 export function discountableSubtotal(cart = [], settings = {}, products = []) {
   const seasonal = seasonalPricing(cart, settings, products);
-  const seasonalIds = seasonal.applied ? new Set(seasonal.includedIds) : new Set();
+  const seasonalIds = seasonal.active && seasonal.eligibleQuantity >= seasonal.minimumQuantity
+    ? new Set(seasonal.includedIds) : new Set();
   const byId = new Map(products.map(product => [product.id, product]));
   const cents = cart.reduce((total, item) => {
     const product = byId.get(item.productId);
