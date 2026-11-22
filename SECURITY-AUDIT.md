@@ -7,6 +7,13 @@
 - En esta tanda se añade escape de HTML en los correos construidos en el navegador, códigos de verificación con generador criptográfico, rechazo de registros nuevos con la dirección administrativa reservada, sustitución del PIN fijo de borrado por confirmación explícita y rechazo de resultados IA incompletos.
 - **Estas medidas son parciales. No constituyen autenticación de servidor ni protegen por sí solas los datos de Supabase.** La confirmación de borrado solo protege de clics accidentales, no autoriza la operación.
 
+## Fiabilidad del guardado de pedidos
+
+- La operación guarda el registro y después añade su ID al índice de pedidos. Un fallo de lectura ya no puede sobrescribir silenciosamente el índice histórico.
+- Los reintentos con el mismo número de pedido no duplican la entrada en el índice.
+- Si fallan tanto el guardado como el correo de respaldo al dueño, **la compra no se confirma y el carrito se conserva**. Si el correo funciona pero el panel no, se informa al comprador y se conserva el número de referencia.
+- **Sigue sin existir una transacción atómica entre las dos escrituras.** Dos compras simultáneas podrían competir por el índice. Se necesita una función/tabla de pedidos en Supabase con transacciones y un índice de base de datos, a implementar y ensayar en staging.
+
 ## Riesgos críticos sin resolver
 
 1. **RLS y Storage de producción no verificados:** el cliente accede a la tabla `public.kulto_kv` y al bucket `kulto-photos` con una clave pública. Si las políticas de producción permiten escritura anónima, se pueden alterar cuentas, pedidos, precios y fotografías sin pasar por la interfaz. Revisar el proyecto real con `security/supabase-readonly-audit.sql`.
