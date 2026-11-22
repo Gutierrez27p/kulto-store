@@ -59,3 +59,9 @@ test("an inactive seasonal campaign does not exclude full-price products", () =>
   assert.equal(result.seasonal.applied, false);
   assert.equal(result.subtotal, 18);
 });
+
+test("a qualifying campaign is excluded even when the special price brings no reduction", () => {
+  const result = discountableSubtotal([line("classic", 2, 8)], opts, [shirt]);
+  assert.equal(result.seasonal.discount, 0);
+  assert.equal(result.subtotal, 0);
+});
