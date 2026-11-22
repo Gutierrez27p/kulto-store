@@ -47,3 +47,24 @@ export function seasonalPricing(cart = [], settings = {}, products = []) {
     includedIds: selected.map(item => item.productId)
   };
 }
+
+
+/**
+ * Only full-price merchandise may receive an additional welcome discount,
+ * promotional coupon or points-reward voucher. Active seasonal bundles keep
+ * their campaign price instead of silently losing it to a coupon.
+ */
+export function discountableSubtotal(cart = [], settings = {}, products = []) {
+  const seasonal = seasonalPricing(cart, settings, products);
+  const seasonalIds = seasonal.applied ? new Set(seasonal.includedIds) : new Set();
+  const byId = new Map(products.map(product => [product.id, product]));
+  const cents = cart.reduce((total, item) => {
+    const product = byId.get(item.productId);
+    const sale = !!product?.tags?.oferta && Number(product.salePrice) > 0;
+    if (sale || seasonalIds.has(item.productId) || item.onSale === true) return total;
+    return total + Math.max(0, Math.trunc(Number(item.qty) || 0)) * euroCents(item.unitPrice);
+  }, 0);
+  return { subtotal: cents / 100, seasonal, hasExcluded: cents < cart.reduce(
+    (total, item) => total + Math.max(0, Math.trunc(Number(item.qty) || 0)) * euroCents(item.unitPrice), 0
+  ) };
+}
