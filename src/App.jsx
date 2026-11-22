@@ -6021,8 +6021,8 @@ function Catalog({ settings, initialCollection, products, categories, groups, on
         </div>
       </div>
 
-      {compareMode && comparedProducts.length > 0 && (
-        <div className="fixed left-1/2 -translate-x-1/2 flex items-center gap-3 rounded-2xl px-3 py-2.5 max-w-[95vw]" style={{ bottom: 16, zIndex: 80, background: "var(--ink-2)", border: "1px solid var(--signal)", boxShadow: "0 12px 40px rgba(0,0,0,0.45)" }}>
+      {compareMode && comparedProducts.length > 0 && createPortal(
+        <div data-mode={document.querySelector('.kulto-root[data-mode="light"]') ? "light" : "dark"} className="kulto-root kulto-product-modal-panel fixed left-1/2 -translate-x-1/2 flex items-center gap-3 rounded-2xl px-3 py-2.5 max-w-[95vw]" style={{ bottom: 16, zIndex: 80, background: "var(--ink-2)", border: "1px solid var(--signal)", boxShadow: "0 12px 40px rgba(0,0,0,0.45)" }}>
           <div className="flex items-center gap-1.5">
             {comparedProducts.map((p) => (
               <button key={p.id} onClick={() => toggleCompare(p.id)} title={`Quitar ${p.name}`} className="kulto-btn w-10 h-10 rounded-lg overflow-hidden flex items-center justify-center" style={{ background: "var(--ink-3)", border: "1px solid var(--line)" }}>
@@ -6044,7 +6044,8 @@ function Catalog({ settings, initialCollection, products, categories, groups, on
             Ver diferencias
           </button>
           <button type="button" onClick={() => { setCompareIds([]); setCompareNotice(""); }} className="kulto-btn text-xs underline" style={{ color: "var(--slate)" }}>Limpiar</button>
-        </div>
+        </div>,
+        document.body
       )}
       {showCompare && comparedProducts.length >= 2 && (
         <CompareModal
@@ -9065,9 +9066,9 @@ function CropModal({ source, onConfirm, onCancel, frameW = CROP_FRAME_W, frameH 
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.85)" }}>
-      <div className="rounded-2xl p-5 max-w-sm w-full flex flex-col gap-4" style={{ background: "var(--ink)", border: "1px solid var(--line)" }}>
+  return createPortal(
+    <div className="kulto-root fixed inset-0 z-[70] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.85)" }}>
+      <div data-mode={document.querySelector('.kulto-root[data-mode="light"]') ? "light" : "dark"} className="kulto-product-modal-panel rounded-2xl p-5 max-w-sm w-full flex flex-col gap-4" style={{ background: "var(--ink)", border: "1px solid var(--line)" }}>
         <p className="text-sm font-semibold" style={{ color: "var(--bone)" }}>{title}</p>
         <div
           className="relative overflow-hidden rounded-xl mx-auto touch-none select-none"
@@ -9111,7 +9112,8 @@ function CropModal({ source, onConfirm, onCancel, frameW = CROP_FRAME_W, frameH 
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
