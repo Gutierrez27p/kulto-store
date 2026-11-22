@@ -20251,6 +20251,39 @@ export default function App() {
     if (cart.length === 0) return;
     // Nunca se registra un pedido con un mail sin confirmar (ver CartDrawer).
     if (!isCheckoutEmailVerified(customerEmail, customer)) return;
+    // Revalidate ALL discounts against the current basket, not a snapshot
+    // from before email verification or a cart update. Promotional items
+    // can never receive a welcome or rewards/coupon discount.
+    const pricing = discountableSubtotal(cart, settings, sellableProducts);
+    subtotal = Math.round(cart.reduce((sum, item) => sum + item.qty * item.unitPrice, 0) * 100) / 100;
+    itemCount = cart.reduce((sum, item) => sum + item.qty, 0);
+    let validPromo = null;
+    if (promo?.code && pricing.subtotal > 0) {
+      const result = findPromo(promo.code, settings, customer, await loadPromoUsage());
+      if (result.ok) {
+        const evaluated = evalPromo(result.promo, pricing.subtotal, customer);
+        if (evaluated.ok) validPromo = {
+          ...promo,
+          discount: evaluated.discount,
+          freeShipping: evaluated.freeShipping,
+          gift: evaluated.gift,
+        };
+      }
+    }
+    const welcomeAllowed = customer && settings.signupDiscountEnabled && !customer.firstDiscountUsed && !validPromo
+      ? Math.round(pricing.subtotal * getWelcomePercent(settings, customer)) / 100
+      : 0;
+    discountAmount = Math.min(Math.max(0, discountAmount), welcomeAllowed);
+    promo = validPromo;
+    seasonalPromotion = pricing.seasonal.applied
+      ? { title: pricing.seasonal.label, discount: pricing.seasonal.discount, productIds: pricing.seasonal.includedIds }
+      : null;
+    // A removed/invalid free-shipping code must not leave shipping free.
+    const defaultShipping = deliveryMethod !== "envio" || subtotal >= settings.freeShippingThreshold
+      ? 0
+      : (settings.shippingRegionPrices?.[address.state] ?? settings.shippingFlatRate ?? 0);
+    shippingCost = promo?.freeShipping ? 0 : defaultShipping;
+    total = Math.round((Math.max(0, subtotal - discountAmount - (promo?.discount || 0) - pricing.seasonal.discount) + shippingCost) * 100) / 100;
     setSending(true);
     const order = {
       id: `KULTO-${new Date().toISOString().slice(2, 10).replace(/-/g, "")}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
