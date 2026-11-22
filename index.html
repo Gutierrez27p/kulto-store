@@ -24,10 +24,16 @@
         "@context": "https://schema.org",
         "@graph": [
           {
-            "@type": "Organization",
+            "@type": ["Organization", "OnlineStore"],
             "@id": "https://kulto-store.es/#organization",
             "name": "KULTO STORE",
-            "url": "https://kulto-store.es/"
+            "url": "https://kulto-store.es/",
+            "description": "Tienda online de ropa personalizada, camisetas estampadas, sudaderas y accesorios de estilo streetwear.",
+            "areaServed": {
+              "@type": "Country",
+              "name": "España"
+            },
+            "availableLanguage": "es"
           },
           {
             "@type": "WebSite",
