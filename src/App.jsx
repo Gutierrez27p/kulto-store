@@ -8212,7 +8212,7 @@ function LeaveReviewSection({ order }) {
 // el visitante no tiene cuenta) y ofrece el descuento de la primera compra a
 // cambio de registrarse. Si lo cierra, no vuelve a molestar por 7 días.
 const SIGNUP_POPUP_KEY = "kulto:signup-popup-dismissed";
-function SignupPromoPopup({ settings, customer, page, onSignup }) {
+function SignupPromoPopup({ settings, customer, page, themeMode, onSignup }) {
   const percent = Number(settings?.signupDiscountPercent) || 0;
   const eligible = !!settings?.signupDiscountEnabled && settings?.signupPopupEnabled !== false && percent > 0 && !customer && page !== "cuenta";
   const [open, setOpen] = useState(false);
@@ -8258,9 +8258,9 @@ function SignupPromoPopup({ settings, customer, page, onSignup }) {
     onSignup?.(v, "register");
   };
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 flex items-center justify-center p-4"
+      className="kulto-root fixed inset-0 flex items-center justify-center p-4"
       style={{ zIndex: 90, background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}
       onClick={dismiss}
       role="dialog"
@@ -8268,7 +8268,8 @@ function SignupPromoPopup({ settings, customer, page, onSignup }) {
       aria-label="Descuento por registrarte"
     >
       <div
-        className="relative w-full max-w-2xl rounded-2xl overflow-hidden flex flex-col sm:flex-row"
+        data-mode={themeMode}
+        className="kulto-product-modal-panel relative w-full max-w-2xl rounded-2xl overflow-hidden flex flex-col sm:flex-row"
         style={{ background: "var(--ink-2)", border: "1px solid var(--line)", boxShadow: "0 20px 60px rgba(0,0,0,0.5)" }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -8316,7 +8317,8 @@ function SignupPromoPopup({ settings, customer, page, onSignup }) {
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -21426,7 +21428,7 @@ export default function App() {
       </main>
 
       <Footer settings={settings} />
-      <SignupPromoPopup settings={settings} customer={customer} page={page} onSignup={openSignup} />
+      <SignupPromoPopup settings={settings} customer={customer} page={page} themeMode={themeMode} onSignup={openSignup} />
       {!(page === "cuenta" && effectiveAdminView) && (
         <RewardsWidget
           settings={settings}
